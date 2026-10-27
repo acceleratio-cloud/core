@@ -1,0 +1,26 @@
+# dependencies
+node_modules/
+
+# builds
+.next/
+dist/
+out/
+coverage/
+*.tsbuildinfo
+
+# local env
+.env
+.env.*
+!.env.example
+
+# local database files
+apps/core/data/
+*.db
+*.db-shm
+*.db-wal
+
+# misc
+.DS_Store
+
+# infrastructure as code (kept out of the product repo for now)
+ansible
