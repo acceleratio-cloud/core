@@ -1,11 +1,11 @@
-import { LoginForm } from "@/modules/auth/containers/login-form";
+import { InstallationForm } from "@/modules/auth/containers/installation-form";
 
 
-export default function Installation() {
+export default function InstallationPage() {
 
   return (
     <div>
-      <LoginForm />
+      <InstallationForm />
     </div>
   )
 }

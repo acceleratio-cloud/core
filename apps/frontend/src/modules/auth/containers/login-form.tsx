@@ -6,12 +6,12 @@ import { Input } from "@/shared/components/ui/input"
 export const LoginForm = () => {
 
   return (
-    <div className="w-full max-w-[320px]">
+    <div className="w-full">
       <div className="text-2xl tracking-tight font-medium leading-none">
         Sign In
       </div>
       <div className="text-sm text-muted-foreground mt-2.5">
-        Fill the form below to continue
+        Welcome back. Sign in to your account.
       </div>
       <FieldSet className="my-6">
         <Field>
@@ -24,7 +24,7 @@ export const LoginForm = () => {
         </Field>
       </FieldSet>
       <Button className="w-full mt-1" size="lg">
-        Continue
+        Sign In
       </Button>
     </div>
   )
