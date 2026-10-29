@@ -13,12 +13,6 @@ coverage/
 .env.*
 !.env.example
 
-# local database files
-apps/api/data/
-*.db
-*.db-shm
-*.db-wal
-
 # misc
 .DS_Store
 
