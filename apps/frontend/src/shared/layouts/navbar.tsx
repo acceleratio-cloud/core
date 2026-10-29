@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useEffect, useRef, useSyncExternalStore } from "react"
-import { History, House, Search, Server, Settings } from "lucide-react"
+import { House, Search, Server, Settings, Store } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -20,8 +20,8 @@ type NavLink = {
 
 const links: NavLink[] = [
   { label: "Overview", href: "/", icon: House },
-  { label: "Marketplace", href: "/marketplace", icon: History },
-  { label: "Servers", href: "/domains", icon: Server },
+  { label: "Marketplace", href: "/marketplace", icon: Store },
+  { label: "Servers", href: "/servers", icon: Server },
   { label: "Settings", href: "/settings", icon: Settings },
 ]
 
@@ -62,17 +62,21 @@ export const Navbar = () => {
       <Link
         href="/"
         aria-label="Acceleratio home"
-        className="flex shrink-0 items-center gap-2 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-foreground/50"
+        className="flex shrink-0 items-center gap-2 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-white/70"
       >
-        <LogoIcon className="size-5 fill-primary" />
-        <span className="hidden text-[13px] font-medium tracking-wide text-foreground sm:inline">
-          cceleratio<span className="text-[11px] text-muted-foreground">.cloud</span>
+        <LogoIcon className="size-5 fill-primary-foreground" />
+        <span className="hidden text-[13px] font-medium tracking-wide text-primary-foreground sm:inline">
+          cceleratio
+          <span className="text-[11px] text-primary-foreground/75">.cloud</span>
         </span>
       </Link>
 
-      <Separator orientation="vertical" className="mx-0.5 h-4 self-center!" />
+      <Separator
+        orientation="vertical"
+        className="mx-0.5 h-4 self-center! bg-white/15"
+      />
 
-      <nav aria-label="Primary" className="flex min-w-0 items-center gap-0.5">
+      <nav aria-label="Primary" className="flex min-w-0 items-center gap-1.5">
         {links.map((link) => (
           <NavItem key={link.href} link={link} active={isActivePath(pathname, link.href)} />
         ))}
@@ -81,12 +85,12 @@ export const Navbar = () => {
       <div className="ml-auto flex items-center gap-3">
         <div
           role="search"
-          className="hidden h-8 w-64 items-center gap-2 rounded-lg border border-input bg-background px-2.5 transition-[border-color,box-shadow] focus-within:border-foreground/50 focus-within:ring-3 focus-within:ring-foreground/10 lg:flex"
+          className="hidden h-8 w-64 items-center gap-2 rounded-lg border border-white/15 bg-white/5 px-2.5 transition-[border-color,box-shadow] focus-within:border-white/40 focus-within:ring-3 focus-within:ring-white/10 lg:flex"
         >
           <Search
             aria-hidden="true"
             strokeWidth={1.75}
-            className="size-3.5 shrink-0 text-muted-foreground"
+            className="size-3.5 shrink-0 text-primary-foreground/50"
           />
           <input
             ref={searchRef}
@@ -96,9 +100,11 @@ export const Navbar = () => {
             autoComplete="off"
             spellCheck={false}
             placeholder="Quick search..."
-            className="min-w-0 flex-1 bg-transparent text-[13px] text-foreground outline-none placeholder:text-muted-foreground"
+            className="min-w-0 flex-1 bg-transparent text-[13px] text-primary-foreground outline-none placeholder:text-primary-foreground/50"
           />
-          <Kbd>{isApple ? "⌘K" : "Ctrl K"}</Kbd>
+          <Kbd className="bg-white/10 text-primary-foreground/60">
+            {isApple ? "⌘K" : "Ctrl K"}
+          </Kbd>
         </div>
 
         <UserMenu />
@@ -115,10 +121,10 @@ const NavItem = ({ link, active }: { link: NavLink; active: boolean }) => {
       href={link.href}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "flex h-8 shrink-0 items-center gap-2 rounded-md px-2 text-[13px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-foreground/50",
+        "flex h-8 shrink-0 items-center gap-2 rounded-md px-3 text-[13px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-white/70",
         active
-          ? "bg-accent font-medium text-accent-foreground"
-          : "text-foreground hover:bg-accent",
+          ? "bg-white/10 font-medium text-primary-foreground"
+          : "text-primary-foreground/70 hover:bg-white/5 hover:text-primary-foreground",
       )}
     >
       <Icon
@@ -126,7 +132,7 @@ const NavItem = ({ link, active }: { link: NavLink; active: boolean }) => {
         strokeWidth={1.75}
         className={cn(
           "size-3.5 shrink-0",
-          active ? "text-foreground" : "text-muted-foreground",
+          active ? "text-primary-foreground" : "text-primary-foreground/50",
         )}
       />
       <span className="sr-only sm:not-sr-only sm:truncate">{link.label}</span>

@@ -32,10 +32,10 @@ export const UserMenu = ({ name, email }: UserMenuProps) => {
     <DropdownMenu>
       <DropdownMenuTrigger
         aria-label={name ? `${name} account menu` : "Account menu"}
-        className="group rounded-full outline-none focus-visible:ring-2 focus-visible:ring-foreground/50 data-[popup-open]:ring-2 data-[popup-open]:ring-foreground/50"
+        className="group rounded-full outline-none focus-visible:ring-2 focus-visible:ring-white/70 data-[popup-open]:ring-2 data-[popup-open]:ring-white/40"
       >
-        <Avatar>
-          <AvatarFallback className="transition-colors group-hover:bg-accent">
+        <Avatar className="border-white/20">
+          <AvatarFallback className="bg-white/10 text-primary-foreground transition-colors group-hover:bg-white/15">
             {initials ?? (
               <User aria-hidden="true" strokeWidth={1.75} className="size-4" />
             )}

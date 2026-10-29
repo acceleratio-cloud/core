@@ -117,17 +117,17 @@ components:
 
 The console is a room you enter. Its threshold is dark and photographic — a real datacenter render, unlit corners, the product mark in white — and its interior is daylit, achromatic, and quiet. That transition is the whole visual thesis: the operator starts outside the facility, at its locked door, then steps into an instrument room where nothing competes with the reading of state.
 
-Inside, the system is deliberately undecorated. Inter carries every role. Graphite on white does the hierarchy, one-pixel hairlines do the structure, and shadow is withheld everywhere except two floating surfaces — the sign-in panel over the photograph and the account menu over the console. There is exactly one chromatic color in the entire system, a signal red, and it only ever means destruction or error. A dashboard that stays grey until something is wrong is a dashboard an operator can trust.
+Inside, the system is deliberately undecorated. Inter carries every role. Graphite frames, Paper carries: the chrome band is graphite with light type, the working surface stays white, and one-pixel hairlines do the structure. Shadow is withheld everywhere except two floating surfaces — the sign-in panel over the photograph and the account menu over the console. There is exactly one chromatic color in the entire system, a signal red, and it only ever means destruction or error. A dashboard that stays grey until something is wrong is a dashboard an operator can trust.
 
 The register is calibrated and quiet. No gradient panels, no glow, no ornament, no color used as enthusiasm. Confidence is expressed through alignment, consistent row heights, and the discipline of not adding a second accent. Where the system is currently thin — one screen of console content, no mobile shell, no data-density patterns — this document records what exists rather than inventing the rest.
 
 **Key Characteristics:**
-- Two lighting conditions only: a photographic dark threshold and a daylit achromatic console.
+- A dark frame around a daylit interior: a graphite chrome bar over achromatic working surfaces.
 - One typeface (Inter) for every role; Geist Mono is declared for data but not yet used on a shipped surface.
-- Graphite on white, separated by hairlines. Shadow appears only on two floating surfaces.
+- Graphite is the primary color: chrome, primary actions, and selected states. Content never sits on it.
 - Exactly one chromatic color, reserved for destructive and invalid state.
 - A 4px rhythm with 32px / 36px controls and 32px navigation pills.
-- Light theme only, declared explicitly in CSS rather than implied.
+- Light content, dark chrome: the CSS declares `color-scheme: light` and no content surface goes dark.
 
 ## Colors
 
@@ -135,14 +135,14 @@ An achromatic instrument palette with a single reserved alarm color.
 
 ### Primary
 
-- **Graphite**: the action color. Fills primary buttons, sets the active navigation label, and appears as body-strong text on rare occasions. It is a near-black, not a brand hue — the console has no brand hue by design.
-- **Graphite Deep**: reading text. Body copy, labels, link text, and the default navigation item. Twice the contrast weight of Graphite on white and used for anything an operator must read rather than press.
+- **Graphite**: the primary color. It is the chrome band behind every console screen, the fill of primary buttons, and the selected-state text. A near-black rather than a brand hue — the console's identity is the absence of hue, carried by weight and alignment instead.
+- **Graphite Deep**: reading text. Body copy, labels, link text, and the default navigation item on light surfaces. Twice the contrast weight of Graphite and used for anything an operator must read rather than press.
 
 ### Neutral
 
-- **Paper**: the canvas. Page background, input fill, dropdown surfaces, and the header bar. Pure white, never tinted.
-- **Enamel**: the raised sheet. The auth card, primary-button text, and the light rail surface. One step off white so a panel can sit on Paper without needing a shadow.
-- **Mist**: the second neutral, used for row hover, muted blocks, secondary fills, and active navigation background. Also the dashboard canvas behind content panes, which is why it must stay distinguishable from Paper at a glance.
+- **Paper**: the canvas. Page background, input fill, dropdown surfaces, table rows. Pure white, never tinted — and never the place where chrome or type-on-dark appears.
+- **Enamel**: the raised sheet, and the text color on Graphite. The auth card, primary-button labels, and header type sit on it. One step off white so a panel can sit on Paper without needing a shadow.
+- **Mist**: the second neutral, used for row and card hover, muted blocks, secondary fills, and the light-surface pressed state. Also the dashboard canvas behind content panes, which is why it must stay distinguishable from Paper at a glance.
 - **Hairline**: structural borders. Header rule, separators, field wrappers, badge outlines, vertical dividers.
 - **Hairline Strong**: input outlines. Intentionally darker than Hairline so a field boundary is visible against Paper.
 - **Slate**: secondary text — subtitles, descriptions, section labels, placeholders, icon strokes. It is the most-used color after Graphite Deep.
@@ -155,7 +155,7 @@ An achromatic instrument palette with a single reserved alarm color.
 
 ### Named Rules
 
-**The Two Rooms Rule.** There are exactly two lighting conditions: the facility threshold (dark, photographic, auth only) and the console (daylit, achromatic). Do not introduce a third — no dark console mode, no "dim" panel, no tinted section background.
+**The Dark Frame Rule.** The chrome is graphite and the work happens on Paper. The bar frames every console screen the way the facility photograph frames the door; content surfaces never go dark. No dark mode, no dim panel, no second dark band, and no card that inverts to graphite.
 
 **The One Signal Rule.** Signal Red is used on ≤2% of any screen and only for destruction or invalidity. If a screen needs emphasis that is not destructive, use weight, a hairline, or whitespace.
 
@@ -188,7 +188,7 @@ An achromatic instrument palette with a single reserved alarm color.
 
 **Auth threshold.** A full-viewport grid of three rows (`1fr auto 1fr`) over a full-bleed, `object-cover` datacenter render. The mark sits top-left with 24px (32px at ≥640px) padding. The form card is centered, capped at 448px, and padded 24px, becoming 32px at ≥640px. The ownership statement is anchored bottom-left at the same padding, with its secondary line hidden below 640px. Two scrims sit over the image: a 192px top gradient for the mark and a 384px bottom gradient for the statement, so type is legible without a full-page overlay.
 
-**Console shell.** Fixed viewport height with a single 48px header spanning the full width, closed by a bottom hairline, and a fluid main region that scrolls on its own. The header carries the brand lockup, the primary navigation, the quick search, and the account avatar, with a 16px gutter. The navigation sits inline as 32px pills rather than in a rail, so the content area is never narrowed. There are no max-width containers inside the console — panes are expected to be full-bleed and to own their own internal padding.
+**Console shell.** Fixed viewport height with a single 48px graphite header spanning the full width, closed by a 1px white-at-10% edge, and a fluid main region that scrolls on its own. The header carries the brand lockup, the primary navigation, the quick search, and the account avatar in light type, with a 16px gutter. The navigation sits inline as 32px pills rather than in a rail, so the content area is never narrowed. There are no max-width containers inside the console — panes are expected to be full-bleed and to own their own internal padding.
 
 **Rhythm.** A 4px base. Recurring steps: 2px between an icon and its label, 4px between stacked micro-elements, 6px between a label and its input, 10px of horizontal control padding, 16px of header gutter, 20px between fields in a group, 24px of panel padding. The console runs at a compact operator density: 32px navigation pills, 36px fields, 32px default buttons, 36px large buttons.
 
@@ -245,13 +245,13 @@ Borders are always exactly 1px and always a solid neutral. No double borders, no
 
 ### Navigation
 
-- **Style:** a 48px Paper header, closed by a bottom hairline. At the left: the mark with its wordmark, a 1px 16px vertical divider, then inline 32px pills. At the right, from 1024px: a 256px search well (10px radius, Hairline Strong border, 13px placeholder, shortcut key in a Kbd chip). Pills carry a 14px Lucide icon at 1.75 stroke and a 13px label, with 8px of horizontal padding.
-- **Default / Hover / Active:** default is Graphite Deep with a Slate icon on transparent; hover is full Mist; active is Mist with a 500-weight Graphite label, a Graphite icon, and `aria-current="page"`. Keyboard focus is a 2px Foreground ring at 50%. A vertical 1px divider separates the brand lockup from the navigation at all widths.
+- **Style:** a 48px Graphite header, closed by a 1px white-at-10% edge. At the left: the mark in Enamel with its wordmark, a 1px 16px white-at-15% divider, then inline 32px pills. At the right, from 1024px: a 256px search well (10px radius, white-at-15% border, white-at-5% fill, 13px placeholder, shortcut key in a white-at-10% Kbd chip). Pills carry a 14px Lucide icon at 1.75 stroke and a 13px label, with 8px of horizontal padding.
+- **Default / Hover / Active:** default is Enamel at 70% with the icon at 50%; hover fills white at 5% and lifts the label to full Enamel; active is white at 10% with a full-Enamel 500-weight label, a full-Enamel icon, and `aria-current="page"`. Keyboard focus is a 2px white-at-70% ring. A vertical 1px divider separates the brand lockup from the navigation at all widths.
 - **Responsive:** below 640px the wordmark and pill labels drop out, leaving the mark and icon-only pills with the label kept as a screen-reader name; the search well is hidden below 1024px. There is no overflow menu and no compact search trigger.
 
 ### Account Menu
 
-- **Trigger:** a 32px circular avatar at the far right of the header: a Mist disc with a 1px Hairline border and a 16px Graphite glyph, or 11px/500 Graphite initials when a name is known. Hover fills the disc with Mist; keyboard focus and the open state paint a 2px Foreground ring at 50%.
+- **Trigger:** a 32px circular avatar at the far right of the header: a white-at-10% disc with a white-at-20% rim and a 16px Enamel glyph, or 11px/500 Enamel initials when a name is known. Hover lifts the disc to white at 15%; keyboard focus paints a 2px white-at-70% ring and the open state a white-at-40% one.
 - **Surface:** a 224px popover anchored to the avatar's right edge, 6px below it. Paper, 1px Hairline, 10px radius, 4px inner padding, and the system's second shadow. It opens with a 150ms fade and a 1px rise, and collapses under `prefers-reduced-motion`.
 - **Items:** 32px rows, 13px labels, 14px Slate icons, Mist on highlight. Profile is a link followed by a hairline separator and Log out as a button. Log out stays neutral — leaving the console is not destructive, so it does not take Signal Red.
 - **With identity:** when a name and email are available, a name/email block sits above the first separator and the trigger shows initials instead of the generic glyph. Without them the menu opens straight onto the items, with no empty header.
@@ -265,7 +265,9 @@ The product's signature composition. A 448px-wide Enamel sheet, 14px radius, 24�
 ### Do:
 
 - **Do** keep every console surface achromatic. If a screen needs emphasis, use weight, a hairline, or space.
-- **Do** use Graphite for action and Graphite Deep for reading; never use one for the other.
+- **Do** keep every content surface on Paper: the chrome is graphite, the work is not.
+- **Do** set type on graphite in Enamel, with secondary text no dimmer than 70% and icons no dimmer than 50%.
+- **Do** use Graphite for action and Graphite Deep for reading on light surfaces; never use one for the other.
 - **Do** separate sections with a 1px Hairline or a Paper/Enamel/Mist tonal step rather than a shadow.
 - **Do** open every screen with the 24px/500 title, 10px gap, 14px Slate subtitle, 24px of air.
 - **Do** reuse the auth frame exactly for any new pre-console screen: 448px panel, 14px radius, top-left mark, bottom-left statement.
@@ -275,7 +277,7 @@ The product's signature composition. A 448px-wide Enamel sheet, 14px radius, 24�
 ### Don't:
 
 - **Don't** add a second accent hue, a brand blue, or a gradient to any UI surface.
-- **Don't** build a dark console or a theme toggle. The CSS declares `color-scheme: light` and the console is light-only by decision.
+- **Don't** extend graphite past the chrome band: no dark cards, no dark panels, no theme toggle. The CSS declares `color-scheme: light` and content surfaces stay light.
 - **Don't** put display type inside the console; 24px is the ceiling for a page title.
 - **Don't** add card shadows, glow, or glassmorphism. The auth panel is the one permitted lift.
 - **Don't** use pill shapes for buttons, and don't use the nav badge token as an interactive filter chip.
