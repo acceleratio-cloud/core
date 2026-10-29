@@ -1,8 +1,8 @@
 import 'dotenv/config';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { betterAuth } from 'better-auth';
-import { db } from '../../core/db/client';
-import * as schema from '../../core/db/schema';
+import { db } from '@/vendor/db/client';
+import * as schema from '@/vendor/db/schema';
 
 const trustedOrigins = (process.env.CORS_ORIGINS ?? 'http://localhost:3000')
   .split(',')
