@@ -32,7 +32,7 @@ export const AuthLayout = ({ children }: { children: ReactNode }) => {
           </div>
         </div>
         <main className="relative z-10 flex min-w-0 justify-center px-4 sm:px-8">
-          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-2xl shadow-black/20 sm:p-8">
+          <div className="w-full max-w-md rounded-xl bg-neutral-50 p-6 shadow-2xl shadow-black/20 sm:p-8">
             {children}
           </div>
         </main>
