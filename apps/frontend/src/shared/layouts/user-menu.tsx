@@ -1,8 +1,11 @@
 "use client"
 
+import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { LogOut, User } from "lucide-react"
 
+import { getApiErrorMessage } from "@/api"
+import { useAuth } from "@/modules/auth/providers/auth-provider"
 import { Avatar, AvatarFallback } from "@/shared/components/ui/avatar"
 import {
   DropdownMenu,
@@ -13,25 +16,39 @@ import {
   DropdownMenuTrigger,
 } from "@/shared/components/ui/dropdown-menu"
 
-type UserMenuProps = {
-  name?: string
-  email?: string
-}
-
 const getInitials = (name?: string) => {
   const parts = name?.trim().split(/\s+/).filter(Boolean).slice(0, 2) ?? []
 
   return parts.length ? parts.map((part) => part[0]).join("").toUpperCase() : null
 }
 
-export const UserMenu = ({ name, email }: UserMenuProps) => {
+export const UserMenu = () => {
   const router = useRouter()
-  const initials = getInitials(name)
+  const { user, signOut } = useAuth()
+  const [isSigningOut, setIsSigningOut] = useState(false)
+  const initials = getInitials(user?.name)
+
+  const onSignOut = async () => {
+    if (isSigningOut) {
+      return
+    }
+
+    setIsSigningOut(true)
+
+    try {
+      await signOut()
+    } catch (error) {
+      console.error(getApiErrorMessage(error))
+    } finally {
+      setIsSigningOut(false)
+      router.replace("/auth")
+    }
+  }
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        aria-label={name ? `${name} account menu` : "Account menu"}
+        aria-label={user?.name ? `${user.name} account menu` : "Account menu"}
         className="group rounded-full outline-none focus-visible:ring-2 focus-visible:ring-white/70 data-[popup-open]:ring-2 data-[popup-open]:ring-white/40"
       >
         <Avatar className="border-white/20">
@@ -44,13 +61,11 @@ export const UserMenu = ({ name, email }: UserMenuProps) => {
       </DropdownMenuTrigger>
 
       <DropdownMenuContent className="min-w-56">
-        {name ? (
+        {user ? (
           <>
             <div className="px-2 py-1.5">
-              <p className="truncate text-[13px] font-medium text-foreground">{name}</p>
-              {email ? (
-                <p className="truncate text-[12px] text-muted-foreground">{email}</p>
-              ) : null}
+              <p className="truncate text-[13px] font-medium text-foreground">{user.name}</p>
+              <p className="truncate text-[12px] text-muted-foreground">{user.email}</p>
             </div>
             <DropdownMenuSeparator />
           </>
@@ -63,9 +78,9 @@ export const UserMenu = ({ name, email }: UserMenuProps) => {
 
         <DropdownMenuSeparator />
 
-        <DropdownMenuItem onClick={() => router.push("/auth")}>
+        <DropdownMenuItem onClick={onSignOut} disabled={isSigningOut}>
           <LogOut aria-hidden="true" strokeWidth={1.75} className="size-3.5 text-muted-foreground" />
-          Log out
+          {isSigningOut ? "Logging out..." : "Log out"}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

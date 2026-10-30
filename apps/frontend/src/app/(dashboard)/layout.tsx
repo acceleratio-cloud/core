@@ -1,10 +1,21 @@
+import { redirect } from "next/navigation";
+import { connection } from "next/server";
+
+import { getServerSession } from "@/api/auth/server";
 import { DashboardLayout } from "@/shared/layouts/dashboard-layout";
 
-export default function DefaultDashboardLayout({ children }: LayoutProps<"/">) {
+export const instant = false;
 
-  return (
-    <DashboardLayout>
-      {children}
-    </DashboardLayout>
-  )
+export default async function DefaultDashboardLayout({
+  children,
+}: LayoutProps<"/">) {
+  await connection();
+
+  const session = await getServerSession();
+
+  if (!session?.user) {
+    redirect("/auth");
+  }
+
+  return <DashboardLayout>{children}</DashboardLayout>;
 }
