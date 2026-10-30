@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  ForbiddenException,
   Get,
   HttpCode,
   HttpStatus,
@@ -19,24 +20,15 @@ import {
 } from '@thallesp/nestjs-better-auth';
 import { fromNodeHeaders } from 'better-auth/node';
 import type { Request, Response } from 'express';
+import type {
+  AuthStatusResponse,
+  SignInEmailPayload,
+  SignUpEmailPayload,
+} from '@acceleratio/shared';
 import { DATABASE } from '@/vendor/db/database.constants';
 import type { Database } from '@/vendor/db/database.constants';
 import { user } from '@/vendor/db/schema';
 import { AuthExceptionFilter } from './auth-exception.filter';
-
-interface SignUpEmailBody {
-  email: string;
-  password: string;
-  name: string;
-  image?: string;
-  rememberMe?: boolean;
-}
-
-interface SignInEmailBody {
-  email: string;
-  password: string;
-  rememberMe?: boolean;
-}
 
 @UseFilters(AuthExceptionFilter)
 @Controller('auth')
@@ -48,7 +40,7 @@ export class AuthController {
 
   @Get('status')
   @AllowAnonymous()
-  async status(): Promise<{ initialized: boolean }> {
+  async status(): Promise<AuthStatusResponse> {
     const usersCount = await this.db.$count(user);
 
     return { initialized: usersCount > 0 };
@@ -57,11 +49,17 @@ export class AuthController {
   @Post('sign-up/email')
   @HttpCode(HttpStatus.OK)
   @AllowAnonymous()
-  signUpEmail(
-    @Body() body: SignUpEmailBody,
+  async signUpEmail(
+    @Body() body: SignUpEmailPayload,
     @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
   ) {
+    const usersCount = await this.db.$count(user);
+
+    if (usersCount > 0) {
+      throw new ForbiddenException('Initial setup has already been completed');
+    }
+
     return this.forwardAuthResult(response, () =>
       this.authService.api.signUpEmail({
         body,
@@ -75,7 +73,7 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @AllowAnonymous()
   signInEmail(
-    @Body() body: SignInEmailBody,
+    @Body() body: SignInEmailPayload,
     @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
   ) {
