@@ -6,11 +6,11 @@ import {
   BackgroundVariant,
   ReactFlow,
   ReactFlowProvider,
-  useReactFlow,
 } from "@xyflow/react"
 
 import { getApiErrorMessage } from "@/api"
 import { nodesApi } from "@/api/nodes"
+import { CanvasLoader } from "@/shared/components/canvas-loader"
 import { CanvasControls } from "../components/canvas-controls"
 import { nodeTypes } from "../components/graph-nodes"
 import { buildGraph } from "../layout"
@@ -26,7 +26,6 @@ const ServersGraph = () => {
   const [servers, setServers] = useState<Server[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const { fitView } = useReactFlow()
 
   useEffect(() => {
     let active = true
@@ -54,16 +53,13 @@ const ServersGraph = () => {
     }
   }, [])
 
-  useEffect(() => {
-    const timer = window.setTimeout(
-      () => fitView({ duration: 250, padding: 0.12 }),
-      80
-    )
-
-    return () => window.clearTimeout(timer)
-  }, [servers.length, fitView])
-
-  const { nodes, edges } = useMemo(() => buildGraph(servers), [servers])
+  const { nodes, edges } = useMemo(
+    () =>
+      isLoading || error
+        ? { nodes: [], edges: [] }
+        : buildGraph(servers),
+    [error, isLoading, servers]
+  )
 
   const total = servers.length
   const ready = servers.filter((server) => server.status === "ready").length
@@ -113,7 +109,7 @@ const ServersGraph = () => {
         </ul>
       </div>
 
-      <div className="min-h-0 flex-1 border bg-zinc-50 rounded-2xl m-4 mt-0 shadow-md">
+      <div className="relative min-h-0 flex-1 border bg-zinc-50 rounded-2xl m-4 mt-0 shadow-md">
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -138,6 +134,8 @@ const ServersGraph = () => {
           />
           <CanvasControls />
         </ReactFlow>
+
+        {isLoading ? <CanvasLoader label="Loading servers..." /> : null}
       </div>
     </div>
   )

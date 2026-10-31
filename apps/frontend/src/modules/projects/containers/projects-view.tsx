@@ -7,9 +7,11 @@ import { getApiErrorMessage } from "@/api"
 import { projectsApi } from "@/api/projects"
 import type { Project } from "@acceleratio/shared"
 import { Button } from "@/shared/components/ui/button"
-import { ProjectCard } from "../components/project-card"
+import { ProjectCard, ProjectCardSkeleton } from "../components/project-card"
 import { ProjectsEmptyState } from "../components/projects-empty-state"
 import { CreateProjectDialog, type ProjectDraft } from "./create-project-dialog"
+
+const SKELETON_COUNT = 6
 
 export const ProjectsView = () => {
   const [projects, setProjects] = useState<Project[]>([])
@@ -68,7 +70,16 @@ export const ProjectsView = () => {
       </div>
 
       {isLoading ? (
-        <p className="mt-6 text-sm text-muted-foreground">Loading projects...</p>
+        <div
+          aria-busy="true"
+          aria-live="polite"
+          className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3"
+        >
+          <span className="sr-only">Loading projects...</span>
+          {Array.from({ length: SKELETON_COUNT }, (_, index) => (
+            <ProjectCardSkeleton key={index} />
+          ))}
+        </div>
       ) : error ? (
         <p className="mt-6 text-sm text-destructive">{error}</p>
       ) : projects.length > 0 ? (
