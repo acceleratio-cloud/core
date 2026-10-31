@@ -1,19 +1,18 @@
 import type { Edge, Node } from "@xyflow/react"
 
-import { CLUSTER, type Server } from "./mock-data"
+import type { Server } from "./server"
 
-export const SERVER_WIDTH = 248
-export const SERVER_HEIGHT = 104
+export const SERVER_WIDTH = 264
+export const SERVER_HEIGHT = 140
 
-const ADD_HEIGHT = 44
 const GAP = 12
 const HUB_GAP = 56
 const CLUSTER_WIDTH = 220
 const CLUSTER_HEIGHT = 64
 
-const stackHeight = (count: number) => count * (SERVER_HEIGHT + GAP) + ADD_HEIGHT
+const stackHeight = (count: number) => count * (SERVER_HEIGHT + GAP)
 
-export const buildGraph = (servers: Server[], onAddServer: () => void) => {
+export const buildGraph = (servers: Server[]) => {
   const nodes: Node[] = []
   const edges: Edge[] = []
 
@@ -28,8 +27,8 @@ export const buildGraph = (servers: Server[], onAddServer: () => void) => {
       y: Math.max(0, height / 2 - CLUSTER_HEIGHT / 2),
     },
     data: {
-      name: CLUSTER.name,
-      meta: `${CLUSTER.runtime} · ${servers.length} ${
+      name: "Cluster",
+      meta: `${servers.length} ${
         servers.length === 1 ? "server" : "servers"
       }`,
     },
@@ -52,22 +51,6 @@ export const buildGraph = (servers: Server[], onAddServer: () => void) => {
       type: "straight",
       style: { stroke: "var(--border)", strokeWidth: 1 },
     })
-  })
-
-  nodes.push({
-    id: "add-server",
-    type: "add",
-    position: {
-      x: serversX,
-      y: servers.length * (SERVER_HEIGHT + GAP),
-    },
-    data: { onAdd: onAddServer },
-    style: {
-      width: SERVER_WIDTH,
-      height: ADD_HEIGHT,
-      pointerEvents: "auto",
-    },
-    draggable: false,
   })
 
   return { nodes, edges }

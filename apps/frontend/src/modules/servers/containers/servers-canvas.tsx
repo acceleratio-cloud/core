@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import {
   Background,
   BackgroundVariant,
@@ -9,12 +9,12 @@ import {
   useReactFlow,
 } from "@xyflow/react"
 
+import { getApiErrorMessage } from "@/api"
+import { nodesApi } from "@/api/nodes"
 import { CanvasControls } from "../components/canvas-controls"
 import { nodeTypes } from "../components/graph-nodes"
 import { buildGraph } from "../layout"
-import { SEED_SERVERS, type Server } from "../mock-data"
-
-const PROVISION_MS = 1600
+import { toServer, type Server } from "../server"
 
 export const ServersCanvas = () => (
   <ReactFlowProvider>
@@ -23,52 +23,38 @@ export const ServersCanvas = () => (
 )
 
 const ServersGraph = () => {
-  const [servers, setServers] = useState<Server[]>(SEED_SERVERS)
+  const [servers, setServers] = useState<Server[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const { fitView } = useReactFlow()
 
-  const addServer = useCallback(() => {
-    const index = servers.length + 1
-
-    const server: Server = {
-      id: `server-${String(index).padStart(2, "0")}`,
-      name: `server-${String(index).padStart(2, "0")}`,
-      role: "worker",
-      ip: `10.0.0.${9 + index}`,
-      cpu: 6,
-      mem: 11,
-      status: "provisioning",
-    }
-
-    setServers((current) => [...current, server])
-  }, [servers])
-
-  // a provisioned server becomes ready shortly after it joins the cluster
   useEffect(() => {
-    const pending = servers.some((server) => server.status === "provisioning")
-    if (!pending) return
+    let active = true
 
-    const timer = window.setTimeout(() => {
-      setServers((current) =>
-        current.map((server) =>
-          server.status === "provisioning"
-            ? { ...server, status: "ready" }
-            : server
-        )
-      )
-    }, PROVISION_MS)
+    nodesApi
+      .list()
+      .then((nodes) => {
+        if (active) {
+          setServers(nodes.map(toServer))
+        }
+      })
+      .catch((requestError) => {
+        if (active) {
+          setError(getApiErrorMessage(requestError))
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setIsLoading(false)
+        }
+      })
 
-    return () => window.clearTimeout(timer)
-  }, [servers])
-
-  // keep a newly added server in view without re-fitting on status changes
-  const isFirstRender = useRef(true)
+    return () => {
+      active = false
+    }
+  }, [])
 
   useEffect(() => {
-    if (isFirstRender.current) {
-      isFirstRender.current = false
-      return
-    }
-
     const timer = window.setTimeout(
       () => fitView({ duration: 250, padding: 0.12 }),
       80
@@ -77,10 +63,7 @@ const ServersGraph = () => {
     return () => window.clearTimeout(timer)
   }, [servers.length, fitView])
 
-  const { nodes, edges } = useMemo(
-    () => buildGraph(servers, addServer),
-    [servers, addServer]
-  )
+  const { nodes, edges } = useMemo(() => buildGraph(servers), [servers])
 
   const total = servers.length
   const ready = servers.filter((server) => server.status === "ready").length
@@ -97,22 +80,36 @@ const ServersGraph = () => {
           </h1>
           <p
             aria-live="polite"
-            className="mt-2.5 text-sm text-muted-foreground"
+            className={
+              error
+                ? "mt-2.5 text-sm text-destructive"
+                : "mt-2.5 text-sm text-muted-foreground"
+            }
           >
-            {total} {total === 1 ? "server" : "servers"} · {ready} ready
-            {notReady > 0 ? (
+            {isLoading ? (
+              "Loading servers..."
+            ) : error ? (
+              error
+            ) : (
               <>
-                {" · "}
-                <span className="text-destructive">{notReady} not ready</span>
+                {total} {total === 1 ? "server" : "servers"} · {ready} ready
+                {notReady > 0 ? (
+                  <>
+                    {" · "}
+                    <span className="text-destructive">
+                      {notReady} not ready
+                    </span>
+                  </>
+                ) : null}
               </>
-            ) : null}
+            )}
           </p>
         </div>
 
         <ul className="flex items-center gap-4 text-[11px] text-muted-foreground">
           <LegendItem dot="bg-foreground" label="Ready" />
           <LegendItem dot="bg-destructive" label="Not ready" />
-          <LegendItem dot="border border-muted-foreground" label="Provisioning" />
+          <LegendItem dot="border border-muted-foreground" label="Unknown" />
         </ul>
       </div>
 
