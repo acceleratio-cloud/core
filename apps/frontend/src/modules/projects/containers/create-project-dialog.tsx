@@ -1,7 +1,9 @@
 "use client"
 
-import { useState, type FormEvent } from "react"
+import { Dices } from "lucide-react"
+import { useForm } from "react-hook-form"
 
+import { getApiErrorMessage } from "@/api"
 import { Button } from "@/shared/components/ui/button"
 import {
   Dialog,
@@ -19,6 +21,7 @@ import {
   FieldLabel,
 } from "@/shared/components/ui/field"
 import { Input } from "@/shared/components/ui/input"
+import { generateProjectName } from "../utils/generate-project-name"
 
 export type ProjectDraft = {
   name: string
@@ -27,11 +30,15 @@ export type ProjectDraft = {
 type CreateProjectDialogProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onCreate: (draft: ProjectDraft) => void
+  onCreate: (draft: ProjectDraft) => Promise<void>
   existingNames: string[]
 }
 
 const NAME_MAX_LENGTH = 48
+
+interface Form {
+  name: string
+}
 
 export const CreateProjectDialog = ({
   open,
@@ -39,50 +46,42 @@ export const CreateProjectDialog = ({
   onCreate,
   existingNames,
 }: CreateProjectDialogProps) => {
-  const [name, setName] = useState("")
-  const [error, setError] = useState<string | null>(null)
-
-  const reset = () => {
-    setName("")
-    setError(null)
-  }
+  const {
+    register,
+    handleSubmit,
+    reset,
+    clearErrors,
+    setError,
+    setValue,
+    formState: { errors, isSubmitting },
+  } = useForm<Form>({ defaultValues: { name: generateProjectName() } })
 
   const handleOpenChange = (nextOpen: boolean) => {
     if (!nextOpen) {
-      reset()
+      reset({ name: generateProjectName() })
     }
 
     onOpenChange(nextOpen)
   }
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-
-    const trimmedName = name.trim()
-
-    if (!trimmedName) {
-      setError("Give the project a name.")
-      return
-    }
-
-    if (trimmedName.length > NAME_MAX_LENGTH) {
-      setError(`Keep the name under ${NAME_MAX_LENGTH} characters.`)
-      return
-    }
-
-    if (
-      existingNames.some(
-        (existingName) => existingName.toLowerCase() === trimmedName.toLowerCase()
-      )
-    ) {
-      setError("A project with this name already exists.")
-      return
-    }
-
-    setError(null)
-    onCreate({ name: trimmedName })
-    handleOpenChange(false)
+  const regenerateName = () => {
+    setValue("name", generateProjectName(), {
+      shouldValidate: true,
+      shouldDirty: true,
+    })
+    clearErrors("root")
   }
+
+  const onSubmit = handleSubmit(async ({ name }) => {
+    clearErrors("root")
+
+    try {
+      await onCreate({ name: name.trim() })
+      handleOpenChange(false)
+    } catch (createError) {
+      setError("root", { message: getApiErrorMessage(createError) })
+    }
+  })
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -94,34 +93,59 @@ export const CreateProjectDialog = ({
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} noValidate>
+        <form onSubmit={onSubmit} noValidate>
           <FieldGroup className="mt-6">
-            <Field data-invalid={error ? true : undefined}>
+            <Field data-invalid={errors.name ? true : undefined}>
               <FieldLabel htmlFor="project-name">Name</FieldLabel>
-              <Input
-                id="project-name"
-                name="name"
-                value={name}
-                onChange={(event) => {
-                  setName(event.target.value)
-                  setError(null)
-                }}
-                placeholder="platform-prod"
-                maxLength={NAME_MAX_LENGTH}
-                autoComplete="off"
-                aria-invalid={error ? true : undefined}
-                aria-describedby={error ? "project-name-error" : undefined}
-                autoFocus
-              />
-              <FieldError id="project-name-error">{error}</FieldError>
+              <div className="flex items-center gap-2">
+                <Input
+                  id="project-name"
+                  autoComplete="off"
+                  placeholder="platform-prod"
+                  maxLength={NAME_MAX_LENGTH}
+                  autoFocus
+                  aria-invalid={!!errors.name}
+                  {...register("name", {
+                    required: "Give the project a name.",
+                    maxLength: {
+                      value: NAME_MAX_LENGTH,
+                      message: `Keep the name under ${NAME_MAX_LENGTH} characters.`,
+                    },
+                    validate: (value) =>
+                      !existingNames.some(
+                        (existingName) =>
+                          existingName.toLowerCase() ===
+                          value.trim().toLowerCase()
+                      ) || "A project with this name already exists.",
+                  })}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  aria-label="Generate another name"
+                  title="Generate another name"
+                  onClick={regenerateName}
+                >
+                  <Dices
+                    aria-hidden="true"
+                    strokeWidth={1.75}
+                    className="size-4"
+                  />
+                </Button>
+              </div>
+              <FieldError errors={[errors.name]} />
             </Field>
+            <FieldError>{errors.root?.message}</FieldError>
           </FieldGroup>
 
           <DialogFooter>
             <DialogClose render={<Button type="button" variant="ghost" />}>
               Cancel
             </DialogClose>
-            <Button type="submit">Create project</Button>
+            <Button type="submit" disabled={isSubmitting}>
+              {isSubmitting ? "Creating..." : "Create project"}
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>

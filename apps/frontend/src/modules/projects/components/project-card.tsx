@@ -1,12 +1,21 @@
 import Link from "next/link"
-import { ArrowUpRight, Boxes, Server } from "lucide-react"
+import { ArrowUpRight, Boxes } from "lucide-react"
 
-import type { Project } from "../mock-data"
+import type { Project } from "@acceleratio/shared"
+
+const dateFormatter = new Intl.DateTimeFormat("en-GB", {
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+  timeZone: "UTC",
+})
+
+const formatDate = (value: string) => dateFormatter.format(new Date(value))
 
 export const ProjectCard = ({ project }: { project: Project }) => {
   return (
     <Link
-      href={`/projects/${project.slug}`}
+      href={`/projects/${project.id}`}
       className="group flex min-h-32 flex-col rounded-lg border border-border bg-white p-4 outline-none transition-colors hover:border-input hover:bg-muted/40 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
     >
       <div className="flex items-center gap-3">
@@ -26,15 +35,11 @@ export const ProjectCard = ({ project }: { project: Project }) => {
       </div>
 
       <div className="mt-auto flex items-center gap-2.5 border-t border-border/70 pt-3 text-[11px] text-muted-foreground">
-        <span className="truncate font-mono">{project.slug}</span>
+        <span className="truncate font-mono">{project.id.slice(0, 8)}</span>
         <span aria-hidden="true" className="h-3 w-px shrink-0 bg-border" />
-        <span className="inline-flex shrink-0 items-center gap-1">
-          <Server aria-hidden="true" strokeWidth={1.75} className="size-3" />
-          {project.servers}
-          <span className="sr-only">servers</span>
+        <span className="ml-auto truncate">
+          Updated {formatDate(project.updatedAt)}
         </span>
-        <span aria-hidden="true" className="h-3 w-px shrink-0 bg-border" />
-        <span className="ml-auto truncate">{project.updatedAt}</span>
       </div>
     </Link>
   )

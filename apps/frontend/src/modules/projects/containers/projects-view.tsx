@@ -1,35 +1,50 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Plus } from "lucide-react"
 
+import { getApiErrorMessage } from "@/api"
+import { projectsApi } from "@/api/projects"
+import type { Project } from "@acceleratio/shared"
 import { Button } from "@/shared/components/ui/button"
 import { ProjectCard } from "../components/project-card"
-import {
-  SEED_PROJECTS,
-  type Project,
-} from "../mock-data"
+import { ProjectsEmptyState } from "../components/projects-empty-state"
 import { CreateProjectDialog, type ProjectDraft } from "./create-project-dialog"
 
-const slugify = (value: string) =>
-  value
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "") || "project"
-
 export const ProjectsView = () => {
-  const [projects, setProjects] = useState<Project[]>(SEED_PROJECTS)
+  const [projects, setProjects] = useState<Project[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [isCreateOpen, setIsCreateOpen] = useState(false)
 
-  const handleCreate = ({ name }: ProjectDraft) => {
-    const project: Project = {
-      id: crypto.randomUUID(),
-      slug: slugify(name),
-      name,
-      servers: 0,
-      updatedAt: "Updated just now",
+  useEffect(() => {
+    let active = true
+
+    projectsApi
+      .list()
+      .then((items) => {
+        if (active) {
+          setProjects(items)
+        }
+      })
+      .catch((requestError) => {
+        if (active) {
+          setError(getApiErrorMessage(requestError))
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setIsLoading(false)
+        }
+      })
+
+    return () => {
+      active = false
     }
+  }, [])
+
+  const handleCreate = async ({ name }: ProjectDraft) => {
+    const project = await projectsApi.create({ name })
 
     setProjects((currentProjects) => [project, ...currentProjects])
   }
@@ -52,22 +67,18 @@ export const ProjectsView = () => {
         </Button>
       </div>
 
-      {projects.length > 0 ? (
+      {isLoading ? (
+        <p className="mt-6 text-sm text-muted-foreground">Loading projects...</p>
+      ) : error ? (
+        <p className="mt-6 text-sm text-destructive">{error}</p>
+      ) : projects.length > 0 ? (
         <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {projects.map((project) => (
             <ProjectCard key={project.id} project={project} />
           ))}
         </div>
       ) : (
-        <div className="mt-6 flex flex-col items-start gap-3 rounded-lg border border-dashed border-border bg-white p-6">
-          <p className="text-sm text-muted-foreground">
-            No projects yet. Create one to group your servers.
-          </p>
-          <Button variant="outline" onClick={() => setIsCreateOpen(true)}>
-            <Plus aria-hidden="true" strokeWidth={2} className="size-4" />
-            New project
-          </Button>
-        </div>
+        <ProjectsEmptyState onCreate={() => setIsCreateOpen(true)} />
       )}
 
       <CreateProjectDialog
