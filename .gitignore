@@ -15,6 +15,3 @@ coverage/
 
 # misc
 .DS_Store
-
-# infrastructure as code (kept out of the product repo for now)
-ansible

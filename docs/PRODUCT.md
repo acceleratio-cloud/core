@@ -26,7 +26,7 @@ Open-source, self-hosted PaaS — the deploy-and-operate experience of a managed
 
 ## Operating Context
 
-- Installation targets a self-managed Kubernetes (k3s) cluster the operator controls. The verified reference deployment is a single Ubuntu 24.04 node that is both control plane and worker, provisioned with Ansible over SSH.
+- Installation targets a self-managed Kubernetes (k3s) cluster the operator controls. The verified reference deployment is a single Ubuntu 22.04, Ubuntu 24.04 or Debian 12 node that is both control plane and worker, provisioned by `deploy/install.sh` over SSH.
 - Local development runs the console and API from source, with Postgres in Docker Compose.
 - The console is a browser application; the API ("core") is a separate NestJS service; a shared package defines the typed contract between them.
 - A fresh install begins with a one-time bootstrap step that creates the initial account, followed by normal sign-in.
@@ -43,7 +43,7 @@ Open-source, self-hosted PaaS — the deploy-and-operate experience of a managed
 - Brand mark: `apps/frontend/src/shared/icons/logo-icon.tsx`.
 - Auth imagery: six datacenter renders in `apps/frontend/public/auth/`, generated to the style guide and ledger in `docs/ILLUSTRATIONS.md`.
 - Working screens: sign-in (`apps/frontend/src/modules/auth/containers/login-form.tsx`), first-run setup (`installation-form.tsx`), dashboard shell (`apps/frontend/src/shared/layouts/`).
-- Deployment record: single-node k3s cluster verified in `ansible/README.md` — internal engineering evidence, not a customer reference.
+- Deployment record: single-node k3s with embedded etcd, Cilium and SeaweedFS verified on Ubuntu 22.04, Ubuntu 24.04 and Debian 12; procedure and limitations are in `deploy/README.md` — internal engineering evidence, not a customer reference.
 - Absent and must not be fabricated: customers, testimonials, user logos, case studies, benchmarks, uptime figures, pricing, compliance certifications, or procurement approvals.
 
 ## Product Principles
