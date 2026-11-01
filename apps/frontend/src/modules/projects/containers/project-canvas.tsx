@@ -10,12 +10,12 @@ import {
 } from '@xyflow/react';
 
 import { CreateWorkloadDialog } from '@/modules/workloads/containers/create-workload-dialog';
+import { WorkloadDetails } from '@/modules/workloads/containers/workload-details';
 import { workloadNodeTypes } from '@/modules/workloads/components/workload-nodes';
 import { toWorkloadNodes } from '@/modules/workloads/utils/workload-nodes';
 import { CanvasLoader } from '@/shared/components/canvas-loader';
 import { ProjectHeader } from '../components/project-header';
 import { useProject } from '../providers/project-provider';
-import { WorkloadDetails } from '@/modules/workloads/containers/workload-details';
 
 const emptyEdges: Edge[] = [];
 

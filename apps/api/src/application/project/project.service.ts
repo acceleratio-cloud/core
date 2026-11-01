@@ -1,15 +1,11 @@
-import {
-  BadRequestException,
-  Inject,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import type {
   CreateProjectPayload,
   Project,
   UpdateProjectPayload,
 } from '@acceleratio/shared';
 import { desc, eq } from 'drizzle-orm';
+import { normalizeName } from '@/common/validation';
 import { DATABASE } from '@/vendor/db/database.constants';
 import type { Database } from '@/vendor/db/database.constants';
 import { project, type ProjectRow } from './schemas/project.schema';
@@ -41,10 +37,20 @@ export class ProjectService {
     return this.toProject(row);
   }
 
+  async exists(id: string): Promise<boolean> {
+    const [row] = await this.db
+      .select({ id: project.id })
+      .from(project)
+      .where(eq(project.id, id))
+      .limit(1);
+
+    return row !== undefined;
+  }
+
   async create(payload: CreateProjectPayload): Promise<Project> {
     const [row] = await this.db
       .insert(project)
-      .values({ name: this.normalizeName(payload?.name) })
+      .values({ name: normalizeName(payload?.name) })
       .returning();
 
     return this.toProject(row);
@@ -57,7 +63,7 @@ export class ProjectService {
 
     const [row] = await this.db
       .update(project)
-      .set({ name: this.normalizeName(payload.name) })
+      .set({ name: normalizeName(payload.name) })
       .where(eq(project.id, id))
       .returning();
 
@@ -77,14 +83,6 @@ export class ProjectService {
     if (!row) {
       throw new NotFoundException('Project not found');
     }
-  }
-
-  private normalizeName(name: unknown): string {
-    if (typeof name !== 'string' || !name.trim()) {
-      throw new BadRequestException('Name is required');
-    }
-
-    return name.trim();
   }
 
   private toProject(row: ProjectRow): Project {

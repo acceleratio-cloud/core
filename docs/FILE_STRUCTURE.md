@@ -1,19 +1,111 @@
 # Frontend structure
 
 src/
-  app/ - general folder with page and routes
-  api/ - axios requests to backend
-    /index.ts - base axios instance to send requests
-    [module-name] - folder with api requests to specific module
-      /index.ts - object with methods as keys to send request
-  modules/ - main logic of the app separated to domains ( modules )
-    [module-name] - logical domain
-      containers/ - components with logic, api requests
-      components/ - "silly" components with just ui and some handles or simple states
+  app/ - Next.js App Router: routes, layouts and route groups
+    (dashboard)/ - authenticated console
+    auth/ - sign-in and first-run installation
+  api/ - HTTP layer, the only place that talks to the API
+    index.ts - axios instance (NEXT_PUBLIC_API_URL, credentials) and getApiErrorMessage
+    [module-name]/
+      index.ts - client calls, one exported object per module (projectsApi)
+      server.ts - server-only calls for route files (getServerProject), forwards cookies
+  modules/ - product domains
+    [module-name]/
+      containers/ - client components with state, effects and api calls
+      components/ - presentational components: props in, markup out
+      providers/ - context provider plus its useX hook
+      utils/ - pure helpers for the domain
+      layouts/ - domain layouts (auth)
+  shared/
+    components/ui/ - shadcn primitives on @base-ui/react
+    components/ - shared app components (canvas-loader)
+    layouts/ - console shell: top navbar and user menu
+    icons/ - hand-written SVG icons
+  lib/utils.ts - cn() re-export
 
-Additional instructions:
-1) Use only tailwindcss for styles
-2) Use camelCase for frontend only variables and snake_case for variables to/from backend
+## Components and containers
+
+- `containers/` own state, effects and api calls; they start with `'use client'` when they use hooks or
+  browser APIs.
+- `components/` are presentational: props in, markup out. No fetching; local state is allowed only when
+  it is purely visual.
+- Route files in `app/` stay server components. They `await connection()` when they read request data,
+  `redirect()` unauthenticated users and `notFound()` missing resources.
+- Push `'use client'` down the tree: keep pages and layouts on the server and mark the smallest
+  interactive component.
+- Route files take the generated `PageProps<"...">` and `LayoutProps<"...">` types instead of
+  hand-written prop types.
+
+## Data fetching
+
+- Client calls live in `api/[module]/index.ts` as one exported object per module (`projectsApi`,
+  `workloadsApi`). Methods resolve to `data` only; errors bubble to the caller.
+- Server calls live in `api/[module]/server.ts`, start with `import "server-only"` and forward the
+  cookie header from `next/headers`. They return `null` for 400 and 404 and rethrow everything else.
+- Nothing outside `api/` imports axios or calls `fetch` directly.
+
+## Providers
+
+- Providers live in `modules/[name]/providers/` and export the component plus a `useX` hook that throws
+  when it is used outside the provider.
+- Context values are memoized with `useMemo`; actions are wrapped in `useCallback`.
+- Fetching effects use an `active` flag and clean up in the returned function, so a late response cannot
+  set state after unmount.
+
+## UI primitives
+
+- `shared/components/ui/*` are shadcn components built on `@base-ui/react`. They accept `className` and
+  merge it last through `cn`.
+- `cn` comes from `@/lib/utils`, which re-exports the `cn` package. Never concatenate class strings by
+  hand.
+- Primitives expose `data-slot` attributes and derive their props from the base-ui primitive types.
+- Do not hand-edit a generated primitive beyond a project wrapper; add a new one from the registry
+  instead.
+
+## Styling
+
+- Tailwind only. No CSS modules, no inline `style`, no CSS-in-JS.
+- Colors, borders and spacing come from design tokens (`bg-popover`, `text-muted-foreground`,
+  `border-border`), never raw hex values.
+- Conditional classes go through `cn(...)`; a passed `className` is merged last.
+- Animate with `animate-in` and `data-[starting-style]`, and always pair it with
+  `motion-reduce:animate-none` or `motion-reduce:transition-none`.
+- Long text uses `truncate` with a `title` attribute; aligned numbers use `tabular-nums`.
+- Icons come from `lucide-react` or `shared/icons`, use `strokeWidth={1.75}` unless a heavier stroke is
+  deliberate, and are `aria-hidden="true"` when decorative.
+
+## Accessibility
+
+- Icon-only buttons carry an `aria-label`.
+- Loading regions set `aria-busy="true"` with an `sr-only` description; async feedback such as copying
+  uses `role="status"`.
+- Decorative icons, separators and spacers are `aria-hidden="true"`.
+- The console shell keeps a `Skip to content` link that is `sr-only` until it receives focus.
+
+## Naming and imports
+
+- Files are kebab-case; components are PascalCase; hooks are `useX`; providers are `XProvider`; api
+  objects are `xApi`; skeletons are `XSkeleton`.
+- camelCase in TypeScript; snake_case only for values that come from the API (`config.docker_image`).
+- Import order: `'use client'`, then react and next, then third-party, then `@acceleratio/shared` types,
+  then `@/` aliases, then relative siblings.
+- Type-only imports use `import type`.
+- Only files in `app/` use a default export; everything else is a named export.
+
+## Formatting
+
+- The repo format comes from the root `.prettierrc` (single quotes, trailing commas) plus Prettier
+  defaults (semicolons, 80 columns). The tree still mixes both styles; new and edited files follow the
+  config.
+- `shared/components/ui/*` keeps the formatting shadcn generates (double quotes, no semicolons) and is
+  not reformatted by hand.
+- ESLint runs `next/core-web-vitals` and `next/typescript` and does not check formatting, so run
+  Prettier before committing.
+
+## Errors
+
+- User-facing text comes from `getApiErrorMessage(error)` in `@/api`; never render a raw axios message.
+- Components display the returned string as-is and do not map HTTP status codes themselves.
 
 # Shared contract (packages/shared)
 
@@ -31,3 +123,156 @@ Rules:
 2) Define API payloads and responses for a domain in `src/types/[module-name].ts` and re-export them from `src/index.ts`; never duplicate them in the apps
 3) Types are resolved from source, so the package needs no build for type sharing; `main`/`dist` are reserved for runtime values and require `bun run build` inside `packages/shared`
 4) bun copies `file:` dependencies into node_modules, so run `bun install` in the consuming app after changing the shared package
+
+# Backend structure (apps/api)
+
+apps/api/src/
+  main.ts - bootstrap: CORS from CORS_ORIGINS, port from PORT
+  app.module.ts - root module: VendorModule + ApplicationModule
+  common/ - helpers shared by submodules (input validation)
+  application/ - product features
+    application.module.ts - the only Nest module in this layer; registers every submodule
+    [submodule]/ - project/, workload/, node/, auth/
+      [submodule].controller.ts - HTTP surface only
+      [submodule].service.ts - logic, validation, database access
+      schemas/ - Drizzle tables owned by this submodule (optional)
+        [submodule].schema.ts
+  vendor/ - infrastructure, exposed globally so application code can inject it anywhere
+    vendor.module.ts - imports the db, auth and kubernetes modules
+    db/ - pool, DATABASE token, better-auth tables
+    auth/ - better-auth instance and its module (global by default)
+    kubernetes/ - lazily built API clients
+
+## Submodules
+
+A submodule is a folder inside `application/` that holds a controller, a service and, when it stores
+data, its own Drizzle schemas. It has no `*.module.ts` of its own. Every controller and provider is
+registered in `application.module.ts`:
+
+```ts
+@Module({
+  controllers: [
+    AuthController,
+    NodeController,
+    ProjectController,
+    WorkloadController,
+  ],
+  providers: [NodeService, ProjectService, WorkloadService],
+})
+export class ApplicationModule {}
+```
+
+The reason is circular dependencies. `WorkloadService` already needs `ProjectService` to confirm the
+parent project exists before it lists, reads or creates anything. The moment a project-side operation
+needs workloads, two separate Nest modules would form a cycle that the container cannot resolve: it
+would force `forwardRef(...)` in both modules and `@Inject(forwardRef(() => ProjectService))` in the
+services. With one module the providers share a single injector and the cycle never reaches Nest.
+
+Consequences:
+
+1) Every registered provider shares one injector, so any service can inject any other service with no
+   `imports` array anywhere.
+2) There is no per-submodule encapsulation. The boundary is maintained by hand: cross-submodule calls
+   go service to service, never controller to controller and never service to controller.
+3) `ApplicationModule` exports nothing; nothing in this layer is injected outside it.
+4) A submodule must not create its own Nest module just to group providers. Infrastructure is injected
+   through the global token or service instead: `DATABASE`, `KubernetesService`, `AuthService`.
+
+Adding a submodule:
+
+1) create `application/<name>/<name>.controller.ts`, `<name>.service.ts` and, if it owns tables,
+   `schemas/<name>.schema.ts`
+2) add the contract types to `packages/shared/src/types/<name>.ts` and re-export them from
+   `packages/shared/src/index.ts`
+3) register the controller and the service in `application.module.ts`
+4) run `bun run db:generate` and `bun run db:migrate` when schemas changed
+
+## Controllers
+
+- Thin: routing, param parsing, status codes. No validation, no try/catch, no database calls.
+- `@Controller('plural')`. Nested resources keep the full path: `@Controller('projects/:projectId/workloads')`.
+- Path params are parsed by a pipe: `@Param('id', ParseUUIDPipe) id: string`.
+- Every handler declares its return type (`Promise<Project[]>`) and returns the service call directly
+  when nothing else happens.
+- `DELETE` returns `Promise<void>` with `@HttpCode(HttpStatus.NO_CONTENT)`.
+- Request bodies use the shared payload interfaces (`CreateProjectPayload`); there are no DTO classes.
+- The auth controller is the one exception: it holds logic because it forwards to better-auth and
+  enforces the single-account bootstrap rule.
+
+## Services
+
+- `@Injectable()`, class name `<name>Service`, one per submodule.
+- Database access through the symbol token: `@Inject(DATABASE) private readonly db: Database`.
+  Collaborators arrive as plain constructor parameters.
+- Queries go through Drizzle only; no raw SQL strings.
+- Validation lives here: rules shared by several submodules come from `src/common/validation.ts`
+  (`normalizeName`), submodule-specific ones are private `normalize*` helpers that accept `unknown` and
+  narrow it. No `class-validator` and no DTO layer.
+- Failures throw Nest exceptions: `BadRequestException` for bad input, `NotFoundException` for missing
+  rows. Messages are sentence case without a trailing period: `'Project not found'`.
+- Child resources scope every query by the parent id in the `where` clause. Only `create` needs an
+  existence check (`projectService.exists(projectId)`), because the insert relies on a foreign key and
+  a missing project would otherwise surface as a database error instead of a 404. Never call
+  `projectService.get()` just to validate the parent — that adds a second query to every request.
+- Rows are mapped to contract objects by a private `to<Name>(row)` helper; timestamps become ISO
+  strings there.
+- Updates build a partial `updates` object and skip the query entirely when nothing changed.
+- Named constants at module scope instead of inline literals: `NAME_MAX_LENGTH`, `DEFAULT_POSITION`.
+
+## Schemas
+
+- The Drizzle table lives in `schemas/<name>.schema.ts` inside the submodule, never in `vendor/db`.
+- Export the inferred row type: `export type ProjectRow = typeof project.$inferSelect`.
+- Table names are singular (`project`, `workload`), columns are snake_case, TypeScript keys are camelCase.
+- Indexes are named `<table>_<column>_idx`; enums use `pgEnum('<name>_type', [...])`.
+- Timestamps use `defaultNow().notNull()`, with `$onUpdate(() => new Date())` on `updatedAt`.
+- Foreign keys declare the delete behavior: `.references(() => project.id, { onDelete: 'cascade' })`.
+- `drizzle.config.ts` picks up `src/application/**/schemas/*.schema.ts` automatically; the better-auth
+  tables stay in `vendor/db/schema.ts`.
+- Migrations are generated into `apps/api/drizzle` with `bun run db:generate` and applied with
+  `bun run db:migrate`.
+
+## Code style
+
+- `@/*` maps to `src/*` (`tsconfig.json`). Imports outside the current folder use the alias; relative
+  paths stay for same-folder files. `workload.schema.ts` still reaches the project schema relatively —
+  the alias form is preferred.
+- tsc does not rewrite aliases, so `scripts/dev.js` runs `tsc-alias` before boot and `bun run build` is
+  `nest build && tsc-alias`. A new alias needs both paths.
+- Import order: `@nestjs/*`, then third-party packages, then `@acceleratio/shared` types, then `@/...`,
+  then relative imports.
+- Type-only imports use `import type`.
+- Files are kebab-case with a role suffix: `project.service.ts`, `auth-exception.filter.ts`,
+  `database.constants.ts`.
+- Formatting is Prettier through ESLint. There is no `.prettierrc`, so defaults apply: single quotes,
+  semicolons, trailing commas, 80 columns, 2 spaces. `bun run lint` fixes in place.
+- ESLint runs the `typescript-eslint` type-checked rules. `no-explicit-any` is off, floating promises
+  and unsafe arguments warn, Prettier violations are errors.
+- Async functions declare `Promise<T>`; fire-and-forget at the top level is explicit: `void bootstrap()`.
+- `strict` is on in `apps/api/tsconfig.json`. Keep it on: catch clauses take `unknown`, optional fields
+  are checked, and new code must satisfy the compiler instead of widening a type.
+- camelCase in TypeScript; snake_case only where a value crosses the boundary (`config.docker_image`,
+  database columns).
+- Tests: `bun run test` runs `*.spec.ts` under `src` (auth controller and exception filter today),
+  `bun run test:e2e` runs `test/*.e2e-spec.ts`. `better-auth` and `@thallesp/nestjs-better-auth` ship
+  ESM only, which Jest cannot load from a CommonJS test, so auth specs stub both with `jest.mock`.
+  Jest maps `@/*` through `moduleNameMapper`.
+
+## Configuration and environment
+
+- `import 'dotenv/config'` sits in the entrypoints (`main.ts`, `vendor/db/client.ts`,
+  `vendor/auth/auth.ts`). There is no `@nestjs/config`; read `process.env` directly.
+- Variables: `PORT`, `DATABASE_URL` (required, thrown at startup), `BETTER_AUTH_URL`, `BETTER_AUTH_SECRET`,
+  `CORS_ORIGINS` (comma separated), `KUBECONFIG` (YAML contents, not a path; the default or in-cluster
+  config is used when unset).
+- Every new variable is listed in `apps/api/.env.example`.
+
+## Auth and errors
+
+- better-auth is configured in `vendor/auth/auth.ts`; the module mounts it with `disableControllers: true`
+  so this app's controllers own the routes.
+- Decorators from `@thallesp/nestjs-better-auth`: `@AllowAnonymous()` for public routes, `@OptionalAuth()`
+  for routes that work signed in or out, `@Session()` to read the session.
+- `AuthExceptionFilter` converts a better-auth `APIError` into the Nest shape (`{ statusCode, message, code? }`),
+  which matches `ApiErrorResponse` in the shared package.
+- Successful responses return the shared contract type directly, without an envelope.

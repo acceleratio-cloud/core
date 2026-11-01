@@ -14,11 +14,11 @@ import type {
 } from '@acceleratio/shared';
 import { and, asc, eq } from 'drizzle-orm';
 import { ProjectService } from '@/application/project/project.service';
+import { normalizeName } from '@/common/validation';
 import { DATABASE } from '@/vendor/db/database.constants';
 import type { Database } from '@/vendor/db/database.constants';
 import { workload, type WorkloadRow } from './schemas/workload.schema';
 
-const NAME_MAX_LENGTH = 255;
 const DEFAULT_POSITION: WorkloadPosition = { x: 0, y: 0 };
 
 @Injectable()
@@ -29,8 +29,6 @@ export class WorkloadService {
   ) {}
 
   async list(projectId: string): Promise<Workload[]> {
-    await this.projectService.get(projectId);
-
     const rows = await this.db
       .select()
       .from(workload)
@@ -44,7 +42,12 @@ export class WorkloadService {
     projectId: string,
     payload: CreateWorkloadPayload,
   ): Promise<Workload> {
-    await this.projectService.get(projectId);
+    // The insert relies on a foreign key, so a missing project would surface as
+    // a database error instead of a 404. This is the only place that needs the
+    // check; every other query already filters by projectId.
+    if (!(await this.projectService.exists(projectId))) {
+      throw new NotFoundException('Project not found');
+    }
 
     const type = this.normalizeType(payload?.type);
 
@@ -52,7 +55,7 @@ export class WorkloadService {
       .insert(workload)
       .values({
         projectId,
-        name: this.normalizeName(payload?.name),
+        name: normalizeName(payload?.name),
         type,
         config: this.normalizeConfig(type, payload?.config),
         position: DEFAULT_POSITION,
@@ -63,8 +66,6 @@ export class WorkloadService {
   }
 
   async get(projectId: string, id: string): Promise<Workload> {
-    await this.projectService.get(projectId);
-
     return this.toWorkload(await this.findRow(projectId, id));
   }
 
@@ -73,8 +74,6 @@ export class WorkloadService {
     id: string,
     payload: UpdateWorkloadPayload,
   ): Promise<Workload> {
-    await this.projectService.get(projectId);
-
     const existing = await this.findRow(projectId, id);
     const updates: {
       name?: string;
@@ -83,7 +82,7 @@ export class WorkloadService {
     } = {};
 
     if (payload?.name !== undefined) {
-      updates.name = this.normalizeName(payload.name);
+      updates.name = normalizeName(payload.name);
     }
 
     if (payload?.config !== undefined) {
@@ -108,8 +107,6 @@ export class WorkloadService {
   }
 
   async remove(projectId: string, id: string): Promise<void> {
-    await this.projectService.get(projectId);
-
     const [row] = await this.db
       .delete(workload)
       .where(and(eq(workload.id, id), eq(workload.projectId, projectId)))
@@ -132,22 +129,6 @@ export class WorkloadService {
     }
 
     return row;
-  }
-
-  private normalizeName(name: unknown): string {
-    if (typeof name !== 'string' || !name.trim()) {
-      throw new BadRequestException('Name is required');
-    }
-
-    const trimmed = name.trim();
-
-    if (trimmed.length > NAME_MAX_LENGTH) {
-      throw new BadRequestException(
-        `Keep the name under ${NAME_MAX_LENGTH} characters`,
-      );
-    }
-
-    return trimmed;
   }
 
   private normalizeType(type: unknown): WorkloadType {
