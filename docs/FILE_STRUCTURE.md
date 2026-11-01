@@ -107,6 +107,17 @@ src/
 - User-facing text comes from `getApiErrorMessage(error)` in `@/api`; never render a raw axios message.
 - Components display the returned string as-is and do not map HTTP status codes themselves.
 
+## Notifications
+
+- `<Toaster />` from `@/shared/components/toaster` is mounted once in the root layout; never mount a
+  second one. It wraps sileo, which ships without a `"use client"` directive, and holds the defaults:
+  bottom-left, light theme, 4s duration.
+- Fire toasts from client components with `sileo.success`, `sileo.error`, `sileo.info`,
+  `sileo.warning` or `sileo.promise`; import `sileo` from `sileo` directly.
+- Error toasts take their description from `getApiErrorMessage`, like any other error copy.
+- State colors are mapped to console tokens in `globals.css` (`--sileo-state-*`), so success and info
+  stay achromatic and only errors take Signal Red.
+
 # Shared contract (packages/shared)
 
 `@acceleratio/shared` is the internal library that holds the typed contract between `apps/frontend` and `apps/api`. Both apps depend on it via `file:../../packages/shared`.

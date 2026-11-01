@@ -131,3 +131,17 @@
     @apply font-sans;
   }
 }
+
+/* ---------------------------------- Toasts --------------------------------- */
+
+/* sileo paints toast text with these variables. The console reserves chroma for
+   destructive and invalid state (docs/DESIGN.md), so success, warning and info
+   stay achromatic and lean on the icon and label instead. */
+:root {
+  --sileo-state-success: var(--foreground);
+  --sileo-state-loading: var(--muted-foreground);
+  --sileo-state-error: var(--destructive);
+  --sileo-state-warning: var(--foreground);
+  --sileo-state-info: var(--foreground);
+  --sileo-state-action: var(--primary);
+}
