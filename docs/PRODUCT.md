@@ -1,6 +1,6 @@
 # Product
 
-<!-- impeccable:product-schema 1 -->
+Acceleratio - open source alternative to Railway, Render, Northflank and Vercel.
 
 ## Platform
 
@@ -31,29 +31,6 @@ Open-source, self-hosted PaaS — the deploy-and-operate experience of a managed
 - The console is a browser application; the API ("core") is a separate NestJS service; a shared package defines the typed contract between them.
 - A fresh install begins with a one-time bootstrap step that creates the initial account, followed by normal sign-in.
 - Buyers evaluate the product without a vendor account, managed service, or hosted dependency.
-
-## Capabilities and Constraints
-
-Implemented today:
-
-- Sign-in (email and password).
-- First-run installation/setup form (full name, email, password, confirm password).
-- Console shell: sidebar navigation, dashboard frame, and UI primitives (button, field, input, label, textarea, separator).
-- Ansible automation for a single-node k3s deployment.
-
-Scaffold only:
-
-- The API is a bare NestJS application with no domain endpoints.
-- The shared contract package exposes nothing yet.
-
-The sidebar navigates to: account home, recents, domains, observability, compute, AI, storage & databases, images & stream, realtime, application security, Zero Trust, networking, threats & defense, monetize, delivery & performance, manage account. This is intended scope, not shipped functionality — never present these sections as working.
-
-Open decisions:
-
-- Which product section is built first.
-- Whether the platform is multi-tenant or multi-team at launch.
-- License and open-source governance (not recorded in the repository).
-- Pricing, support terms, and any deployment or performance claims.
 
 ## Brand Commitments
 

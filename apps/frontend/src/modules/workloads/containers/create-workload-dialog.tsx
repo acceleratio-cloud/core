@@ -15,7 +15,7 @@ import {
 
 import type { Workload } from '@acceleratio/shared';
 import { cn } from '@/lib/utils';
-import { useProject } from '../providers/project-provider';
+import { useProject } from '@/modules/projects/providers/project-provider';
 import { Button } from '@/shared/components/ui/button';
 import {
   Dialog,
