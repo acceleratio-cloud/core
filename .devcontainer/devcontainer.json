@@ -1,0 +1,39 @@
+{
+  "name": "Acceleratio",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:4": {
+      "dockerDashComposeVersion": "v2"
+    }
+  },
+  "remoteUser": "node",
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
+  "forwardPorts": [3000, 8080, 5433],
+  "portsAttributes": {
+    "3000": {
+      "label": "Console",
+      "onAutoForward": "notify"
+    },
+    "8080": {
+      "label": "API",
+      "onAutoForward": "notify"
+    },
+    "5433": {
+      "label": "PostgreSQL",
+      "onAutoForward": "silent"
+    }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "oven.bun-vscode",
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "bradlc.vscode-tailwindcss"
+      ]
+    }
+  }
+}

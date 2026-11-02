@@ -135,6 +135,39 @@ export KUBECONFIG="$(./scripts/cluster.sh kubeconfig)"
 (cd apps/frontend && bun run dev)
 ```
 
+## Dev container
+
+`.devcontainer/` packages the local development environment so contributors do
+not need to install Bun, Node.js, PostgreSQL, k3d, Helm or kubectl on the host.
+Docker is still required. It is optional; the native workflow above still works.
+
+Open the repository in VS Code with the Dev Containers extension, or in a
+Codespaces workspace, and choose **Reopen in Container**. The image pins Bun
+1.4.0 and Node.js 22, the same runtimes as the production images, and adds
+Docker-in-Docker with Compose v2. It also installs k3d 5.9.0, Helm 3.18.0 and
+kubectl 1.36.5 for cluster work.
+
+Nested Kubernetes clusters inside Docker-in-Docker depend on the host kernel.
+`make cluster-up` is not supported on Docker Desktop for macOS; the API,
+console, PostgreSQL and migrations still run in the container. For
+cluster-backed features, use a cluster that is reachable from the container and
+point `KUBECONFIG` at it.
+
+`postCreateCommand` runs `./scripts/dev.sh --setup`, which creates the env
+files if they are missing, installs dependencies, starts PostgreSQL and applies
+migrations. Existing env files are used as-is, so a checkout configured for an
+external database keeps that target. The first container build downloads the
+base image and the tool binaries, so expect a few minutes.
+
+```bash
+make dev        # API on :8080 and console on :3000
+make cluster-up # optional disposable k3d cluster
+```
+
+VS Code forwards ports `3000`, `8080` and `5433`. Docker-in-Docker gives the
+workspace its own daemon, so containers started inside it do not appear in the
+host's Docker Desktop.
+
 ## Containers
 
 Both Dockerfiles build from the repository root because the applications depend
