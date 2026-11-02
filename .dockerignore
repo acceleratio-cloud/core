@@ -1,0 +1,22 @@
+# Keep the build context small and free of local state. Both Dockerfiles are
+# built from the repository root because the applications depend on
+# packages/shared through a file: dependency.
+
+.git
+.gitignore
+.factory
+.impeccable
+
+**/node_modules
+**/.next
+**/dist
+**/coverage
+
+# Never bake local secrets or environment overrides into an image.
+**/.env
+**/.env.*
+!**/.env.example
+
+**/*.tsbuildinfo
+**/.DS_Store
+**/*.log
