@@ -39,7 +39,7 @@ export const ProjectCard = ({ project }: { project: Project }) => {
         <span className="truncate font-mono">{project.id.slice(0, 8)}</span>
         <span aria-hidden="true" className="h-3 w-px shrink-0 bg-border" />
         <span className="ml-auto truncate">
-          Updated {formatDate(project.updatedAt)}
+          Updated {formatDate(project.updated_at)}
         </span>
       </div>
     </Link>

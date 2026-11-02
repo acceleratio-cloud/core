@@ -6,7 +6,7 @@ jest.mock('better-auth', () => ({
 import type { ArgumentsHost } from '@nestjs/common';
 import type { APIError } from 'better-auth';
 import type { Response } from 'express';
-import { AuthExceptionFilter } from './auth-exception.filter';
+import { AuthExceptionFilter } from '../auth-exception.filter';
 
 const createHost = () => {
   const json = jest.fn();
@@ -45,7 +45,7 @@ describe('AuthExceptionFilter', () => {
 
     expect(status).toHaveBeenCalledWith(401);
     expect(json).toHaveBeenCalledWith({
-      statusCode: 401,
+      status_code: 401,
       message: 'Invalid email or password',
       code: 'INVALID_EMAIL_OR_PASSWORD',
     });
@@ -60,7 +60,7 @@ describe('AuthExceptionFilter', () => {
     );
 
     expect(json).toHaveBeenCalledWith({
-      statusCode: 400,
+      status_code: 400,
       message: 'Bad request',
       code: undefined,
     });

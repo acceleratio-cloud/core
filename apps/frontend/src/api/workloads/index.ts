@@ -2,9 +2,22 @@ import type {
   CreateWorkloadPayload,
   UpdateWorkloadPayload,
   Workload,
-} from "@acceleratio/shared";
+} from '@acceleratio/shared';
 
-import { api } from "@/api";
+import { api } from '@/api';
+
+type WorkloadAction = 'deploy' | 'start' | 'stop' | 'restart';
+
+const postAction = async (
+  projectId: string,
+  id: string,
+  action: WorkloadAction,
+) => {
+  const { data } = await api.post<Workload>(
+    `/projects/${projectId}/workloads/${id}/${action}`,
+  );
+  return data;
+};
 
 export const workloadsApi = {
   list: async (projectId: string) => {
@@ -40,4 +53,10 @@ export const workloadsApi = {
   remove: async (projectId: string, id: string) => {
     await api.delete(`/projects/${projectId}/workloads/${id}`);
   },
+  deploy: (projectId: string, id: string) =>
+    postAction(projectId, id, 'deploy'),
+  start: (projectId: string, id: string) => postAction(projectId, id, 'start'),
+  stop: (projectId: string, id: string) => postAction(projectId, id, 'stop'),
+  restart: (projectId: string, id: string) =>
+    postAction(projectId, id, 'restart'),
 };

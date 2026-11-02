@@ -20,7 +20,7 @@ import { useProject } from '../providers/project-provider';
 const emptyEdges: Edge[] = [];
 
 export const ProjectCanvas = () => {
-  const { workloads } = useProject();
+  const { workloads, workloadsError } = useProject();
   const [selectedWorkloadId, setSelectedWorkloadId] = useState<string | null>(
     null,
   );
@@ -37,6 +37,14 @@ export const ProjectCanvas = () => {
         <div className="absolute top-2 right-4 z-10">
           <CreateWorkloadDialog />
         </div>
+        {workloadsError ? (
+          <p
+            role="alert"
+            className="absolute top-2 left-4 z-10 max-w-sm rounded-md border border-destructive/30 bg-background px-3 py-2 text-xs leading-relaxed text-destructive"
+          >
+            {workloadsError}
+          </p>
+        ) : null}
         <WorkloadDetails workload={selectedWorkload} onClose={closeDetails} />
         <WorkloadFlow
           onSelectWorkload={setSelectedWorkloadId}

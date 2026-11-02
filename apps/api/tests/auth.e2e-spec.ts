@@ -93,7 +93,18 @@ describe('Auth (e2e)', () => {
     headers.append('set-cookie', 'better-auth.session=abc; Path=/');
     signInEmail.mockResolvedValue({
       headers,
-      response: { user: { id: 'user-1' } },
+      response: {
+        token: 'token-abc',
+        user: {
+          id: 'user-1',
+          name: 'Ada Lovelace',
+          email: 'ada@example.com',
+          emailVerified: true,
+          image: null,
+          createdAt: new Date('2026-01-01T10:00:00.000Z'),
+          updatedAt: new Date('2026-01-02T10:00:00.000Z'),
+        },
+      },
     });
 
     const response = await request(app.getHttpServer())
@@ -101,7 +112,18 @@ describe('Auth (e2e)', () => {
       .send(signInPayload)
       .expect(200);
 
-    expect(response.body).toEqual({ user: { id: 'user-1' } });
+    expect(response.body).toEqual({
+      token: 'token-abc',
+      user: {
+        id: 'user-1',
+        name: 'Ada Lovelace',
+        email: 'ada@example.com',
+        email_verified: true,
+        image: null,
+        created_at: '2026-01-01T10:00:00.000Z',
+        updated_at: '2026-01-02T10:00:00.000Z',
+      },
+    });
     expect(response.headers['set-cookie']).toEqual([
       'better-auth.session=abc; Path=/',
     ]);

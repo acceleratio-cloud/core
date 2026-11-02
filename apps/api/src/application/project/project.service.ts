@@ -1,4 +1,10 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  Logger,
+  NotFoundException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import type {
   CreateProjectPayload,
   Project,
@@ -8,17 +14,23 @@ import { desc, eq } from 'drizzle-orm';
 import { normalizeName } from '@/common/validation';
 import { DATABASE } from '@/vendor/db/database.constants';
 import type { Database } from '@/vendor/db/database.constants';
+import { ProjectIsolationService } from './project-isolation.service';
 import { project, type ProjectRow } from './schemas/project.schema';
 
 @Injectable()
 export class ProjectService {
-  constructor(@Inject(DATABASE) private readonly db: Database) {}
+  private readonly logger = new Logger(ProjectService.name);
+
+  constructor(
+    @Inject(DATABASE) private readonly db: Database,
+    private readonly isolation: ProjectIsolationService,
+  ) {}
 
   async list(): Promise<Project[]> {
     const rows = await this.db
       .select()
       .from(project)
-      .orderBy(desc(project.createdAt));
+      .orderBy(desc(project.created_at));
 
     return rows.map((row) => this.toProject(row));
   }
@@ -53,6 +65,13 @@ export class ProjectService {
       .values({ name: normalizeName(payload?.name) })
       .returning();
 
+    try {
+      await this.isolation.ensure(row.id);
+    } catch (error) {
+      await this.deleteRowAfterFailedCreate(row.id);
+      throw error;
+    }
+
     return this.toProject(row);
   }
 
@@ -75,6 +94,21 @@ export class ProjectService {
   }
 
   async remove(id: string): Promise<void> {
+    // The namespace goes first: a project row without a namespace can be
+    // deleted again, a namespace without a project row cannot be found later.
+    try {
+      await this.isolation.remove(id);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+
+      this.logger.warn(
+        `Failed to remove namespace for project ${id}: ${message}`,
+      );
+      throw new ServiceUnavailableException(
+        'Failed to remove project namespace',
+      );
+    }
+
     const [row] = await this.db
       .delete(project)
       .where(eq(project.id, id))
@@ -85,12 +119,26 @@ export class ProjectService {
     }
   }
 
+  /**
+   * Best-effort cleanup after a failed namespace setup. The original error is
+   * the one that reaches the client, so a cleanup failure is only logged.
+   */
+  private async deleteRowAfterFailedCreate(id: string): Promise<void> {
+    try {
+      await this.db.delete(project).where(eq(project.id, id));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+
+      this.logger.error(`Failed to roll back project ${id}: ${message}`);
+    }
+  }
+
   private toProject(row: ProjectRow): Project {
     return {
       id: row.id,
       name: row.name,
-      createdAt: row.createdAt.toISOString(),
-      updatedAt: row.updatedAt.toISOString(),
+      created_at: row.created_at.toISOString(),
+      updated_at: row.updated_at.toISOString(),
     };
   }
 }

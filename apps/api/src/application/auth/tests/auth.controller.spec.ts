@@ -21,7 +21,7 @@ import { ForbiddenException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { AuthService, type UserSession } from '@thallesp/nestjs-better-auth';
 import { DATABASE } from '@/vendor/db/database.constants';
-import { AuthController } from './auth.controller';
+import { AuthController } from '../auth.controller';
 
 const createRequest = (): Request => ({ headers: {} }) as unknown as Request;
 
@@ -39,6 +39,48 @@ const authResult = <T>(response: T, cookies: string[] = []) => {
   cookies.forEach((cookie) => headers.append('set-cookie', cookie));
 
   return { headers, response };
+};
+
+const user = {
+  id: 'user-1',
+  name: 'Ada Lovelace',
+  email: 'ada@example.com',
+  emailVerified: true,
+  image: null,
+  createdAt: new Date('2026-01-01T10:00:00.000Z'),
+  updatedAt: new Date('2026-01-02T10:00:00.000Z'),
+};
+
+const serializedUser = {
+  id: 'user-1',
+  name: 'Ada Lovelace',
+  email: 'ada@example.com',
+  email_verified: true,
+  image: null,
+  created_at: '2026-01-01T10:00:00.000Z',
+  updated_at: '2026-01-02T10:00:00.000Z',
+};
+
+const session = {
+  id: 'session-1',
+  token: 'token-abc',
+  userId: 'user-1',
+  expiresAt: new Date('2026-01-08T10:00:00.000Z'),
+  createdAt: new Date('2026-01-01T10:00:00.000Z'),
+  updatedAt: new Date('2026-01-02T10:00:00.000Z'),
+  ipAddress: '127.0.0.1',
+  userAgent: 'jest',
+};
+
+const serializedSession = {
+  id: 'session-1',
+  token: 'token-abc',
+  user_id: 'user-1',
+  expires_at: '2026-01-08T10:00:00.000Z',
+  created_at: '2026-01-01T10:00:00.000Z',
+  updated_at: '2026-01-02T10:00:00.000Z',
+  ip_address: '127.0.0.1',
+  user_agent: 'jest',
 };
 
 const createFixture = async (usersCount: number) => {
@@ -97,10 +139,10 @@ describe('AuthController', () => {
       expect(auth.api.signUpEmail).not.toHaveBeenCalled();
     });
 
-    it('forwards the payload and the session cookies', async () => {
+    it('forwards the payload, the session cookies and serializes the user', async () => {
       const { controller, auth } = await createFixture(0);
       const { response, setHeader } = createResponse();
-      const created = { user: { id: 'user-1' } };
+      const created = { token: 'token-abc', user };
 
       auth.api.signUpEmail.mockResolvedValue(
         authResult(created, ['better-auth.session=abc; Path=/']),
@@ -108,7 +150,7 @@ describe('AuthController', () => {
 
       await expect(
         controller.signUpEmail(signUpPayload, createRequest(), response),
-      ).resolves.toEqual(created);
+      ).resolves.toEqual({ token: 'token-abc', user: serializedUser });
 
       expect(auth.api.signUpEmail).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -125,7 +167,9 @@ describe('AuthController', () => {
       const { controller, auth } = await createFixture(0);
       const { response, setHeader } = createResponse();
 
-      auth.api.signUpEmail.mockResolvedValue(authResult({ user: null }));
+      auth.api.signUpEmail.mockResolvedValue(
+        authResult({ token: 'token-abc', user }),
+      );
 
       await controller.signUpEmail(signUpPayload, createRequest(), response);
 
@@ -134,11 +178,16 @@ describe('AuthController', () => {
   });
 
   describe('signInEmail', () => {
-    it('returns the better-auth response and copies the cookies', async () => {
+    it('keeps better-auth fields and serializes the user', async () => {
       const { controller, auth } = await createFixture(1);
       const { response, setHeader } = createResponse();
       const payload = { email: 'ada@example.com', password: 'secret-password' };
-      const signedIn = { user: { id: 'user-1' } };
+      const signedIn = {
+        redirect: false,
+        token: 'token-def',
+        url: '/dashboard',
+        user,
+      };
 
       auth.api.signInEmail.mockResolvedValue(
         authResult(signedIn, ['better-auth.session=def; Path=/']),
@@ -146,7 +195,12 @@ describe('AuthController', () => {
 
       await expect(
         controller.signInEmail(payload, createRequest(), response),
-      ).resolves.toEqual(signedIn);
+      ).resolves.toEqual({
+        redirect: false,
+        token: 'token-def',
+        url: '/dashboard',
+        user: serializedUser,
+      });
 
       expect(setHeader).toHaveBeenCalledWith('set-cookie', [
         'better-auth.session=def; Path=/',
@@ -161,14 +215,18 @@ describe('AuthController', () => {
       expect(controller.session(null)).toEqual({ session: null, user: null });
     });
 
-    it('passes the resolved session through', async () => {
+    it('serializes the resolved session and user to snake_case', async () => {
       const { controller } = await createFixture(1);
       const current = {
-        session: { id: 'session-1' },
-        user: { id: 'user-1' },
+        session,
+        user: { ...user, role: 'admin' },
       } as unknown as UserSession;
 
-      expect(controller.session(current)).toEqual(current);
+      expect(controller.session(current)).toEqual({
+        session: serializedSession,
+        user: serializedUser,
+      });
+      expect(controller.session(current).user).not.toHaveProperty('role');
     });
   });
 

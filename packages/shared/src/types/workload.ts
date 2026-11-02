@@ -1,5 +1,12 @@
 export type WorkloadType = "docker";
 
+export type WorkloadStatus =
+  | "draft"
+  | "deploying"
+  | "running"
+  | "stopped"
+  | "failed";
+
 export interface WorkloadPosition {
   x: number;
   y: number;
@@ -13,13 +20,20 @@ export type WorkloadConfig = DockerWorkloadConfig;
 
 export interface Workload {
   id: string;
-  projectId: string;
+  project_id: string;
   name: string;
   type: WorkloadType;
   config: WorkloadConfig;
   position: WorkloadPosition;
-  createdAt: string;
-  updatedAt: string;
+  status: WorkloadStatus;
+  status_message: string | null;
+  /** Deployment name in the cluster. Generated once, never changes. */
+  external_name: string;
+  /** Kubernetes namespace that holds the workload: `project-<project_id>`. */
+  namespace: string;
+  last_deployed_at: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface CreateWorkloadPayload {

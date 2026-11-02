@@ -44,6 +44,42 @@ export class WorkloadController {
     return this.workloadService.create(projectId, body);
   }
 
+  @Post(':id/deploy')
+  @HttpCode(HttpStatus.OK)
+  deploy(
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<Workload> {
+    return this.workloadService.deploy(projectId, id);
+  }
+
+  @Post(':id/start')
+  @HttpCode(HttpStatus.OK)
+  start(
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<Workload> {
+    return this.workloadService.start(projectId, id);
+  }
+
+  @Post(':id/stop')
+  @HttpCode(HttpStatus.OK)
+  stop(
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<Workload> {
+    return this.workloadService.stop(projectId, id);
+  }
+
+  @Post(':id/restart')
+  @HttpCode(HttpStatus.OK)
+  restart(
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<Workload> {
+    return this.workloadService.restart(projectId, id);
+  }
+
   @Patch(':id')
   update(
     @Param('projectId', ParseUUIDPipe) projectId: string,

@@ -5,11 +5,11 @@ export interface ClusterNode {
   status: ClusterNodeStatus;
   roles: string[];
   version: string | null;
-  internalIp: string | null;
+  internal_ip: string | null;
   os: string | null;
-  containerRuntime: string | null;
+  container_runtime: string | null;
   cpu: string | null;
   memory: string | null;
   storage: string | null;
-  createdAt: string | null;
+  created_at: string | null;
 }

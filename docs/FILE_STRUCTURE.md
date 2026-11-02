@@ -16,6 +16,7 @@ src/
       providers/ - context provider plus its useX hook
       utils/ - pure helpers for the domain
       layouts/ - domain layouts (auth)
+      tests/ - unit tests for this module; never colocate *.spec.ts next to source
   shared/
     components/ui/ - shadcn primitives on @base-ui/react
     components/ - shared app components (canvas-loader)
@@ -86,7 +87,8 @@ src/
 
 - Files are kebab-case; components are PascalCase; hooks are `useX`; providers are `XProvider`; api
   objects are `xApi`; skeletons are `XSkeleton`.
-- camelCase in TypeScript; snake_case only for values that come from the API (`config.docker_image`).
+- snake_case for every field in the API contract and in Drizzle schema keys; camelCase only for local
+  frontend variables and function parameters (`projectId`, `dockerImage`).
 - Import order: `'use client'`, then react and next, then third-party, then `@acceleratio/shared` types,
   then `@/` aliases, then relative siblings.
 - Type-only imports use `import type`.
@@ -134,25 +136,35 @@ Rules:
 2) Define API payloads and responses for a domain in `src/types/[module-name].ts` and re-export them from `src/index.ts`; never duplicate them in the apps
 3) Types are resolved from source, so the package needs no build for type sharing; `main`/`dist` are reserved for runtime values and require `bun run build` inside `packages/shared`
 4) bun copies `file:` dependencies into node_modules, so run `bun install` in the consuming app after changing the shared package
+5) Response fields are snake_case (`created_at`, `project_id`, `email_verified`); request payloads follow the same rule. camelCase stays only for local variables, function parameters and values owned by a vendor library
 
 # Backend structure (apps/api)
 
 apps/api/src/
   main.ts - bootstrap: CORS from CORS_ORIGINS, port from PORT
   app.module.ts - root module: VendorModule + ApplicationModule
-  common/ - helpers shared by submodules (input validation)
+  common/ - helpers shared by submodules (input validation, DNS naming, exception filters)
   application/ - product features
     application.module.ts - the only Nest module in this layer; registers every submodule
     [submodule]/ - project/, workload/, node/, auth/
       [submodule].controller.ts - HTTP surface only
       [submodule].service.ts - logic, validation, database access
+      [type]/ - workload only: one folder per workload type, see "Workload types"
+        [type]-workload.service.ts - the full service for this type
+        [type]-workload.manifests.ts - pure Kubernetes object builders
+        [type]-workload.status.ts - pure cluster state to status mapping
+        [type]-workload.config.ts - config normalization for this type
+        tests/ - unit tests for this type
       schemas/ - Drizzle tables owned by this submodule (optional)
         [submodule].schema.ts
+      tests/ - unit tests for this submodule; never colocate *.spec.ts next to source
   vendor/ - infrastructure, exposed globally so application code can inject it anywhere
     vendor.module.ts - imports the db, auth and kubernetes modules
     db/ - pool, DATABASE token, better-auth tables
     auth/ - better-auth instance and its module (global by default)
     kubernetes/ - lazily built API clients
+
+apps/api/tests/ - end-to-end tests: jest-e2e.json and *.e2e-spec.ts
 
 ## Submodules
 
@@ -168,16 +180,25 @@ registered in `application.module.ts`:
     ProjectController,
     WorkloadController,
   ],
-  providers: [NodeService, ProjectService, WorkloadService],
+  providers: [
+    NodeService,
+    ProjectService,
+    ProjectIsolationService,
+    DockerWorkloadService,
+    WorkloadTypeRegistry,
+    WorkloadTypeResolver,
+    WorkloadService,
+  ],
 })
 export class ApplicationModule {}
 ```
 
-The reason is circular dependencies. `WorkloadService` already needs `ProjectService` to confirm the
-parent project exists before it lists, reads or creates anything. The moment a project-side operation
-needs workloads, two separate Nest modules would form a cycle that the container cannot resolve: it
-would force `forwardRef(...)` in both modules and `@Inject(forwardRef(() => ProjectService))` in the
-services. With one module the providers share a single injector and the cycle never reaches Nest.
+The reason is circular dependencies. `WorkloadService` needs `ProjectService` to confirm the parent
+project exists before it dispatches `create`; the Docker type service repeats that check on its own
+path, and future type services may depend on project-side services too. The moment a project-side
+operation needs workloads, two separate Nest modules would form a cycle that the container cannot
+resolve: it would force `forwardRef(...)` in both modules and `@Inject(forwardRef(() => ProjectService))`
+in the services. With one module the providers share a single injector and the cycle never reaches Nest.
 
 Consequences:
 
@@ -198,6 +219,38 @@ Adding a submodule:
 3) register the controller and the service in `application.module.ts`
 4) run `bun run db:generate` and `bun run db:migrate` when schemas changed
 
+## Workload types
+
+`workload/` is the one submodule that stores several kinds of resource. Each type owns a folder with a
+complete service instead of sharing a runtime adapter: `docker/` holds `DockerWorkloadService`, its
+manifests, status derivation, config normalization and tests. Common operations (project existence,
+external names, row mapping, status persistence) are duplicated per type on purpose: a new type must be
+free to diverge without changing another type's code. Each type service scopes its own row queries to
+its type (`type = '<type>'`); rows of other types never enter it.
+
+The shared layer stays small:
+
+1) `workload-type-service.ts` declares the full type service: `type`, `list`, `create`, `get`, `update`,
+   `deploy`, `start`, `stop`, `restart`, `remove`. Every type implements all of it.
+2) `workload-type.registry.ts` holds `Map<WorkloadType, WorkloadTypeService>`, returns the service for
+   a type (400 `Unsupported workload type` when missing) and `all()` for list merging.
+3) `workload-type.resolver.ts` performs the only shared row query: `select type from workload where id
+   and project_id`, with 404 `Workload not found`. It never reads or writes other columns.
+4) `workload.service.ts` is a facade. `create` first confirms the project exists, then dispatches by
+   `payload.type`; `get`, `update`, `deploy`, `start`, `stop`, `restart` and `remove` resolve the row
+   type and delegate. `list` calls every registered service, merges the results and sorts by
+   `created_at` with the id as a stable tie-breaker. The facade contains no Drizzle writes and no
+   Kubernetes calls.
+
+Adding a workload type:
+
+1) create `workload/<type>/` with `<type>-workload.service.ts` implementing `WorkloadTypeService`, plus
+   its manifests, status, config and `tests/`
+2) register the service in `workload-type.registry.ts`; `DockerWorkloadService` stays untouched
+3) add the type to the shared contract and the Drizzle enum in `schemas/workload.schema.ts`, then
+   generate the migration
+4) add the service to `application.module.ts` providers
+
 ## Controllers
 
 - Thin: routing, param parsing, status codes. No validation, no try/catch, no database calls.
@@ -212,7 +265,8 @@ Adding a submodule:
 
 ## Services
 
-- `@Injectable()`, class name `<name>Service`, one per submodule.
+- `@Injectable()`, class name `<name>Service`, one per submodule. The workload submodule additionally
+  has one full service per type, wrapped by the facade, registry and resolver described above.
 - Database access through the symbol token: `@Inject(DATABASE) private readonly db: Database`.
   Collaborators arrive as plain constructor parameters.
 - Queries go through Drizzle only; no raw SQL strings.
@@ -234,12 +288,15 @@ Adding a submodule:
 
 - The Drizzle table lives in `schemas/<name>.schema.ts` inside the submodule, never in `vendor/db`.
 - Export the inferred row type: `export type ProjectRow = typeof project.$inferSelect`.
-- Table names are singular (`project`, `workload`), columns are snake_case, TypeScript keys are camelCase.
+- Table names are singular (`project`, `workload`); columns and TypeScript keys are snake_case
+  (`project_id`, `created_at`), so a row maps to the contract without renaming fields.
 - Indexes are named `<table>_<column>_idx`; enums use `pgEnum('<name>_type', [...])`.
-- Timestamps use `defaultNow().notNull()`, with `$onUpdate(() => new Date())` on `updatedAt`.
+- Timestamps use `defaultNow().notNull()`, with `$onUpdate(() => new Date())` on `updated_at`.
 - Foreign keys declare the delete behavior: `.references(() => project.id, { onDelete: 'cascade' })`.
-- `drizzle.config.ts` picks up `src/application/**/schemas/*.schema.ts` automatically; the better-auth
-  tables stay in `vendor/db/schema.ts`.
+- `drizzle.config.ts` picks up `src/application/**/schemas/*.schema.ts` automatically. The better-auth
+  tables stay in `vendor/db/schema.ts` and keep better-auth's camelCase keys (`emailVerified`,
+  `expiresAt`) deliberately: the library owns those tables and reads them by those names. The
+  snake_case rule stops at that file; do not "fix" it.
 - Migrations are generated into `apps/api/drizzle` with `bun run db:generate` and applied with
   `bun run db:migrate`.
 
@@ -255,19 +312,23 @@ Adding a submodule:
 - Type-only imports use `import type`.
 - Files are kebab-case with a role suffix: `project.service.ts`, `auth-exception.filter.ts`,
   `database.constants.ts`.
-- Formatting is Prettier through ESLint. There is no `.prettierrc`, so defaults apply: single quotes,
-  semicolons, trailing commas, 80 columns, 2 spaces. `bun run lint` fixes in place.
+- Formatting is Prettier through ESLint. The root `.prettierrc` sets single quotes and trailing
+  commas; Prettier defaults add semicolons, 80 columns, 2 spaces. `bun run lint` fixes in place.
+- ESLint lints `src/` and `tests/`; generated `dist/`, `coverage/` and the CommonJS `scripts/`
+  launcher are ignored in `eslint.config.mjs`. Do not add generated output to the lint scope.
 - ESLint runs the `typescript-eslint` type-checked rules. `no-explicit-any` is off, floating promises
   and unsafe arguments warn, Prettier violations are errors.
 - Async functions declare `Promise<T>`; fire-and-forget at the top level is explicit: `void bootstrap()`.
 - `strict` is on in `apps/api/tsconfig.json`. Keep it on: catch clauses take `unknown`, optional fields
   are checked, and new code must satisfy the compiler instead of widening a type.
-- camelCase in TypeScript; snake_case only where a value crosses the boundary (`config.docker_image`,
-  database columns).
-- Tests: `bun run test` runs `*.spec.ts` under `src` (auth controller and exception filter today),
-  `bun run test:e2e` runs `test/*.e2e-spec.ts`. `better-auth` and `@thallesp/nestjs-better-auth` ship
-  ESM only, which Jest cannot load from a CommonJS test, so auth specs stub both with `jest.mock`.
-  Jest maps `@/*` through `moduleNameMapper`.
+- snake_case for every field in the API contract and in Drizzle schema keys. camelCase is for local
+  TypeScript (variables, parameters, class members) and for vendor-owned tables (`vendor/db/schema.ts`).
+- Tests live in `tests/` folders, never as `*.spec.ts` next to production source. Unit tests sit in
+  `src/**/tests/` inside the submodule they cover; e2e tests sit in `apps/api/tests` with
+  `jest-e2e.json`. `bun run test` runs `*.spec.ts` under `src`, `bun run test:e2e` runs
+  `tests/*.e2e-spec.ts`. `better-auth` and `@thallesp/nestjs-better-auth` ship ESM only, which Jest
+  cannot load from a CommonJS test, so auth specs stub both with `jest.mock`. Jest maps `@/*` through
+  `moduleNameMapper`.
 
 ## Configuration and environment
 
@@ -284,6 +345,13 @@ Adding a submodule:
   so this app's controllers own the routes.
 - Decorators from `@thallesp/nestjs-better-auth`: `@AllowAnonymous()` for public routes, `@OptionalAuth()`
   for routes that work signed in or out, `@Session()` to read the session.
-- `AuthExceptionFilter` converts a better-auth `APIError` into the Nest shape (`{ statusCode, message, code? }`),
-  which matches `ApiErrorResponse` in the shared package.
+- `AuthExceptionFilter` is controller-scoped and converts a better-auth `APIError` into
+  `{ status_code, message, code? }`, which matches `ApiErrorResponse` in the shared package.
+- `HttpExceptionFilter` in `common/http-exception.filter.ts` is registered globally in `main.ts` and
+  turns every other failure into the same shape; unknown exceptions become a 500 with a generic
+  message and a log entry. Controller-scoped filters run first, so better-auth errors keep their
+  specific messages.
+- better-auth responses are camelCase with Date objects (`emailVerified`, `createdAt`, `userId`). The
+  auth controller maps them with private `toAuthUser`/`toAuthSession` serializers before returning, so
+  the API surface stays snake_case. Keep vendor fields the caller needs (`token`, `url`) untouched.
 - Successful responses return the shared contract type directly, without an envelope.

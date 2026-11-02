@@ -40,15 +40,15 @@ export class NodeService {
         .map((label) => label.slice('node-role.kubernetes.io/'.length))
         .filter(Boolean),
       version: node.status?.nodeInfo?.kubeletVersion ?? null,
-      internalIp:
+      internal_ip:
         node.status?.addresses?.find((address) => address.type === 'InternalIP')
           ?.address ?? null,
       os: node.status?.nodeInfo?.osImage ?? null,
-      containerRuntime: node.status?.nodeInfo?.containerRuntimeVersion ?? null,
+      container_runtime: node.status?.nodeInfo?.containerRuntimeVersion ?? null,
       cpu: node.status?.capacity?.cpu ?? null,
       memory: node.status?.capacity?.memory ?? null,
       storage: node.status?.capacity?.['ephemeral-storage'] ?? null,
-      createdAt: node.metadata?.creationTimestamp?.toISOString() ?? null,
+      created_at: node.metadata?.creationTimestamp?.toISOString() ?? null,
     };
   }
 

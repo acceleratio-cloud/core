@@ -2,21 +2,21 @@ export interface AuthUser {
   id: string;
   name: string;
   email: string;
-  emailVerified: boolean;
+  email_verified: boolean;
   image: string | null;
-  createdAt: string;
-  updatedAt: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface AuthSession {
   id: string;
   token: string;
-  userId: string;
-  expiresAt: string;
-  createdAt: string;
-  updatedAt: string;
-  ipAddress?: string | null;
-  userAgent?: string | null;
+  user_id: string;
+  expires_at: string;
+  created_at: string;
+  updated_at: string;
+  ip_address?: string | null;
+  user_agent?: string | null;
 }
 
 export interface SessionResponse {
@@ -48,7 +48,7 @@ export interface SignOutResponse {
 }
 
 export interface ApiErrorResponse {
-  statusCode: number;
+  status_code: number;
   message: string;
   code?: string;
 }

@@ -3,9 +3,13 @@ import { AuthController } from '@/application/auth/auth.controller';
 import { NodeController } from '@/application/node/node.controller';
 import { NodeService } from '@/application/node/node.service';
 import { ProjectController } from '@/application/project/project.controller';
+import { ProjectIsolationService } from '@/application/project/project-isolation.service';
 import { ProjectService } from '@/application/project/project.service';
+import { DockerWorkloadService } from '@/application/workload/docker/docker-workload.service';
 import { WorkloadController } from '@/application/workload/workload.controller';
 import { WorkloadService } from '@/application/workload/workload.service';
+import { WorkloadTypeRegistry } from '@/application/workload/workload-type.registry';
+import { WorkloadTypeResolver } from '@/application/workload/workload-type.resolver';
 
 /**
  * Single Nest module for every application submodule. A submodule owns its
@@ -21,6 +25,14 @@ import { WorkloadService } from '@/application/workload/workload.service';
     ProjectController,
     WorkloadController,
   ],
-  providers: [NodeService, ProjectService, WorkloadService],
+  providers: [
+    NodeService,
+    ProjectService,
+    ProjectIsolationService,
+    DockerWorkloadService,
+    WorkloadTypeRegistry,
+    WorkloadTypeResolver,
+    WorkloadService,
+  ],
 })
 export class ApplicationModule {}

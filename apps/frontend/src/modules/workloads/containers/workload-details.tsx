@@ -5,6 +5,7 @@ import { Check, Copy, LayoutDashboard, Settings, X } from 'lucide-react';
 
 import type { Workload } from '@acceleratio/shared';
 import { cn } from '@/lib/utils';
+import { WorkloadStatus } from '@/modules/workloads/components/workload-status';
 import { Button } from '@/shared/components/ui/button';
 import { Separator } from '@/shared/components/ui/separator';
 import {
@@ -14,6 +15,7 @@ import {
   TabsTrigger,
 } from '@/shared/components/ui/tabs';
 import { DockerIcon } from '@/shared/icons/docker-icon';
+import { WorkloadActions } from './workload-actions';
 
 const dateFormatter = new Intl.DateTimeFormat('en-GB', {
   dateStyle: 'medium',
@@ -98,7 +100,7 @@ export const WorkloadDetails = ({
       </header>
 
       <Tabs
-        key={workload.id}
+        key={`tabs-${workload.id}`}
         defaultValue="overview"
         className="flex min-h-0 flex-1 flex-col"
       >
@@ -118,46 +120,49 @@ export const WorkloadDetails = ({
           className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto overscroll-contain px-6 py-5"
         >
           <dl className="flex flex-col gap-1.5">
-            <dt className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
-              Container image
-              <CopyButton value={image} label="container image" />
+            <dt className="text-xs font-medium text-muted-foreground">
+              Status
             </dt>
-            <dd className="font-mono text-[13px] leading-relaxed break-all text-foreground">
-              {image}
+            <dd>
+              <WorkloadStatus
+                status={workload.status}
+                statusMessage={workload.status_message}
+              />
             </dd>
           </dl>
 
           <Separator />
 
-          <dl className="flex flex-col gap-1.5">
-            <dt className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
-              Service ID
-              <CopyButton value={workload.id} label="service ID" />
-            </dt>
-            <dd className="font-mono text-xs leading-relaxed break-all text-foreground">
-              {workload.id}
-            </dd>
-          </dl>
+          <CopyableField
+            label="Container image"
+            value={image}
+            valueClassName="text-[13px]"
+          />
+
+          <Separator />
+
+          <div className="flex flex-col gap-4">
+            <CopyableField label="Namespace" value={workload.namespace} />
+            <CopyableField
+              label="External name"
+              value={workload.external_name}
+            />
+          </div>
+
+          <Separator />
+
+          <CopyableField label="Service ID" value={workload.id} />
 
           <Separator />
 
           <dl className="flex flex-col gap-2.5">
-            <div className="flex items-baseline justify-between gap-4">
-              <dt className="text-xs text-muted-foreground">Created</dt>
-              <dd className="text-[13px] text-foreground tabular-nums">
-                <time dateTime={workload.createdAt} title={workload.createdAt}>
-                  {formatDate(workload.createdAt)}
-                </time>
-              </dd>
-            </div>
-            <div className="flex items-baseline justify-between gap-4">
-              <dt className="text-xs text-muted-foreground">Last updated</dt>
-              <dd className="text-[13px] text-foreground tabular-nums">
-                <time dateTime={workload.updatedAt} title={workload.updatedAt}>
-                  {formatDate(workload.updatedAt)}
-                </time>
-              </dd>
-            </div>
+            <TimestampRow label="Created" value={workload.created_at} />
+            <TimestampRow label="Last updated" value={workload.updated_at} />
+            <TimestampRow
+              label="Last deployed"
+              value={workload.last_deployed_at}
+              emptyLabel="Never"
+            />
           </dl>
         </TabsContent>
 
@@ -180,9 +185,59 @@ export const WorkloadDetails = ({
           </p>
         </TabsContent>
       </Tabs>
+
+      <WorkloadActions key={`actions-${workload.id}`} workload={workload} />
     </aside>
   );
 };
+
+const CopyableField = ({
+  label,
+  value,
+  valueClassName,
+}: {
+  label: string;
+  value: string;
+  valueClassName?: string;
+}) => (
+  <dl className="flex min-w-0 flex-col gap-1.5">
+    <dt className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
+      {label}
+      <CopyButton value={value} label={label.toLowerCase()} />
+    </dt>
+    <dd
+      className={cn(
+        'font-mono text-xs leading-relaxed break-all text-foreground',
+        valueClassName,
+      )}
+    >
+      {value}
+    </dd>
+  </dl>
+);
+
+const TimestampRow = ({
+  label,
+  value,
+  emptyLabel,
+}: {
+  label: string;
+  value: string | null;
+  emptyLabel?: string;
+}) => (
+  <div className="flex items-baseline justify-between gap-4">
+    <dt className="text-xs text-muted-foreground">{label}</dt>
+    <dd className="text-[13px] text-foreground tabular-nums">
+      {value ? (
+        <time dateTime={value} title={value}>
+          {formatDate(value)}
+        </time>
+      ) : (
+        <span className="text-muted-foreground">{emptyLabel ?? '—'}</span>
+      )}
+    </dd>
+  </div>
+);
 
 const CopyButton = ({ value, label }: { value: string; label: string }) => {
   const [status, setStatus] = useState<'idle' | 'copied' | 'error'>('idle');

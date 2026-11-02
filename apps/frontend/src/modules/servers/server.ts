@@ -71,7 +71,7 @@ export const toServer = (node: ClusterNode): Server => ({
   role: node.roles.some((role) => controlPlaneRoles.includes(role))
     ? "control plane"
     : "worker",
-  ip: node.internalIp ?? "—",
+  ip: node.internal_ip ?? "—",
   cpu: node.cpu,
   ram: formatGigabytes(node.memory),
   storage: formatGigabytes(node.storage),

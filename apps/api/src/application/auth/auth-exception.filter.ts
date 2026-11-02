@@ -9,7 +9,7 @@ export class AuthExceptionFilter implements ExceptionFilter {
     const status = exception.statusCode ?? 500;
 
     response.status(status).json({
-      statusCode: status,
+      status_code: status,
       message: exception.body?.message ?? exception.message,
       code: exception.body?.code,
     });

@@ -1,8 +1,8 @@
 export interface Project {
   id: string;
   name: string;
-  createdAt: string;
-  updatedAt: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface CreateProjectPayload {
