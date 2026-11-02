@@ -1,0 +1,24 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: acceleratio
+      POSTGRES_PASSWORD: acceleratio
+      POSTGRES_DB: acceleratio
+    ports:
+      # Host port 5433 avoids clashing with a PostgreSQL already running on 5432.
+      # Bind to loopback: the database holds auth and session data and must not
+      # be reachable from other machines on the network.
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - acceleratio-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U acceleratio -d acceleratio"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+
+volumes:
+  acceleratio-postgres:

@@ -335,8 +335,9 @@ Adding a workload type:
 - `import 'dotenv/config'` sits in the entrypoints (`main.ts`, `vendor/db/client.ts`,
   `vendor/auth/auth.ts`). There is no `@nestjs/config`; read `process.env` directly.
 - Variables: `PORT`, `DATABASE_URL` (required, thrown at startup), `BETTER_AUTH_URL`, `BETTER_AUTH_SECRET`,
-  `CORS_ORIGINS` (comma separated), `KUBECONFIG` (YAML contents, not a path; the default or in-cluster
-  config is used when unset).
+  `CORS_ORIGINS` (comma separated), `KUBECONFIG` (YAML contents or a path to an
+  existing kubeconfig file; an exported shell value wins over `.env`, a leading
+  `~` is expanded, and the default or in-cluster config is used when unset).
 - Every new variable is listed in `apps/api/.env.example`.
 
 ## Auth and errors
