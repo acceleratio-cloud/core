@@ -89,6 +89,7 @@ erDiagram
         workload_status status
         text status_message
         timestamp last_deployed_at
+        timestamp status_observed_at
         timestamp created_at
         timestamp updated_at
     }
@@ -108,7 +109,7 @@ Columns: `id`, `name`, `created_at`, `updated_at`.
 One row per deployable node on the project canvas. `project_id` scopes every read and write.
 
 Columns: `id`, `project_id`, `name`, `type`, `config`, `position`, `external_name`, `status`,
-`status_message`, `last_deployed_at`, `created_at`, `updated_at`.
+`status_message`, `last_deployed_at`, `status_observed_at`, `created_at`, `updated_at`.
 
 Invariants:
 
@@ -120,7 +121,10 @@ Invariants:
   default is `{ "x": 0, "y": 0 }`.
 - `status` starts as `draft` and is constrained by the `workload_status` enum. `status_message`
   carries the operator-facing explanation for the current status; `last_deployed_at` records when a
-  deploy action last ran, not when the deployment finished rolling out.
+  deploy action last ran, not when the deployment finished rolling out. `status_observed_at` records
+  when the workloads observer last wrote the status, so a row's freshness can be judged without
+  reading the cluster; it is stored as `timestamp` without time zone, like the other timestamps, and
+  is not used for ordering.
 - `workload_project_id_idx` covers lookups by project. The unique constraint doubles as the index for
   the project plus deployment name pair.
 

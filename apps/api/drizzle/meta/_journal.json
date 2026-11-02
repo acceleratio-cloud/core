@@ -36,6 +36,13 @@
       "when": 1793567589098,
       "tag": "0004_brave_sue_storm",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1793612367115,
+      "tag": "0005_loose_betty_brant",
+      "breakpoints": true
     }
   ]
 }

@@ -26,6 +26,10 @@ export const workloadsApi = {
     );
     return data;
   },
+  eventsUrl: (projectId: string) => {
+    const baseUrl = (api.defaults.baseURL ?? '').replace(/\/+$/, '');
+    return `${baseUrl}/projects/${projectId}/workloads/events`;
+  },
   get: async (projectId: string, id: string) => {
     const { data } = await api.get<Workload>(
       `/projects/${projectId}/workloads/${id}`,

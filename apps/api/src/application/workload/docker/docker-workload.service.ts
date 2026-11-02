@@ -8,7 +8,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import type { V1Deployment, V1Pod } from '@kubernetes/client-node';
+import type { V1Deployment } from '@kubernetes/client-node';
 import type {
   CreateWorkloadPayload,
   UpdateWorkloadPayload,
@@ -34,6 +34,8 @@ import {
   toNestException,
 } from '@/vendor/kubernetes/kubernetes-error';
 import { KubernetesService } from '@/vendor/kubernetes/kubernetes.service';
+import { WorkloadEventsService } from '@/application/workload/observer/workload-events.service';
+import { WorkloadMutationGuard } from '@/application/workload/observer/workload-mutation-guard';
 import {
   workload,
   type WorkloadRow,
@@ -43,9 +45,7 @@ import { normalizeDockerConfig } from './docker-workload.config';
 import {
   buildDeployment,
   RESTARTED_AT_ANNOTATION,
-  WORKLOAD_ID_LABEL,
 } from './docker-workload.manifests';
-import { deriveStatus } from './docker-workload.status';
 
 const DEFAULT_POSITION: WorkloadPosition = { x: 0, y: 0 };
 const UNIQUE_VIOLATION = '23505';
@@ -98,7 +98,10 @@ const describeError = (error: unknown): string =>
 
 /**
  * Complete Docker workload type: rows, external names, manifests, Deployment
- * lifecycle, status reconciliation and the mapping to the API contract.
+ * lifecycle and the mapping to the API contract.
+ *
+ * Reads are pure database queries. The observer owns status derivation and
+ * writes; lifecycle actions here only record the optimistic state.
  *
  * Every query is scoped to `type = 'docker'`; other types own their own
  * services and never pass through this one.
@@ -114,6 +117,8 @@ export class DockerWorkloadService implements WorkloadTypeService {
     private readonly projectService: ProjectService,
     private readonly isolation: ProjectIsolationService,
     private readonly kubernetes: KubernetesService,
+    private readonly guard: WorkloadMutationGuard,
+    private readonly events: WorkloadEventsService,
   ) {}
 
   async list(projectId: string): Promise<Workload[]> {
@@ -125,13 +130,7 @@ export class DockerWorkloadService implements WorkloadTypeService {
       )
       .orderBy(asc(workload.created_at));
 
-    if (rows.length === 0) {
-      return [];
-    }
-
-    const reconciled = await this.reconcile(projectId, rows);
-
-    return reconciled.map((row) => this.toWorkload(row));
+    return rows.map((row) => this.toWorkload(row));
   }
 
   async create(
@@ -280,6 +279,8 @@ export class DockerWorkloadService implements WorkloadTypeService {
       throw this.mapClusterError(error);
     }
 
+    this.guard.noteMutation(row.id);
+
     return this.persistState(row.id, {
       status: 'stopped',
       status_message: null,
@@ -325,6 +326,8 @@ export class DockerWorkloadService implements WorkloadTypeService {
       throw this.mapClusterError(error);
     }
 
+    this.guard.noteMutation(row.id);
+
     return this.persistState(row.id, {
       status: 'deploying',
       status_message: null,
@@ -347,6 +350,8 @@ export class DockerWorkloadService implements WorkloadTypeService {
       throw this.mapClusterError(error);
     }
 
+    this.guard.noteMutation(row.id);
+
     await this.db
       .delete(workload)
       .where(and(eq(workload.id, id), eq(workload.project_id, projectId)));
@@ -360,6 +365,8 @@ export class DockerWorkloadService implements WorkloadTypeService {
     } catch (error) {
       throw this.mapClusterError(error);
     }
+
+    this.guard.noteMutation(row.id);
 
     return this.persistState(row.id, {
       status: 'deploying',
@@ -478,109 +485,16 @@ export class DockerWorkloadService implements WorkloadTypeService {
       throw new NotFoundException('Workload not found');
     }
 
+    this.events.publish({
+      workload_id: row.id,
+      project_id: row.project_id,
+      status: row.status,
+      status_message: row.status_message,
+      status_observed_at: row.status_observed_at?.toISOString() ?? null,
+      updated_at: row.updated_at.toISOString(),
+    });
+
     return this.toWorkload(row);
-  }
-
-  /**
-   * One Deployment list and one Pod list per project. Only rows whose observed
-   * status changed are written, so a polling console does not churn
-   * updated_at on every request. A missing namespace or an unreachable cluster
-   * falls back to the stored rows.
-   */
-  private async reconcile(
-    projectId: string,
-    rows: WorkloadRow[],
-  ): Promise<WorkloadRow[]> {
-    const namespace = projectNamespace(projectId);
-    let deployments: V1Deployment[];
-    let pods: V1Pod[];
-
-    try {
-      const [deploymentList, podList] = await Promise.all([
-        this.kubernetes.appsV1.listNamespacedDeployment({ namespace }),
-        this.kubernetes.coreV1.listNamespacedPod({ namespace }),
-      ]);
-
-      deployments = deploymentList.items ?? [];
-      pods = podList.items ?? [];
-    } catch (error) {
-      this.logger.warn(
-        `Skipped workload reconciliation for project ${projectId}: ${describeError(error)}`,
-      );
-
-      return rows;
-    }
-
-    const deploymentsByName = new Map<string, V1Deployment>();
-
-    for (const deployment of deployments) {
-      const name = deployment.metadata?.name;
-
-      if (name !== undefined) {
-        deploymentsByName.set(name, deployment);
-      }
-    }
-
-    const podsByWorkloadId = new Map<string, V1Pod[]>();
-
-    for (const pod of pods) {
-      const workloadId = pod.metadata?.labels?.[WORKLOAD_ID_LABEL];
-
-      if (workloadId === undefined) {
-        continue;
-      }
-
-      const group = podsByWorkloadId.get(workloadId);
-
-      if (group !== undefined) {
-        group.push(pod);
-      } else {
-        podsByWorkloadId.set(workloadId, [pod]);
-      }
-    }
-
-    const reconciled: WorkloadRow[] = [];
-
-    for (const row of rows) {
-      const deployment = deploymentsByName.get(row.external_name);
-      const workloadPods = podsByWorkloadId.get(row.id) ?? [];
-
-      // Nothing was ever deployed (or the namespace is gone): keep the stored
-      // state instead of resetting a draft or an intentionally stopped row.
-      if (deployment === undefined && workloadPods.length === 0) {
-        reconciled.push(row);
-        continue;
-      }
-
-      const derived = deriveStatus(deployment, workloadPods);
-
-      if (
-        derived.status === row.status &&
-        derived.status_message === row.status_message
-      ) {
-        reconciled.push(row);
-        continue;
-      }
-
-      const [updated] = await this.db
-        .update(workload)
-        .set({
-          status: derived.status,
-          status_message: derived.status_message,
-        })
-        .where(eq(workload.id, row.id))
-        .returning();
-
-      reconciled.push(
-        updated ?? {
-          ...row,
-          status: derived.status,
-          status_message: derived.status_message,
-        },
-      );
-    }
-
-    return reconciled;
   }
 
   private mapClusterError(error: unknown): HttpException {
@@ -642,6 +556,7 @@ export class DockerWorkloadService implements WorkloadTypeService {
       position: row.position,
       status: row.status,
       status_message: row.status_message,
+      status_observed_at: row.status_observed_at?.toISOString() ?? null,
       external_name: row.external_name,
       namespace: projectNamespace(row.project_id),
       last_deployed_at: row.last_deployed_at?.toISOString() ?? null,

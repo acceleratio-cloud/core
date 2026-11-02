@@ -42,6 +42,8 @@ export const workload = pgTable(
     external_name: varchar('external_name', { length: 63 }).notNull(),
     status: workloadStatusEnum('status').notNull().default('draft'),
     status_message: text('status_message'),
+    // When the observer last derived the stored status from the cluster.
+    status_observed_at: timestamp('status_observed_at'),
     last_deployed_at: timestamp('last_deployed_at'),
     created_at: timestamp('created_at').defaultNow().notNull(),
     updated_at: timestamp('updated_at')

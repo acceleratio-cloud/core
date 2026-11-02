@@ -1,20 +1,17 @@
-import { Logger } from '@nestjs/common';
-import type {
-  V1Deployment,
-  V1DeploymentCondition,
-  V1Pod,
-} from '@kubernetes/client-node';
+import type { V1Deployment } from '@kubernetes/client-node';
 import type { WorkloadType } from '@acceleratio/shared';
 import type { ProjectIsolationService } from '@/application/project/project-isolation.service';
 import type { ProjectService } from '@/application/project/project.service';
 import type { Database } from '@/vendor/db/database.constants';
 import type { KubernetesService } from '@/vendor/kubernetes/kubernetes.service';
+import type { WorkloadEventsService } from '../../observer/workload-events.service';
+import type { WorkloadMutationGuard } from '../../observer/workload-mutation-guard';
 import type { WorkloadRow } from '../../schemas/workload.schema';
 import { DockerWorkloadService } from '../docker-workload.service';
 
 // @kubernetes/client-node is ESM-only and Jest runs CommonJS. None of these
-// collaborators is exercised here; only the classes are needed to construct
-// the service.
+// collaborators is exercised through a real client; only the classes are
+// needed to construct the service.
 jest.mock('@/vendor/kubernetes/kubernetes.service', () => ({
   KubernetesService: class KubernetesService {},
 }));
@@ -28,6 +25,7 @@ jest.mock('@/application/project/project-isolation.service', () => ({
 const projectId = '2f1c9a3e-8b7d-4e6f-9a0b-1c2d3e4f5a6b';
 const workloadId = '3f9a1b2c-4d5e-6f70-8192-a3b4c5d6e7f8';
 const externalName = 'my-api-3f9a1b2c';
+const namespace = `project-${projectId}`;
 
 const baseRow: WorkloadRow = {
   id: workloadId,
@@ -39,36 +37,18 @@ const baseRow: WorkloadRow = {
   external_name: externalName,
   status: 'running',
   status_message: null,
+  status_observed_at: null,
   last_deployed_at: new Date('2026-11-01T10:00:00.000Z'),
   created_at: new Date('2026-11-01T09:00:00.000Z'),
   updated_at: new Date('2026-11-01T09:30:00.000Z'),
 };
 
-const createDeployment = (
-  conditions: V1DeploymentCondition[],
-): V1Deployment => ({
+const createDeployment = (): V1Deployment => ({
   metadata: { name: externalName },
   spec: {
     replicas: 1,
     selector: { matchLabels: {} },
     template: {},
-  },
-  status: { conditions },
-});
-
-const createPod = (reason: string): V1Pod => ({
-  metadata: { labels: { 'acceleratio.io/workload-id': workloadId } },
-  status: {
-    containerStatuses: [
-      {
-        name: 'main',
-        image: 'nginx:1.25',
-        imageID: '',
-        ready: false,
-        restartCount: 0,
-        state: { waiting: { reason } },
-      },
-    ],
   },
 });
 
@@ -115,9 +95,11 @@ const createDatabase = () => {
   const updateWhere = jest.fn().mockReturnValue({ returning });
   const set = jest.fn().mockReturnValue({ where: updateWhere });
   const update = jest.fn().mockReturnValue({ set });
+  const deleteWhere = jest.fn();
+  const remove = jest.fn().mockReturnValue({ where: deleteWhere });
 
   return {
-    db: { select, update } as unknown as Database,
+    db: { select, update, delete: remove } as unknown as Database,
     select,
     selectWhere,
     orderBy,
@@ -125,36 +107,64 @@ const createDatabase = () => {
     update,
     set,
     returning,
+    remove,
+    deleteWhere,
   };
 };
 
 const createService = () => {
   const database = createDatabase();
-  const appsV1 = { listNamespacedDeployment: jest.fn() };
-  const coreV1 = { listNamespacedPod: jest.fn() };
+  const appsV1 = {
+    // `list()` must never reach Kubernetes. A rejecting stub turns an
+    // accidental call into a failed test instead of a silent success.
+    listNamespacedDeployment: jest
+      .fn()
+      .mockRejectedValue(new Error('list() must not call Kubernetes')),
+    readNamespacedDeployment: jest.fn(),
+    createNamespacedDeployment: jest.fn(),
+    replaceNamespacedDeployment: jest.fn(),
+    deleteNamespacedDeployment: jest.fn(),
+  };
+  const coreV1 = {
+    listNamespacedPod: jest
+      .fn()
+      .mockRejectedValue(new Error('list() must not call Kubernetes')),
+  };
   const kubernetes = { appsV1, coreV1 } as unknown as KubernetesService;
   const exists = jest.fn();
   const projectService = { exists } as unknown as ProjectService;
+  const ensure = jest.fn();
   const isolation = {
-    ensure: jest.fn(),
+    ensure,
     remove: jest.fn(),
   } as unknown as ProjectIsolationService;
+  const noteMutation = jest.fn();
+  const guard = { noteMutation } as unknown as WorkloadMutationGuard;
+  const publish = jest.fn();
+  const events = { publish } as unknown as WorkloadEventsService;
   const service = new DockerWorkloadService(
     database.db,
     projectService,
     isolation,
     kubernetes,
+    guard,
+    events,
   );
 
-  return { service, ...database, appsV1, coreV1, exists };
+  return {
+    service,
+    ...database,
+    appsV1,
+    coreV1,
+    ensure,
+    exists,
+    noteMutation,
+    publish,
+  };
 };
 
-describe('DockerWorkloadService.list reconciliation', () => {
-  afterEach(() => {
-    jest.restoreAllMocks();
-  });
-
-  it('returns stored rows without a write when the cluster is unavailable', async () => {
+describe('DockerWorkloadService.list', () => {
+  it('returns stored rows without calling Kubernetes', async () => {
     const { service, orderBy, update, appsV1, coreV1 } = createService();
     const stored: WorkloadRow = {
       ...baseRow,
@@ -163,11 +173,6 @@ describe('DockerWorkloadService.list reconciliation', () => {
     };
 
     orderBy.mockResolvedValue([stored]);
-    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
-    appsV1.listNamespacedDeployment.mockRejectedValue(
-      new Error('cluster unavailable'),
-    );
-    coreV1.listNamespacedPod.mockResolvedValue({ items: [] });
 
     const result = await service.list(projectId);
 
@@ -177,19 +182,19 @@ describe('DockerWorkloadService.list reconciliation', () => {
       status: 'failed',
       status_message: 'previous failure',
     });
+    expect(appsV1.listNamespacedDeployment).not.toHaveBeenCalled();
+    expect(coreV1.listNamespacedPod).not.toHaveBeenCalled();
     expect(update).not.toHaveBeenCalled();
   });
 
   it('strips a legacy port from the config returned to the API', async () => {
-    const { service, orderBy, update, appsV1, coreV1 } = createService();
+    const { service, orderBy, update } = createService();
     const legacyRow = {
       ...baseRow,
       config: { docker_image: 'nginx:1.25', port: 8080 },
     } as WorkloadRow;
 
     orderBy.mockResolvedValue([legacyRow]);
-    appsV1.listNamespacedDeployment.mockResolvedValue({ items: [] });
-    coreV1.listNamespacedPod.mockResolvedValue({ items: [] });
 
     const result = await service.list(projectId);
 
@@ -198,92 +203,167 @@ describe('DockerWorkloadService.list reconciliation', () => {
     expect(result[0].config).not.toHaveProperty('port');
     expect(update).not.toHaveBeenCalled();
   });
+});
 
-  it('does not write when the observed status already matches the row', async () => {
-    const { service, orderBy, update, appsV1, coreV1 } = createService();
-
-    orderBy.mockResolvedValue([baseRow]);
-    appsV1.listNamespacedDeployment.mockResolvedValue({
-      items: [createDeployment([{ type: 'Available', status: 'True' }])],
-    });
-    coreV1.listNamespacedPod.mockResolvedValue({ items: [] });
-
-    const result = await service.list(projectId);
-
-    expect(result).toHaveLength(1);
-    expect(result[0]).toMatchObject({
-      id: workloadId,
-      status: 'running',
-      status_message: null,
-    });
-    expect(update).not.toHaveBeenCalled();
-  });
-
-  it('persists deploying to running when a replica is available', async () => {
-    const { service, orderBy, update, set, returning, appsV1, coreV1 } =
-      createService();
-    const deploying: WorkloadRow = {
+describe('DockerWorkloadService lifecycle actions', () => {
+  it('deploys a missing Deployment and publishes the optimistic status', async () => {
+    const {
+      service,
+      limit,
+      set,
+      returning,
+      appsV1,
+      ensure,
+      noteMutation,
+      publish,
+    } = createService();
+    const deployed: WorkloadRow = {
       ...baseRow,
       status: 'deploying',
       status_message: null,
+      status_observed_at: new Date('2026-11-02T10:00:00.000Z'),
+      last_deployed_at: new Date('2026-11-02T10:00:00.000Z'),
+      updated_at: new Date('2026-11-02T10:00:01.000Z'),
     };
-    const updated: WorkloadRow = { ...deploying, status: 'running' };
 
-    orderBy.mockResolvedValue([deploying]);
-    returning.mockResolvedValue([updated]);
-    appsV1.listNamespacedDeployment.mockResolvedValue({
-      items: [createDeployment([{ type: 'Available', status: 'True' }])],
-    });
-    coreV1.listNamespacedPod.mockResolvedValue({
-      items: [createPod('ContainerCreating')],
-    });
+    limit.mockResolvedValue([baseRow]);
+    appsV1.readNamespacedDeployment.mockResolvedValue(undefined);
+    appsV1.createNamespacedDeployment.mockResolvedValue({});
+    returning.mockResolvedValue([deployed]);
 
-    const result = await service.list(projectId);
+    const result = await service.deploy(projectId, workloadId);
 
-    expect(update).toHaveBeenCalledTimes(1);
-    expect(set).toHaveBeenCalledWith({
-      status: 'running',
+    expect(ensure).toHaveBeenCalledWith(projectId);
+    expect(appsV1.createNamespacedDeployment).toHaveBeenCalledTimes(1);
+    expect(noteMutation).toHaveBeenCalledWith(workloadId);
+    expect(set).toHaveBeenCalledTimes(1);
+
+    const persisted = firstArgument(set) as {
+      status?: string;
+      status_message?: string | null;
+      last_deployed_at?: Date;
+    };
+
+    expect(persisted.status).toBe('deploying');
+    expect(persisted.status_message).toBeNull();
+    expect(persisted.last_deployed_at).toBeInstanceOf(Date);
+    expect(publish).toHaveBeenCalledWith({
+      workload_id: workloadId,
+      project_id: projectId,
+      status: 'deploying',
       status_message: null,
+      status_observed_at: '2026-11-02T10:00:00.000Z',
+      updated_at: '2026-11-02T10:00:01.000Z',
     });
-    expect(result[0]).toMatchObject({
-      id: workloadId,
-      status: 'running',
-      status_message: null,
-    });
+    expect(result).toMatchObject({ id: workloadId, status: 'deploying' });
   });
 
-  it('persists failed with the image pull reason when no replica is available', async () => {
-    const { service, orderBy, update, set, returning, appsV1, coreV1 } =
+  it('stops a Deployment and publishes the optimistic status', async () => {
+    const { service, limit, set, returning, appsV1, noteMutation, publish } =
       createService();
-    const deploying: WorkloadRow = {
+    const stopped: WorkloadRow = {
+      ...baseRow,
+      status: 'stopped',
+      status_message: null,
+      status_observed_at: new Date('2026-11-02T10:00:00.000Z'),
+      updated_at: new Date('2026-11-02T10:00:01.000Z'),
+    };
+
+    limit.mockResolvedValue([baseRow]);
+    appsV1.readNamespacedDeployment.mockResolvedValue(createDeployment());
+    appsV1.replaceNamespacedDeployment.mockResolvedValue({});
+    returning.mockResolvedValue([stopped]);
+
+    const result = await service.stop(projectId, workloadId);
+
+    const replace = firstArgument(appsV1.replaceNamespacedDeployment) as {
+      name?: string;
+      namespace?: string;
+      body?: { spec?: { replicas?: number } };
+    };
+
+    expect(replace.name).toBe(externalName);
+    expect(replace.namespace).toBe(namespace);
+    expect(replace.body?.spec?.replicas).toBe(0);
+    expect(noteMutation).toHaveBeenCalledWith(workloadId);
+    expect(set).toHaveBeenCalledWith({
+      status: 'stopped',
+      status_message: null,
+    });
+    expect(publish).toHaveBeenCalledWith({
+      workload_id: workloadId,
+      project_id: projectId,
+      status: 'stopped',
+      status_message: null,
+      status_observed_at: '2026-11-02T10:00:00.000Z',
+      updated_at: '2026-11-02T10:00:01.000Z',
+    });
+    expect(result).toMatchObject({ id: workloadId, status: 'stopped' });
+  });
+
+  it('restarts a Deployment with a new deployment time and publishes', async () => {
+    const { service, limit, set, returning, appsV1, noteMutation, publish } =
+      createService();
+    const restarted: WorkloadRow = {
       ...baseRow,
       status: 'deploying',
       status_message: null,
+      status_observed_at: new Date('2026-11-02T10:00:00.000Z'),
+      last_deployed_at: new Date('2026-11-02T10:00:00.000Z'),
+      updated_at: new Date('2026-11-02T10:00:01.000Z'),
     };
-    const failed: WorkloadRow = {
-      ...deploying,
-      status: 'failed',
-      status_message: 'ImagePullBackOff',
+    const before = Date.now();
+
+    limit.mockResolvedValue([baseRow]);
+    appsV1.readNamespacedDeployment.mockResolvedValue(createDeployment());
+    appsV1.replaceNamespacedDeployment.mockResolvedValue({});
+    returning.mockResolvedValue([restarted]);
+
+    const result = await service.restart(projectId, workloadId);
+
+    expect(appsV1.replaceNamespacedDeployment).toHaveBeenCalledTimes(1);
+    expect(noteMutation).toHaveBeenCalledWith(workloadId);
+    expect(set).toHaveBeenCalledTimes(1);
+
+    const persisted = firstArgument(set) as {
+      status?: string;
+      status_message?: string | null;
+      last_deployed_at?: Date;
     };
 
-    orderBy.mockResolvedValue([deploying]);
-    returning.mockResolvedValue([failed]);
-    appsV1.listNamespacedDeployment.mockResolvedValue({
-      items: [createDeployment([{ type: 'Available', status: 'False' }])],
+    expect(persisted.status).toBe('deploying');
+    expect(persisted.status_message).toBeNull();
+    expect(persisted.last_deployed_at?.getTime()).toBeGreaterThanOrEqual(
+      before,
+    );
+    expect(publish).toHaveBeenCalledWith({
+      workload_id: workloadId,
+      project_id: projectId,
+      status: 'deploying',
+      status_message: null,
+      status_observed_at: '2026-11-02T10:00:00.000Z',
+      updated_at: '2026-11-02T10:00:01.000Z',
     });
-    coreV1.listNamespacedPod.mockResolvedValue({
-      items: [createPod('ImagePullBackOff')],
-    });
+    expect(result).toMatchObject({ id: workloadId, status: 'deploying' });
+  });
 
-    const result = await service.list(projectId);
+  it('removes the Deployment and the row, then fences the observer', async () => {
+    const { service, limit, deleteWhere, appsV1, noteMutation, publish } =
+      createService();
 
-    expect(update).toHaveBeenCalledTimes(1);
-    expect(set).toHaveBeenCalledWith({
-      status: 'failed',
-      status_message: 'ImagePullBackOff',
+    limit.mockResolvedValue([baseRow]);
+    appsV1.deleteNamespacedDeployment.mockResolvedValue({});
+    deleteWhere.mockResolvedValue(undefined);
+
+    await service.remove(projectId, workloadId);
+
+    expect(appsV1.deleteNamespacedDeployment).toHaveBeenCalledWith({
+      name: externalName,
+      namespace,
     });
-    expect(result[0].status).toBe('failed');
-    expect(result[0].status_message).toContain('ImagePullBackOff');
+    expect(noteMutation).toHaveBeenCalledWith(workloadId);
+    expect(deleteWhere).toHaveBeenCalledTimes(1);
+    expect(publish).not.toHaveBeenCalled();
   });
 });
 
@@ -312,7 +392,7 @@ describe('DockerWorkloadService type scope', () => {
       id: workloadId,
       type: 'docker',
       external_name: externalName,
-      namespace: `project-${projectId}`,
+      namespace,
     });
     expect(queryParams(firstArgument(selectWhere))).toEqual(
       expect.arrayContaining([workloadId, projectId, 'docker']),

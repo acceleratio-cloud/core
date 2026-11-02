@@ -3,29 +3,48 @@ import {
   Controller,
   Delete,
   Get,
+  Header,
   HttpCode,
   HttpStatus,
   Param,
   ParseUUIDPipe,
   Patch,
   Post,
+  Sse,
 } from '@nestjs/common';
+import type { MessageEvent } from '@nestjs/common';
 import type {
   CreateWorkloadPayload,
   UpdateWorkloadPayload,
   Workload,
 } from '@acceleratio/shared';
+import type { Observable } from 'rxjs';
+import { WorkloadEventsService } from './observer/workload-events.service';
 import { WorkloadService } from './workload.service';
 
 @Controller('projects/:projectId/workloads')
 export class WorkloadController {
-  constructor(private readonly workloadService: WorkloadService) {}
+  constructor(
+    private readonly workloadService: WorkloadService,
+    // Not `events`: an instance property would shadow the `events()` route
+    // handler of the same name on the prototype.
+    private readonly workloadEvents: WorkloadEventsService,
+  ) {}
 
   @Get()
   list(
     @Param('projectId', ParseUUIDPipe) projectId: string,
   ): Promise<Workload[]> {
     return this.workloadService.list(projectId);
+  }
+
+  // Registered before `:id`: the SSE route path is not a UUID.
+  @Sse('events')
+  @Header('X-Accel-Buffering', 'no')
+  events(
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+  ): Observable<MessageEvent> {
+    return this.workloadEvents.toSse(projectId);
   }
 
   @Get(':id')

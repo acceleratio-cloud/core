@@ -27,12 +27,23 @@ export interface Workload {
   position: WorkloadPosition;
   status: WorkloadStatus;
   status_message: string | null;
+  /** When the stored status was last derived from the cluster. */
+  status_observed_at: string | null;
   /** Deployment name in the cluster. Generated once, never changes. */
   external_name: string;
   /** Kubernetes namespace that holds the workload: `project-<project_id>`. */
   namespace: string;
   last_deployed_at: string | null;
   created_at: string;
+  updated_at: string;
+}
+
+export interface WorkloadStatusEvent {
+  workload_id: string;
+  project_id: string;
+  status: WorkloadStatus;
+  status_message: string | null;
+  status_observed_at: string | null;
   updated_at: string;
 }
 

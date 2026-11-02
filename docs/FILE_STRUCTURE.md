@@ -141,7 +141,7 @@ Rules:
 # Backend structure (apps/api)
 
 apps/api/src/
-  main.ts - bootstrap: CORS from CORS_ORIGINS, port from PORT
+  main.ts - bootstrap: CORS from CORS_ORIGINS, port from PORT, shutdown hooks
   app.module.ts - root module: VendorModule + ApplicationModule
   common/ - helpers shared by submodules (input validation, DNS naming, exception filters)
   application/ - product features
@@ -153,8 +153,18 @@ apps/api/src/
         [type]-workload.service.ts - the full service for this type
         [type]-workload.manifests.ts - pure Kubernetes object builders
         [type]-workload.status.ts - pure cluster state to status mapping
+        [type]-workload.deriver.ts - WorkloadStatusDeriver for this type
         [type]-workload.config.ts - config normalization for this type
         tests/ - unit tests for this type
+      workload-status-deriver.ts - workload only: type to cluster snapshot interface
+      workload-status-deriver.registry.ts - workload only: derivers looked up by type
+      observer/ - workload only: cluster observation, see "Workload observer"
+        workload-observer.service.ts - supervised informers, debounce and resync
+        workload-snapshot.store.ts - in-memory Deployments and Pods by workload id
+        workload-status.writer.ts - the single observer-driven status writer
+        workload-mutation-guard.ts - fences watch events against lifecycle actions
+        workload-events.service.ts - project-scoped SSE fan-out
+        tests/ - unit tests for the observer
       schemas/ - Drizzle tables owned by this submodule (optional)
         [submodule].schema.ts
       tests/ - unit tests for this submodule; never colocate *.spec.ts next to source
@@ -162,7 +172,7 @@ apps/api/src/
     vendor.module.ts - imports the db, auth and kubernetes modules
     db/ - pool, DATABASE token, better-auth tables
     auth/ - better-auth instance and its module (global by default)
-    kubernetes/ - lazily built API clients
+    kubernetes/ - lazily built API clients and the cluster-wide watch service
 
 apps/api/tests/ - end-to-end tests: jest-e2e.json and *.e2e-spec.ts
 
@@ -184,7 +194,14 @@ registered in `application.module.ts`:
     NodeService,
     ProjectService,
     ProjectIsolationService,
+    DockerWorkloadStatusDeriver,
     DockerWorkloadService,
+    WorkloadStatusDeriverRegistry,
+    WorkloadEventsService,
+    WorkloadMutationGuard,
+    WorkloadSnapshotStore,
+    WorkloadStatusWriter,
+    WorkloadObserverService,
     WorkloadTypeRegistry,
     WorkloadTypeResolver,
     WorkloadService,
@@ -223,10 +240,10 @@ Adding a submodule:
 
 `workload/` is the one submodule that stores several kinds of resource. Each type owns a folder with a
 complete service instead of sharing a runtime adapter: `docker/` holds `DockerWorkloadService`, its
-manifests, status derivation, config normalization and tests. Common operations (project existence,
-external names, row mapping, status persistence) are duplicated per type on purpose: a new type must be
-free to diverge without changing another type's code. Each type service scopes its own row queries to
-its type (`type = '<type>'`); rows of other types never enter it.
+manifests, status derivation, status deriver, config normalization and tests. Common operations (project
+existence, external names, row mapping, status persistence) are duplicated per type on purpose: a new
+type must be free to diverge without changing another type's code. Each type service scopes its own row
+queries to its type (`type = '<type>'`); rows of other types never enter it.
 
 The shared layer stays small:
 
@@ -245,11 +262,138 @@ The shared layer stays small:
 Adding a workload type:
 
 1) create `workload/<type>/` with `<type>-workload.service.ts` implementing `WorkloadTypeService`, plus
-   its manifests, status, config and `tests/`
-2) register the service in `workload-type.registry.ts`; `DockerWorkloadService` stays untouched
+   its manifests, status, deriver, config and `tests/`
+2) register the service in `workload-type.registry.ts` and the deriver in
+   `workload-status-deriver.registry.ts`; `DockerWorkloadService` and the Docker deriver stay untouched
 3) add the type to the shared contract and the Drizzle enum in `schemas/workload.schema.ts`, then
    generate the migration
-4) add the service to `application.module.ts` providers
+4) add the service and deriver to `application.module.ts` providers
+
+## Workload observer
+
+`workload/observer/` keeps the stored status equal to the cluster even when no console is open.
+`WorkloadObserverService` starts on bootstrap unless `WORKLOAD_OBSERVER_ENABLED=false` and stops with
+the application. `KubernetesWatchService` in `vendor/kubernetes/` owns the cluster-wide paths and list
+calls.
+
+### Sources and snapshot
+
+- Two cluster-wide informers: Deployments selected by
+  `app.kubernetes.io/managed-by=acceleratio` and Pods selected by the existence of the
+  `acceleratio.io/workload-id` label.
+- `WorkloadSnapshotStore` keys both kinds by `acceleratio.io/workload-id`; objects without that label
+  are ignored. Pods are grouped by UID, or by name when the UID is absent, so updates do not duplicate
+  entries. A workload id is accepted only when it is a canonical UUID: malformed objects are ignored
+  before the id reaches the store or SQL.
+- Add, update and delete events update the snapshot. Status writes are debounced by 250 ms with a
+  maximum wait of 1 s.
+- A full resync runs at startup and every `WORKLOAD_OBSERVER_RESYNC_MS` (default 60000). The timer is
+  `unref`'d. A failed list leaves the previous snapshot and database rows untouched.
+- A resync stamps its lists with the moment the requests started, not the moment they returned, and
+  merges them into the snapshot instead of rebuilding it: a watch event applied while the lists were in
+  flight is newer than what they returned, so a Deployment add, update or delete and any Pod change
+  survive the merge. The Deployment part and the Pods are merged against their own timestamps, so a
+  Pod event never pins a stale Deployment from the list and the reverse. A workload id the list no
+  longer contains keeps an entry with no Deployment and no Pods, which keeps event-driven drift
+  detection correct while `reconcileAll()` still covers rows with no entry.
+- Each Pod carries its own observation time, so the Pod merge is per key: an event that landed after
+  the list started keeps its version for that Pod only, without pinning the sibling Pods the list says
+  are gone, and an untouched Pod takes the list value. A Pod delete leaves a tombstone under its key,
+  so a list request that started before the delete cannot resurrect it. The full sweep calls
+  `retain(liveIds, sweepStartedAt)` so tombstones for rows that no longer exist are dropped while
+  entries touched after the sweep began are kept.
+- Each informer is supervised: an error stops it and schedules a restart with 1, 2, 4, ... up to 30 s
+  backoff. A successful informer start (initial list and watch established) resets the delay, and a
+  start that fails or errors during the initial list keeps the growing backoff. Resync runs
+  independently of watch health.
+- A cluster that is unavailable at startup does not fail bootstrap: the API serves database reads, logs
+  the failure and keeps retrying.
+
+### Single writer
+
+- Only two paths update `status` and `status_message`: `WorkloadStatusWriter` for observer-derived
+  status, and `persistState` in the type service for an optimistic action status. `list` and `get` are
+  pure database reads and never call Kubernetes.
+- `WorkloadStatusWriter` reads the affected rows in one `SELECT ... WHERE id IN (...)`, picks the
+  deriver by row type and writes only when `status` or `status_message` changes. A changed write sets
+  `status_observed_at`; unchanged rows keep `updated_at` untouched.
+- `reconcileAll()` is the full sweep after every successful resync. It also visits rows with no snapshot
+  entry, which is how a Deployment deleted while the API was down is discovered.
+- Derivation awaits (the namespace probe among others) while a user action or a watch event can land.
+  The writer therefore re-reads the mutation fence and the snapshot entry immediately before the write:
+  a row whose fence is now violated is skipped, and a row whose snapshot moved on (new observation time,
+  different Deployment or Pod set) is re-derived up to three times. A row that keeps changing is dropped
+  because the event that changed it schedules its own write.
+- The final `UPDATE` is conditional on the row still being the one the writer derived from (`id`,
+  `status` and `status_message` with a null-safe comparison, plus the stored wall clock of `updated_at`
+  compared as a millisecond-truncated timestamp string; binding the string instead of a `Date` keeps
+  that comparison independent of the process timezone). An action that commits after the revalidation
+  but before the statement changes one of those columns, even when it writes the same status, so the
+  write matches no row; the writer then skips the row without publishing an event and the action's
+  status stays.
+- `write` and `reconcileAll` are serialized through one promise queue, so two writes cannot persist out
+  of order; a rejected write rejects only its caller and leaves the queue usable.
+- `status_observed_at` marks the last observer write. Action updates leave it alone.
+
+### Drift and fencing
+
+- A missing Deployment is drift only for a deployed row (`last_deployed_at` is set) whose project
+  namespace still exists. The writer stores `failed` with `Deployment is missing from the cluster`; a
+  row that was never deployed stays `draft`.
+- A namespace probe that returns 404 is skipped: the project is being deleted. Other probe errors are
+  logged and the row is skipped. Namespace answers are cached for 5 s; errors are not cached, so the
+  next sweep retries them.
+- A Deployment delete event leaves the workload id in the snapshot with a fresh observation time, so
+  event-driven drift is immediate. A Pod event alone does not imply a missing Deployment; the snapshot
+  records whether a Deployment event or resync has been observed for that id.
+- After every successful Deployment create, replace or delete, the action calls
+  `WorkloadMutationGuard.noteMutation(id)` before the optimistic database update or row delete. The
+  writer skips a row when `snapshot.deploymentObservedAt(id) <= guard.mutatedAt(id)`, so a watch event
+  received before the action cannot undo it. Only the Deployment part's clock releases the fence: a Pod
+  event alone must not release it while the cached Deployment still predates the action. Guard entries
+  expire after 5 minutes.
+
+### Status derivation
+
+- `docker/docker-workload.status.ts` is the pure priority chain: `stopped` when replicas are 0,
+  `deploying` for a stale `observedGeneration`, `failed` for a stalled rollout or a failing pod,
+  `running` when the rollout is fully available, and `deploying` otherwise.
+- Each type supplies a `WorkloadStatusDeriver` (`docker/docker-workload.deriver.ts` for Docker) and
+  `WorkloadStatusDeriverRegistry` looks it up by `type`. A row whose type has no deriver is skipped with
+  a warning. Adding a type means adding its deriver and registering it.
+
+### SSE
+
+- `GET /projects/:projectId/workloads/events` is the project-scoped stream (`@Sse`), declared before
+  `:id` so the path is not parsed as a UUID. It sets `X-Accel-Buffering: no`.
+- Status frames are unnamed `data:` messages carrying `WorkloadStatusEvent`; a named `heartbeat` event
+  follows every 20 s. The writer publishes on change and `persistState` publishes action states.
+- The console opens an `EventSource` with credentials, ignores events older than the row's `updated_at`,
+  and merges the rest by `workload_id`; an event that names an unknown workload refreshes the list. The
+  stream carries status only, so the list is also re-read on every stream open (including the first,
+  which clears an error from a failed initial load), on a 60 s reconcile, and when the tab becomes
+  visible; that reconciliation picks up workloads created or deleted by other clients. An HTTP error
+  closes the stream permanently, so the console re-creates the `EventSource` after a delay. The list
+  reconciliation is not status polling.
+- The controller method is `events()` and the injected service is `workloadEvents`: an instance property
+  named `events` would shadow the route handler.
+
+### RBAC
+
+- The observer needs cluster-wide `get`, `list` and `watch` on `deployments` (`apps`) and `pods`
+  (core). `get` on `namespaces` (core) is the drift probe.
+- The workload actions add `get`, `create`, `update` and `delete` on `deployments` (`apps`).
+- Project isolation adds `get`, `create` and `delete` on `namespaces` (core), `get` on
+  `customresourcedefinitions` (`apiextensions.k8s.io`) and `get`, `create` and `update` on
+  `ciliumnetworkpolicies` (`cilium.io/v2`).
+- The cluster inventory needs `list` on `nodes` (core).
+- The dev setup uses an admin kubeconfig. An in-cluster installation needs a `ClusterRole` with those
+  rules and a `ClusterRoleBinding` to the API service account.
+
+### Limitation
+
+The writer assumes one API process. Multiple replicas each observe and write, so they can publish
+duplicate status events; a leader lock is future work.
 
 ## Controllers
 
@@ -300,7 +444,8 @@ Adding a workload type:
 - Migrations are generated into `apps/api/drizzle` with `bun run db:generate` and applied with
   `bun run db:migrate`. `bun run db:check` verifies the journal, snapshots and SQL files agree without
   a database. Commit the schema edit, the SQL file, the new snapshot and `_journal.json` together; the
-  table reference and data-model invariants live in [DATABASE.md](./DATABASE.md).
+  table reference and data-model invariants live in [DATABASE.md](./DATABASE.md). Migration `0005_*`
+  adds `status_observed_at` to `workload`.
 
 ## Code style
 
@@ -339,7 +484,9 @@ Adding a workload type:
 - Variables: `PORT`, `DATABASE_URL` (required, thrown at startup), `BETTER_AUTH_URL`, `BETTER_AUTH_SECRET`,
   `CORS_ORIGINS` (comma separated), `KUBECONFIG` (YAML contents or a path to an
   existing kubeconfig file; an exported shell value wins over `.env`, a leading
-  `~` is expanded, and the default or in-cluster config is used when unset).
+  `~` is expanded, and the default or in-cluster config is used when unset),
+  `WORKLOAD_OBSERVER_ENABLED` (`false` disables the observer) and
+  `WORKLOAD_OBSERVER_RESYNC_MS` (full resync interval, default 60000).
 - Every new variable is listed in `apps/api/.env.example`.
 
 ## Auth and errors

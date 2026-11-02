@@ -16,6 +16,9 @@ async function bootstrap() {
     credentials: true,
   });
 
+  // Stops the workload observer (informers, timers) on SIGTERM and close.
+  app.enableShutdownHooks();
+
   await app.listen(process.env.PORT ?? 8080);
 }
 void bootstrap();

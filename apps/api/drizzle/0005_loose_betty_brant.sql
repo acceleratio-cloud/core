@@ -1,0 +1,1 @@
+ALTER TABLE "workload" ADD COLUMN "status_observed_at" timestamp;

@@ -37,6 +37,7 @@ const createWorkload = (overrides: Partial<Workload> = {}): Workload => ({
   position: { x: 0, y: 0 },
   status: 'running',
   status_message: null,
+  status_observed_at: null,
   external_name: 'my-api-3f9a1b2c',
   namespace: `project-${projectId}`,
   last_deployed_at: null,
