@@ -298,7 +298,9 @@ Adding a workload type:
   `expiresAt`) deliberately: the library owns those tables and reads them by those names. The
   snake_case rule stops at that file; do not "fix" it.
 - Migrations are generated into `apps/api/drizzle` with `bun run db:generate` and applied with
-  `bun run db:migrate`.
+  `bun run db:migrate`. `bun run db:check` verifies the journal, snapshots and SQL files agree without
+  a database. Commit the schema edit, the SQL file, the new snapshot and `_journal.json` together; the
+  table reference and data-model invariants live in [DATABASE.md](./DATABASE.md).
 
 ## Code style
 
