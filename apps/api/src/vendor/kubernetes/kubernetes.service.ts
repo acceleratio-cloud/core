@@ -7,9 +7,10 @@ import {
   KubeConfig,
   NetworkingV1Api,
 } from '@kubernetes/client-node';
-
-const INVALID_KUBECONFIG_MESSAGE =
-  'KUBECONFIG must contain kubeconfig YAML contents, not a file path';
+import {
+  INVALID_KUBECONFIG_MESSAGE,
+  readKubeConfigSource,
+} from './kubeconfig-source';
 
 @Injectable()
 export class KubernetesService {
@@ -35,15 +36,16 @@ export class KubernetesService {
   }
 
   private loadKubeConfig(): KubeConfig {
-    const kubeConfigData = process.env.KUBECONFIG;
+    const kubeConfigSource = process.env.KUBECONFIG;
 
-    if (!kubeConfigData) {
+    if (!kubeConfigSource) {
       const kubeConfig = new KubeConfig();
       kubeConfig.loadFromDefault();
       return kubeConfig;
     }
 
     const kubeConfig = new KubeConfig();
+    const kubeConfigData = readKubeConfigSource(kubeConfigSource);
 
     try {
       kubeConfig.loadFromString(kubeConfigData);

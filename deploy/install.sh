@@ -21,6 +21,7 @@ readonly MANAGED_BY="Acceleratio deploy/install.sh"
 # ---------------------------------------------------------------------------
 
 # Empty K3S_VERSION means "latest release from K3S_CHANNEL".
+# scripts/cluster.sh reads this default; keep the KEY="${KEY-default}" form.
 K3S_VERSION="${K3S_VERSION-v1.36.5+k3s1}"
 K3S_CHANNEL="${K3S_CHANNEL:-stable}"
 K3S_NODE_NAME="${K3S_NODE_NAME:-}"
@@ -31,6 +32,7 @@ K3S_SERVICE_CIDR="${K3S_SERVICE_CIDR:-10.43.0.0/16}"
 K3S_ETCD_SNAPSHOT_CRON="${K3S_ETCD_SNAPSHOT_CRON-0 3 * * *}"
 K3S_KUBECONFIG="${K3S_KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
 
+# scripts/cluster.sh reads this default; keep the KEY="${KEY:-default}" form.
 CILIUM_VERSION="${CILIUM_VERSION:-1.20.4}"
 CILIUM_CNI_CONF_PATH="${CILIUM_CNI_CONF_PATH:-/etc/cni/net.d}"
 CILIUM_CNI_BIN_PATH="${CILIUM_CNI_BIN_PATH:-/opt/cni/bin}"
