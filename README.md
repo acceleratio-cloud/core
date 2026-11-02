@@ -135,6 +135,43 @@ export KUBECONFIG="$(./scripts/cluster.sh kubeconfig)"
 (cd apps/frontend && bun run dev)
 ```
 
+## Containers
+
+Both Dockerfiles build from the repository root because the applications depend
+on `packages/shared` through a `file:` dependency. The images run as the
+unprivileged `node` user.
+
+```bash
+docker build -f apps/api/Dockerfile -t acceleratio/api:dev .
+docker build -f apps/frontend/Dockerfile \
+  --build-arg NEXT_PUBLIC_API_URL=http://localhost:8080 \
+  -t acceleratio/console:dev .
+```
+
+The API expects the same environment as local development: `DATABASE_URL`,
+`BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, and `CORS_ORIGINS`. Apply the Drizzle
+migrations before starting it (`make migrate` or
+`cd apps/api && bun run db:migrate`); the container does not migrate the
+database on startup. `KUBECONFIG` may be a file path or inline YAML; inside
+Kubernetes the in-cluster service account is used when it is unset.
+
+```bash
+docker run --rm -p 8080:8080 \
+  -e DATABASE_URL=postgresql://acceleratio:acceleratio@host.docker.internal:5433/acceleratio \
+  -e BETTER_AUTH_SECRET="$(openssl rand -base64 32)" \
+  -e BETTER_AUTH_URL=http://localhost:8080 \
+  -e CORS_ORIGINS=http://localhost:3000 \
+  acceleratio/api:dev
+
+docker run --rm -p 3000:3000 acceleratio/console:dev
+```
+
+`host.docker.internal` is built into Docker Desktop; on Linux add
+`--add-host=host.docker.internal:host-gateway` or point `DATABASE_URL` at a
+reachable database. `NEXT_PUBLIC_API_URL` is inlined by `next build`, so rebuild
+the console image when the public API URL changes. The console listens on port
+`3000` and the API on `8080`.
+
 ## Install on a VPS
 
 The installer provisions a single-node Kubernetes cluster with k3s, embedded
