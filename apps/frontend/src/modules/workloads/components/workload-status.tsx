@@ -18,7 +18,7 @@ const statusStyles: Record<
   },
   running: {
     label: 'Running',
-    dot: 'bg-foreground',
+    dot: 'bg-emerald-500',
     text: 'text-foreground',
   },
   stopped: {

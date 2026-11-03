@@ -89,7 +89,7 @@ export const WorkloadActions = ({ workload }: { workload: Workload }) => {
       <div
         role="group"
         aria-label="Service actions"
-        className="shrink-0 border-t border-border px-6 py-3"
+        className="shrink-0 border-t border-border bg-muted/40 px-5 py-3"
       >
         <div className="flex flex-wrap items-center gap-2">
           {canDeploy ? (
