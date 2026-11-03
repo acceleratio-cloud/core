@@ -221,7 +221,9 @@ Five steps replace the six arbitrary sizes. Tracking: `-0.02em` at `xl`,
    Service cards on the board (`node-card-primitives.tsx`) are 264px wide on
    `surface-raised` with `shadow-float`: a header with a 28px icon tile, the
    name and a five-bar status meter; then label/value rows (icon and label in
-   `fg-tertiary`, value in mono); a danger notice when the rollout failed; and
+   `fg-tertiary`, value in mono); an error well when the rollout failed (red only on the icon and the "Error"
+   title, the message in `fg-secondary` on `surface-sunken`, three lines then
+   "Show more"); and
    a footer that shows a small Deploy button only when a deploy is possible,
    otherwise "Deployed 3 hours ago". The meter is decorative, and the Status row
    carries the label. Selection is a `brand-fg` border plus an offset outline.

@@ -1,7 +1,14 @@
 'use client';
 
-import { useState, type ReactNode } from 'react';
-import { Clock, LoaderCircle, Rocket, type LucideIcon } from 'lucide-react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import {
+  ChevronDown,
+  CircleAlert,
+  Clock,
+  LoaderCircle,
+  Rocket,
+  type LucideIcon,
+} from 'lucide-react';
 
 import type {
   Workload,
@@ -130,14 +137,89 @@ export const NodeRow = ({
   </div>
 );
 
-export const NodeNotice = ({ children }: { children: string }) => (
-  <p
-    title={children}
-    className="mx-3 mb-2.5 line-clamp-2 rounded-md border border-destructive/20 bg-destructive/10 px-2 py-1.5 text-xs leading-snug text-destructive"
-  >
-    {children}
-  </p>
-);
+/**
+ * A failure message from the cluster. Red marks only the icon and title; the
+ * message itself is neutral text on a dark well, which stays readable at small
+ * sizes. Long messages clamp to three lines and expand in place.
+ */
+export const NodeNotice = ({ children }: { children: string }) => {
+  const messageId = useId();
+  const messageRef = useRef<HTMLParagraphElement>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [overflows, setOverflows] = useState(false);
+
+  useEffect(() => {
+    const message = messageRef.current;
+
+    if (!message || expanded) {
+      return;
+    }
+
+    // The observer fires once on observe, so this also covers the first paint.
+    const observer = new ResizeObserver(() =>
+      setOverflows(message.scrollHeight > message.clientHeight + 1),
+    );
+    observer.observe(message);
+
+    return () => observer.disconnect();
+  }, [children, expanded]);
+
+  return (
+    <div className="mx-3 mb-3 rounded-md border border-border bg-surface-sunken">
+      <div className="flex h-7 items-center gap-1.5 pr-1 pl-2.5">
+        <CircleAlert
+          aria-hidden="true"
+          strokeWidth={1.75}
+          className="size-3.5 shrink-0 text-status-danger"
+        />
+        <span className="min-w-0 flex-1 truncate text-xs font-medium text-status-danger">
+          Error
+        </span>
+        {overflows || expanded ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            aria-expanded={expanded}
+            aria-controls={messageId}
+            onClick={(event) => {
+              event.stopPropagation();
+              setExpanded((value) => !value);
+            }}
+            className="nodrag nopan shrink-0 text-muted-foreground"
+          >
+            {expanded ? 'Show less' : 'Show more'}
+            <ChevronDown
+              data-icon="inline-end"
+              aria-hidden="true"
+              strokeWidth={1.75}
+              className={cn(
+                'transition-transform duration-150 motion-reduce:transition-none',
+                expanded && 'rotate-180',
+              )}
+            />
+          </Button>
+        ) : null}
+      </div>
+
+      {/* Padding lives on the wrapper: a clamped element clips at its padding
+          edge, so padding on it would let the next line peek out. */}
+      <div className="px-2.5 pb-2.5">
+        <p
+          ref={messageRef}
+          id={messageId}
+          // Selectable so the message can be copied without dragging the node.
+          className={cn(
+            'nodrag nopan cursor-text text-xs leading-relaxed break-words text-fg-secondary select-text',
+            !expanded && 'line-clamp-3',
+          )}
+        >
+          {children}
+        </p>
+      </div>
+    </div>
+  );
+};
 
 export const WorkloadNodeFooter = ({ workload }: { workload: Workload }) => {
   if (canDeployWorkload(workload.status)) {

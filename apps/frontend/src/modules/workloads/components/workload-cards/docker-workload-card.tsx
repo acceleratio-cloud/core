@@ -49,7 +49,7 @@ export const DockerWorkloadCard = ({
       </NodeRows>
 
       {data.status === 'failed' && data.status_message ? (
-        <NodeNotice>{data.status_message}</NodeNotice>
+        <NodeNotice key={data.status_message}>{data.status_message}</NodeNotice>
       ) : null}
 
       <WorkloadNodeFooter workload={data} />
