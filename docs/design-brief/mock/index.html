@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Acceleratio design brief: workspace mock</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --surface-canvas: oklch(0.97 0 0);
+    --surface-board: oklch(0.92 0 0);
+    --surface-panel: oklch(1 0 0);
+    --surface-sunken: oklch(0.975 0 0);
+    --border-subtle: oklch(0.93 0 0);
+    --border-default: oklch(0.87 0 0);
+    --border-control: oklch(0.60 0 0);
+    --text-primary: oklch(0.145 0 0);
+    --text-secondary: oklch(0.44 0 0);
+    --text-tertiary: oklch(0.50 0 0);
+    --success: oklch(0.52 0.14 150);
+    --warning: oklch(0.55 0.13 75);
+    --danger: oklch(0.54 0.22 27);
+    --r-control: 8px;
+    --r-surface: 12px;
+    --shadow-float: 0 1px 2px oklch(0 0 0 / 6%), 0 4px 12px oklch(0 0 0 / 6%);
+  }
+  .accent-a { --accent: oklch(0.50 0.19 268); --accent-wash: oklch(0.50 0.19 268 / 9%); }
+  .accent-b { --accent: oklch(0.52 0.10 195); --accent-wash: oklch(0.52 0.10 195 / 10%); }
+  .accent-c { --accent: oklch(0.52 0.19 252); --accent-wash: oklch(0.52 0.19 252 / 9%); }
+
+  * { box-sizing: border-box; }
+  html { background: oklch(0.88 0 0); }
+  body {
+    margin: 0; padding: 32px; color: var(--text-primary);
+    font: 14px/22px Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1 { font-size: 20px; line-height: 28px; margin: 0 0 4px; letter-spacing: -0.02em; }
+  .lead { margin: 0 0 24px; color: var(--text-secondary); font-size: 13px; }
+  .variant { margin-bottom: 40px; }
+  .variant > h2 { font-size: 13px; line-height: 20px; margin: 0 0 8px; font-weight: 600; }
+  .variant > h2 span { font-weight: 400; color: var(--text-secondary); }
+
+  .frame { width: 1180px; height: 640px; display: flex; flex-direction: column; background: var(--surface-canvas); border-radius: 12px; overflow: hidden; border: 1px solid var(--border-default); }
+  .topbar { height: 48px; flex: none; display: flex; align-items: center; gap: 12px; padding: 0 20px; }
+  .brand { display: flex; align-items: center; gap: 8px; font-weight: 500; font-size: 13px; }
+  .logo { width: 18px; height: 18px; background: var(--text-primary); clip-path: polygon(50% 0, 100% 100%, 78% 100%, 50% 38%, 22% 100%, 0 100%); }
+  .brand small { color: var(--text-tertiary); font-size: 11px; font-weight: 400; }
+  .sep { width: 1px; height: 16px; background: var(--border-default); }
+  .topnav { display: flex; gap: 2px; }
+  .topnav a { display: flex; align-items: center; height: 32px; padding: 0 12px; border-radius: var(--r-control); font-size: 13px; color: var(--text-secondary); border: 1px solid transparent; text-decoration: none; }
+  .topnav a.on { background: var(--surface-panel); color: var(--text-primary); font-weight: 500; border-color: var(--border-default); }
+  .spacer { flex: 1; }
+  .search { width: 240px; height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 10px; background: var(--surface-panel); border: 1px solid var(--border-default); border-radius: var(--r-control); font-size: 13px; color: var(--text-tertiary); }
+  .search kbd { margin-left: auto; font: 500 11px/16px inherit; background: var(--surface-sunken); border-radius: 4px; padding: 0 5px; color: var(--text-secondary); }
+  .avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--surface-panel); border: 1px solid var(--border-default); display: grid; place-items: center; font-size: 11px; font-weight: 500; }
+
+  .panel { flex: 1; min-height: 0; margin: 0 12px 12px; background: var(--surface-panel); border: 1px solid var(--border-default); border-radius: var(--r-surface); overflow: hidden; display: flex; }
+  .board { position: relative; flex: 1; background: var(--surface-board); background-image: radial-gradient(oklch(0 0 0 / 22%) 1px, transparent 1px); background-size: 14px 14px; }
+
+  .floatbar { position: absolute; top: 12px; left: 12px; right: 12px; display: flex; justify-content: space-between; align-items: center; pointer-events: none; }
+  .pill { pointer-events: auto; height: 40px; display: flex; align-items: center; gap: 10px; padding: 4px 4px 4px 16px; background: var(--surface-raised, var(--surface-panel)); border: 1px solid var(--border-default); border-radius: 9999px; box-shadow: var(--shadow-float); }
+  .pill .name { font-size: 13px; font-weight: 500; letter-spacing: -0.01em; }
+  .pill .id { font: 11px/16px ui-monospace, "Geist Mono", Menlo, monospace; color: var(--text-tertiary); }
+  .pill .tabs { display: flex; gap: 2px; }
+  .pill .tabs a { height: 32px; display: flex; align-items: center; padding: 0 12px; border-radius: 9999px; font-size: 13px; color: var(--text-secondary); text-decoration: none; }
+  .pill .tabs a.on { background: var(--accent-wash); color: var(--accent); font-weight: 500; }
+  .btn { pointer-events: auto; height: 40px; display: inline-flex; align-items: center; gap: 6px; padding: 0 16px; border-radius: var(--r-control); background: var(--accent); color: oklch(1 0 0); font-size: 13px; font-weight: 500; border: 1px solid transparent; box-shadow: var(--shadow-float); }
+
+  .node { position: absolute; width: 240px; padding: 12px; background: var(--surface-panel); border: 1px solid var(--border-default); border-radius: var(--r-surface); box-shadow: 0 1px 2px oklch(0 0 0 / 5%); }
+  .node.selected { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-wash); }
+  .node .row { display: flex; gap: 10px; align-items: center; }
+  .whale { width: 28px; height: 28px; border-radius: 6px; background: oklch(0.62 0.15 240); flex: none; }
+  .node .t { font-size: 14px; font-weight: 500; line-height: 20px; }
+  .node .s { font-size: 13px; color: var(--text-secondary); line-height: 18px; }
+  .node .foot { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border-subtle); font-size: 12px; color: var(--text-tertiary); }
+  .badge { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; }
+  .badge i { display: inline-block; width: 8px; height: 8px; }
+  .ok { color: var(--success); } .ok i { background: var(--success); border-radius: 50%; }
+  .draft { color: var(--text-secondary); } .draft i { border: 1.5px solid var(--text-secondary); border-radius: 50%; }
+  .fail { color: var(--danger); } .fail i { background: var(--danger); border-radius: 1.5px; }
+
+  .side { position: absolute; top: 64px; right: 12px; bottom: 12px; width: 300px; background: var(--surface-panel); border: 1px solid var(--border-default); border-radius: var(--r-surface); box-shadow: var(--shadow-float); padding: 16px; }
+  .side h3 { margin: 0; font-size: 18px; line-height: 26px; font-weight: 600; letter-spacing: -0.01em; }
+  .side p { margin: 2px 0 16px; font-size: 13px; color: var(--text-secondary); }
+  .side dl { margin: 0; display: grid; grid-template-columns: 90px 1fr; row-gap: 10px; font-size: 13px; }
+  .side dt { color: var(--text-tertiary); }
+  .side dd { margin: 0; }
+  .mono { font: 12px/18px ui-monospace, "Geist Mono", Menlo, monospace; }
+  .field { margin-top: 20px; height: 36px; border: 1px solid var(--border-control); border-radius: var(--r-control); padding: 0 10px; display: flex; align-items: center; font-size: 13px; color: var(--text-tertiary); background: var(--surface-panel); }
+  .link { color: var(--accent); font-weight: 500; font-size: 13px; margin-top: 14px; display: inline-block; }
+
+  .tokens { display: flex; gap: 8px; margin: 12px 0 0; width: 1180px; }
+  .sw { flex: 1; height: 56px; border-radius: 8px; border: 1px solid var(--border-default); padding: 6px 8px; font-size: 11px; line-height: 14px; color: var(--text-secondary); display: flex; align-items: flex-end; }
+</style>
+</head>
+<body>
+  <h1>Workspace mock, three accent candidates</h1>
+  <p class="lead">Same layout and tokens in each frame; only the accent hue changes. Board is <code>oklch(0.92 0 0)</code>, so white nodes, the pill and the panel are clearly separated from it.</p>
+
+  <!-- VARIANT TEMPLATE REPEATED THREE TIMES (A, B, C) -->
+  <section class="variant accent-a" id="a">
+    <h2>A. Indigo <span>accent-600 oklch(0.50 0.19 268), 6.31:1 with white text</span></h2>
+    <div class="frame">
+      <div class="topbar">
+        <div class="brand"><span class="logo"></span>cceleratio<small>.cloud</small></div>
+        <div class="sep"></div>
+        <nav class="topnav"><a>Overview</a><a>Marketplace</a><a>Servers</a><a>Settings</a></nav>
+        <div class="spacer"></div>
+        <div class="search">Quick search... <kbd>⌘K</kbd></div>
+        <div class="avatar">UA</div>
+      </div>
+      <div class="panel"><div class="board">
+        <div class="floatbar">
+          <div class="pill"><span class="name">pole-shut</span><span class="id">b6717514</span><span class="sep"></span>
+            <span class="tabs"><a class="on">Overview</a><a>Observability</a><a>Settings</a></span></div>
+          <span class="btn">+ Create service</span>
+        </div>
+        <div class="node selected" style="left:80px;top:230px"><div class="row"><span class="whale"></span><div><div class="t">test</div><div class="s">nginx:latest</div></div></div><div class="foot"><span class="badge ok"><i></i>Running</span><span>Deployed 2 Nov, 22:39</span></div></div>
+        <div class="node" style="left:360px;top:230px"><div class="row"><span class="whale"></span><div><div class="t">test2</div><div class="s">httpd:latest</div></div></div><div class="foot"><span class="badge draft"><i></i>Draft</span><span>Never deployed</span></div></div>
+        <div class="node" style="left:640px;top:230px"><div class="row"><span class="whale"></span><div><div class="t">wrongimage</div><div class="s">wenfew</div></div></div><div class="foot"><span class="badge fail"><i></i>Failed</span><span>Deployed 3 Nov</span></div></div>
+      </div></div>
+    </div>
+    <div class="tokens">
+      <div class="sw" style="background:var(--surface-canvas)">canvas .97</div>
+      <div class="sw" style="background:var(--surface-board)">board .92</div>
+      <div class="sw" style="background:var(--surface-panel)">panel 1.0</div>
+      <div class="sw" style="background:var(--accent);color:#fff;border-color:transparent">accent-600</div>
+      <div class="sw" style="background:var(--accent-wash);color:var(--accent)">accent wash</div>
+      <div class="sw" style="color:var(--success)">success</div>
+      <div class="sw" style="color:var(--warning)">warning</div>
+      <div class="sw" style="color:var(--danger)">danger</div>
+    </div>
+  </section>
+
+  <section class="variant accent-b" id="b">
+    <h2>B. Teal <span>accent-600 oklch(0.52 0.10 195), 5.15:1 with white text</span></h2>
+    <div class="frame">
+      <div class="topbar">
+        <div class="brand"><span class="logo"></span>cceleratio<small>.cloud</small></div>
+        <div class="sep"></div>
+        <nav class="topnav"><a>Overview</a><a>Marketplace</a><a>Servers</a><a>Settings</a></nav>
+        <div class="spacer"></div>
+        <div class="search">Quick search... <kbd>⌘K</kbd></div>
+        <div class="avatar">UA</div>
+      </div>
+      <div class="panel"><div class="board">
+        <div class="floatbar">
+          <div class="pill"><span class="name">pole-shut</span><span class="id">b6717514</span><span class="sep"></span>
+            <span class="tabs"><a class="on">Overview</a><a>Observability</a><a>Settings</a></span></div>
+          <span class="btn">+ Create service</span>
+        </div>
+        <div class="node selected" style="left:80px;top:230px"><div class="row"><span class="whale"></span><div><div class="t">test</div><div class="s">nginx:latest</div></div></div><div class="foot"><span class="badge ok"><i></i>Running</span><span>Deployed 2 Nov, 22:39</span></div></div>
+        <div class="node" style="left:360px;top:230px"><div class="row"><span class="whale"></span><div><div class="t">test2</div><div class="s">httpd:latest</div></div></div><div class="foot"><span class="badge draft"><i></i>Draft</span><span>Never deployed</span></div></div>
+        <div class="node" style="left:640px;top:230px"><div class="row"><span class="whale"></span><div><div class="t">wrongimage</div><div class="s">wenfew</div></div></div><div class="foot"><span class="badge fail"><i></i>Failed</span><span>Deployed 3 Nov</span></div></div>
+      </div></div>
+    </div>
+    <div class="tokens">
+      <div class="sw" style="background:var(--surface-canvas)">canvas .97</div>
+      <div class="sw" style="background:var(--surface-board)">board .92</div>
+      <div class="sw" style="background:var(--surface-panel)">panel 1.0</div>
+      <div class="sw" style="background:var(--accent);color:#fff;border-color:transparent">accent-600</div>
+      <div class="sw" style="background:var(--accent-wash);color:var(--accent)">accent wash</div>
+      <div class="sw" style="color:var(--success)">success</div>
+      <div class="sw" style="color:var(--warning)">warning</div>
+      <div class="sw" style="color:var(--danger)">danger</div>
+    </div>
+  </section>
+
+  <section class="variant accent-c" id="c">
+    <h2>C. Blue <span>accent-600 oklch(0.52 0.19 252), 5.45:1 with white text</span></h2>
+    <div class="frame">
+      <div class="topbar">
+        <div class="brand"><span class="logo"></span>cceleratio<small>.cloud</small></div>
+        <div class="sep"></div>
+        <nav class="topnav"><a>Overview</a><a>Marketplace</a><a>Servers</a><a>Settings</a></nav>
+        <div class="spacer"></div>
+        <div class="search">Quick search... <kbd>⌘K</kbd></div>
+        <div class="avatar">UA</div>
+      </div>
+      <div class="panel"><div class="board">
+        <div class="floatbar">
+          <div class="pill"><span class="name">pole-shut</span><span class="id">b6717514</span><span class="sep"></span>
+            <span class="tabs"><a class="on">Overview</a><a>Observability</a><a>Settings</a></span></div>
+          <span class="btn">+ Create service</span>
+        </div>
+        <div class="node selected" style="left:80px;top:230px"><div class="row"><span class="whale"></span><div><div class="t">test</div><div class="s">nginx:latest</div></div></div><div class="foot"><span class="badge ok"><i></i>Running</span><span>Deployed 2 Nov, 22:39</span></div></div>
+        <div class="node" style="left:360px;top:230px"><div class="row"><span class="whale"></span><div><div class="t">test2</div><div class="s">httpd:latest</div></div></div><div class="foot"><span class="badge draft"><i></i>Draft</span><span>Never deployed</span></div></div>
+        <div class="node" style="left:640px;top:230px"><div class="row"><span class="whale"></span><div><div class="t">wrongimage</div><div class="s">wenfew</div></div></div><div class="foot"><span class="badge fail"><i></i>Failed</span><span>Deployed 3 Nov</span></div></div>
+      </div></div>
+    </div>
+    <div class="tokens">
+      <div class="sw" style="background:var(--surface-canvas)">canvas .97</div>
+      <div class="sw" style="background:var(--surface-board)">board .92</div>
+      <div class="sw" style="background:var(--surface-panel)">panel 1.0</div>
+      <div class="sw" style="background:var(--accent);color:#fff;border-color:transparent">accent-600</div>
+      <div class="sw" style="background:var(--accent-wash);color:var(--accent)">accent wash</div>
+      <div class="sw" style="color:var(--success)">success</div>
+      <div class="sw" style="color:var(--warning)">warning</div>
+      <div class="sw" style="color:var(--danger)">danger</div>
+    </div>
+  </section>
+</body>
+</html>
