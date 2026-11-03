@@ -165,7 +165,7 @@ export const NodeNotice = ({ children }: { children: string }) => {
   }, [children, expanded]);
 
   return (
-    <div className="mx-3 mb-3 rounded-md border border-border bg-surface-sunken">
+    <div className="mx-3 mb-3 rounded-md border border-destructive/50 bg-red-950/25">
       <div className="flex h-7 items-center gap-1.5 pr-1 pl-2.5">
         <CircleAlert
           aria-hidden="true"
