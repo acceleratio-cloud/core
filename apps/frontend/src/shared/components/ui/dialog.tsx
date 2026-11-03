@@ -39,7 +39,9 @@ function DialogContent({
 }) {
   return (
     <DialogPrimitive.Portal container={container}>
+      {/* Base UI skips the backdrop of a dialog nested in another one. */}
       <DialogPrimitive.Backdrop
+        forceRender
         data-slot="dialog-backdrop"
         className="fixed inset-0 z-50 bg-scrim transition-opacity duration-150 ease-out data-[starting-style]:opacity-0 data-[ending-style]:opacity-0 motion-reduce:transition-none"
       />
