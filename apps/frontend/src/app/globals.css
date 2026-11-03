@@ -79,7 +79,7 @@
   --chart-3: var(--neutral-560);
   --chart-4: var(--neutral-450);
   --chart-5: var(--neutral-320);
-  --radius: 0.625rem;
+  --radius: 0.75rem;
   --sidebar: var(--surface-panel);
   --sidebar-foreground: var(--fg-primary);
   --sidebar-primary: var(--brand);

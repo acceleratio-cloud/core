@@ -181,8 +181,12 @@ Five steps replace the six arbitrary sizes. Tracking: `-0.02em` at `xl`,
 
 ## Shape, depth, spacing
 
-- **Radius:** `control` 8px (buttons, inputs, nav items), `surface` 12px (cards,
+- **Radius:** one base, `--radius` = 12px, and every step derives from it:
+  `control` 9.6px (0.8x: nav items, icon buttons), `surface` 16.8px (1.4x: cards,
   panels, menus, dialogs), `pill` 9999px (floating toolbars, status badges, tabs).
+  Buttons and fields use `rounded-sm` (0.6x, 7.2px), and `rounded-lg` (12px) is the
+  default for small cards. The base was 10px before; raising it to 12px rounds
+  every step by 20% without touching components.
   Nothing else.
 - **Shadow:** `none` (default), `float` (floating bars and menus, one soft
   layer plus a hairline), `modal` (dialogs). Two shadows replace six.

@@ -99,8 +99,8 @@
   /* Names are edge-*, fg-* and brand rather than border-*, text-* and accent-*
      so they cannot collide with Tailwind's own utilities or shadcn's tokens. */
 
-  --radius-control: 8px;
-  --radius-surface: 12px;
+  --radius-control: calc(var(--radius) * 0.8);
+  --radius-surface: calc(var(--radius) * 1.4);
   --shadow-float: 0 1px 2px oklch(0 0 0 / 40%), 0 4px 12px oklch(0 0 0 / 30%);
   --shadow-modal: 0 8px 32px oklch(0 0 0 / 55%), 0 2px 8px oklch(0 0 0 / 40%);
 }
