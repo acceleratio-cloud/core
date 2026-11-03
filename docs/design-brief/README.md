@@ -1,6 +1,6 @@
 # Design brief: Acceleratio console design system
 
-Status: approved. Accent is Teal and the console is **dark only**. Tokens are
+Status: approved. The brand is blue and the console is **dark only**. Tokens are
 implemented in `apps/frontend/src/app/tokens.css` and every existing screen
 reads them. Primitives, lint, `/design` and visual tests are not built yet.
 This brief replaces the visual decisions in [DESIGN.md](../DESIGN.md);
@@ -119,17 +119,18 @@ All ratios are computed by `check:contrast`, not estimated.
 
 ### Brand
 
-One hue, one scale. Teal was chosen from three candidates rendered in
-[`mock/index.html`](./mock/index.html). The mock shows the light theme; the dark
-values below replace it.
+One hue, one scale. The brand started as Teal (hue 195, picked from the three
+candidates in [`mock/index.html`](./mock/index.html), which shows the light
+theme) and was moved to a blue (hue 245) after review of the dark UI. The dark
+values below replace the mock.
 
 | Token | Value | Use |
 | --- | --- | --- |
-| `brand` | `teal-400` `0.74 0.11 195` | Primary button fill, focus ring, links, selection |
-| `brand-hover` | `teal-300` `0.80 0.10 195` | Hover on brand fills |
+| `brand` | `blue-400` `0.70 0.16 245` | Primary button fill, focus ring, links, selection |
+| `brand-hover` | `blue-300` `0.76 0.14 245` | Hover on brand fills |
 | `brand-wash` | brand at 16% | Selected nav item, node selection halo |
 
-Brand on panel is 8.61:1, dark text on the brand fill is 8.99:1. Usage is
+Brand on panel is 7.17:1, dark text on the brand fill is 7.49:1. Usage is
 limited to: primary button fill, selected nav indicator, focus ring, links,
 selected row or node outline, and progress.
 
@@ -240,14 +241,17 @@ Work stays on one branch with small commits, as agreed.
   on `:root`, the toaster is pinned to `dark`, and shadcn's `dark:` variants
   stay inert (no `.dark` class is applied). Reversing this means adding a second
   value set to `tokens.css`, not touching components.
-- Accent: **B. Teal**. In the dark theme it is `teal-400`
-  (`oklch(0.74 0.11 195)`); the light value `0.52 0.10 195` was used only in the
-  mock. Chosen because it stays clear of the status colors and the Docker blue.
+- Accent: **blue** (`blue-400`, `oklch(0.70 0.16 245)`). It replaced Teal, which
+  was chosen first for staying clear of the Docker blue, but read as too green
+  on the dark surfaces. The cost is that the brand now sits near the Docker
+  mark's hue, so a running Docker service card shows two similar blues. The
+  brand is only used on actions, focus and selection, and status never uses it,
+  so the two do not carry the same meaning.
 - Token names: semantic tokens are `surface-*`, `edge-*`, `fg-*`, `brand` and
   `status-*`, not `border-*`, `text-*` or `accent-*`. Those names are already
   taken by Tailwind utilities and shadcn tokens, so reusing them would be
   ambiguous. `--primary`, `--ring` and the other shadcn tokens are now aliases
-  of the semantic tokens, which turns primary buttons and focus rings teal.
+  of the semantic tokens, which gives primary buttons and focus rings the brand color.
 - `bun run check:contrast` (`apps/frontend/scripts/check-contrast.mjs`) reads
   `tokens.css` and checks 40 text, control-border and focus pairs. It passes.
 

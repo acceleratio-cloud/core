@@ -111,7 +111,7 @@ components:
 
 # Design System: Acceleratio Cloud Console
 
-> **Superseded in part.** The console is now dark-only with a Teal brand color
+> **Superseded in part.** The console is now dark-only with a blue brand color
 > and chromatic status colors. Colors, theme, elevation, the shell and the
 > status rules below describe the earlier light design and are replaced by
 > [design-brief/README.md](./design-brief/README.md) and

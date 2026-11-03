@@ -24,8 +24,8 @@
   --neutral-800: oklch(0.8 0 0);
   --neutral-970: oklch(0.97 0 0);
 
-  --teal-300: oklch(0.8 0.1 195);
-  --teal-400: oklch(0.74 0.11 195);
+  --blue-300: oklch(0.76 0.14 245);
+  --blue-400: oklch(0.7 0.16 245);
   --green-400: oklch(0.74 0.15 150);
   --amber-400: oklch(0.8 0.14 80);
   --red-400: oklch(0.7 0.19 25);
@@ -48,9 +48,9 @@
   --fg-disabled: var(--neutral-450);
   --fg-on-brand: var(--neutral-145);
 
-  --brand: var(--teal-400);
-  --brand-hover: var(--teal-300);
-  --brand-wash: color-mix(in oklch, var(--teal-400) 16%, transparent);
+  --brand: var(--blue-400);
+  --brand-hover: var(--blue-300);
+  --brand-wash: color-mix(in oklch, var(--blue-400) 16%, transparent);
 
   --status-success: var(--green-400);
   --status-warning: var(--amber-400);
