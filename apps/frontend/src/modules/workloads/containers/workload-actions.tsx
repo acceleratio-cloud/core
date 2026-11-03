@@ -87,7 +87,7 @@ export const WorkloadActions = ({ workload }: { workload: Workload }) => {
       <div
         role="group"
         aria-label="Service actions"
-        className="shrink-0 border-t border-border bg-muted/40 px-5 py-3"
+        className="shrink-0 border-t border-edge-subtle bg-surface-muted/40 px-4 py-3"
       >
         <div className="flex flex-wrap items-center gap-2">
           {canDeploy ? (
@@ -202,7 +202,7 @@ export const WorkloadActions = ({ workload }: { workload: Workload }) => {
               setIsDeleteOpen(true);
             }}
             disabled={isBusy}
-            className="ml-auto"
+            className="ml-auto bg-surface-sunken hover:bg-surface-panel active:bg-surface-sunken"
           >
             <Trash2
               data-icon="inline-start"

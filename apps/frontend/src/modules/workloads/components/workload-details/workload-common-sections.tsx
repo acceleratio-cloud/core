@@ -1,3 +1,5 @@
+import { Box, Rocket } from 'lucide-react';
+
 import type { Workload } from '@acceleratio/shared';
 import {
   CopyableProperty,
@@ -29,7 +31,7 @@ export const WorkloadDeploymentSection = ({
 }: {
   workload: Workload;
 }) => (
-  <DetailSection title="Deployment">
+  <DetailSection title="Deployment" icon={Rocket}>
     <PropertyList>
       <TimeProperty
         label="Last deployed"
@@ -47,7 +49,7 @@ export const WorkloadIdentitySection = ({
 }: {
   workload: Workload;
 }) => (
-  <DetailSection title="Cluster">
+  <DetailSection title="Cluster" icon={Box}>
     <PropertyList>
       <CopyableProperty label="Namespace" value={workload.namespace} />
       <CopyableProperty label="External name" value={workload.external_name} />
