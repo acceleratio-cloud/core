@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 
 import { cn } from '@/lib/utils';
 import { Separator } from '@/shared/components/ui/separator';
+import { ProjectSwitcher } from '../containers/project-switcher';
 import { useProject } from '../providers/project-provider';
 
 type ProjectTab = {
@@ -25,14 +26,9 @@ export const ProjectHeader = () => {
   const basePath = `/project/${project.id}`;
 
   return (
-    <header className="flex h-10 min-w-0 items-center gap-2.5 rounded-full border border-border bg-surface-raised py-1 pr-1 pl-4 shadow-float">
-      <div className="flex min-w-0 items-center gap-2.5">
-        <span
-          title={project.name}
-          className="max-w-40 truncate text-[13px] leading-none font-medium tracking-tight text-foreground sm:max-w-56"
-        >
-          {project.name}
-        </span>
+    <header className="flex h-10 min-w-0 items-center gap-2.5 rounded-lg border border-border bg-surface-raised p-1 pl-1.5 shadow-float">
+      <div className="flex min-w-0 items-center gap-1.5">
+        <ProjectSwitcher />
 
         <span className="hidden shrink-0 font-mono text-[11px] leading-none text-muted-foreground sm:inline">
           {project.id.slice(0, 8)}
@@ -60,7 +56,7 @@ export const ProjectHeader = () => {
               href={href}
               aria-current={active ? 'page' : undefined}
               className={cn(
-                'flex h-8 items-center rounded-full px-3 text-[13px] whitespace-nowrap outline-none transition-colors focus-visible:ring-2 focus-visible:ring-foreground/60',
+                'flex h-7.5 items-center rounded-lg px-3 text-[13px] whitespace-nowrap outline-none transition-colors focus-visible:ring-2 focus-visible:ring-foreground/60',
                 active
                   ? 'bg-muted font-medium text-foreground'
                   : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',

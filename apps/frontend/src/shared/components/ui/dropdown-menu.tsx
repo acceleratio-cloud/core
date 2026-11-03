@@ -86,6 +86,28 @@ function DropdownMenuLinkItem({
   )
 }
 
+function DropdownMenuGroup(
+  props: React.ComponentProps<typeof MenuPrimitive.Group>
+) {
+  return <MenuPrimitive.Group data-slot="dropdown-menu-group" {...props} />
+}
+
+function DropdownMenuLabel({
+  className,
+  ...props
+}: React.ComponentProps<typeof MenuPrimitive.GroupLabel>) {
+  return (
+    <MenuPrimitive.GroupLabel
+      data-slot="dropdown-menu-label"
+      className={cn(
+        "px-2 pt-1.5 pb-1 text-xs font-medium text-muted-foreground",
+        className
+      )}
+      {...props}
+    />
+  )
+}
+
 function DropdownMenuSeparator({
   className,
   ...props
@@ -102,7 +124,9 @@ function DropdownMenuSeparator({
 export {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuLinkItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,

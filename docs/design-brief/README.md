@@ -218,6 +218,11 @@ Five steps replace the six arbitrary sizes. Tracking: `-0.02em` at `xl`,
    A `FloatingBar` pins top-left (identity and section tabs as a pill) and
    top-right (primary action). A `SidePanel` slides from the right and anchors
    below the bar through a shared offset token, so no screen hardcodes it.
+   The project name in the `FloatingBar` is a ghost button with a chevron that
+   opens the project switcher: the list of projects (current one checked, long
+   names truncated, scrolling after about eight), then a separator and
+   "Create project" as the last item, which opens the create dialog and goes to
+   the new project. The list loads when the menu opens.
    Service cards on the board (`node-card-primitives.tsx`) are 264px wide on
    `surface-raised` with `shadow-float`: a header with a 28px icon tile, the
    name and a five-bar status meter; then label/value rows (icon and label in
