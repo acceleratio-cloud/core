@@ -60,7 +60,7 @@ const pairs = [
   ...["fg-primary", "fg-secondary", "fg-tertiary"].flatMap((fg) =>
     surfaces.map((bg) => ({ fg, bg, min: TEXT, kind: "text" })),
   ),
-  ...["brand", "status-success", "status-warning", "status-danger"].flatMap((fg) =>
+  ...["brand-fg", "status-success", "status-warning", "status-danger"].flatMap((fg) =>
     ["surface-panel", "surface-board", "surface-raised"].map((bg) => ({
       fg,
       bg,
@@ -72,11 +72,13 @@ const pairs = [
   { fg: "fg-on-brand", bg: "brand-hover", min: TEXT, kind: "text" },
   ...["surface-panel", "surface-board", "surface-sunken", "surface-raised"].flatMap((bg) => [
     { fg: "edge-control", bg, min: NON_TEXT, kind: "control border" },
-    { fg: "brand", bg, min: NON_TEXT, kind: "focus ring" },
+    { fg: "brand-fg", bg, min: NON_TEXT, kind: "focus ring" },
   ]),
 ]
 
 const info = [
+  ["brand", "surface-panel"],
+  ["brand", "surface-raised"],
   ["surface-raised", "surface-board"],
   ["surface-raised", "surface-panel"],
   ["surface-panel", "surface-board"],

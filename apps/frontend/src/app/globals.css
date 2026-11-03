@@ -73,7 +73,7 @@
   --destructive: var(--status-danger);
   --border: var(--edge-default);
   --input: var(--edge-control);
-  --ring: var(--brand);
+  --ring: var(--brand-fg);
   --chart-1: var(--neutral-800);
   --chart-2: var(--neutral-700);
   --chart-3: var(--neutral-560);
@@ -87,7 +87,7 @@
   --sidebar-accent: var(--surface-muted);
   --sidebar-accent-foreground: var(--fg-primary);
   --sidebar-border: var(--edge-default);
-  --sidebar-ring: var(--brand);
+  --sidebar-ring: var(--brand-fg);
 }
 
 @layer base {
@@ -132,5 +132,5 @@
   --sileo-state-error: var(--status-danger);
   --sileo-state-warning: var(--status-warning);
   --sileo-state-info: var(--foreground);
-  --sileo-state-action: var(--primary);
+  --sileo-state-action: var(--brand-fg);
 }

@@ -114,25 +114,31 @@ minimum). Everything else is decorative and may be lighter.
 | `fg-disabled` | `0.45 0 0` | exempt (inactive) | exempt | exempt |
 
 Primary text is `0.97`, not pure white, to limit glare on large dark areas.
-`fg-on-brand` is dark (`0.145`), because the brand fill is light in this theme.
-All ratios are computed by `check:contrast`, not estimated.
+`fg-on-brand` is pure white (`1 0 0`): the brand fill is a deep blue that carries
+white labels. All ratios are computed by `check:contrast`, not estimated.
 
 ### Brand
 
 One hue, one scale. The brand started as Teal (hue 195, picked from the three
 candidates in [`mock/index.html`](./mock/index.html), which shows the light
-theme) and was moved to a blue (hue 245) after review of the dark UI. The dark
-values below replace the mock.
+theme), then moved to a blue (hue 245) and finally to a saturated blue (hue 262)
+after review of the dark UI. The dark values below replace the mock.
 
-| Token | Value | Use |
-| --- | --- | --- |
-| `brand` | `blue-400` `0.70 0.16 245` | Primary button fill, focus ring, links, selection |
-| `brand-hover` | `blue-300` `0.76 0.14 245` | Hover on brand fills |
-| `brand-wash` | brand at 16% | Selected nav item, node selection halo |
+The brand needs two shades, because a fill that carries white text must be
+dark, while the same hue used as text, a link or a focus ring on a dark surface
+must be light. They are separate tokens so neither use is compromised.
 
-Brand on panel is 7.17:1, dark text on the brand fill is 7.49:1. Usage is
-limited to: primary button fill, selected nav indicator, focus ring, links,
-selected row or node outline, and progress.
+| Token | Value | Use | Check |
+| --- | --- | --- | --- |
+| `brand` | `blue-500` `0.56 0.22 262` | Fill: primary buttons, progress | white on it 4.87:1 |
+| `brand-hover` | `blue-600` `0.52 0.22 262` | Hover on the fill | white on it 5.80:1 |
+| `brand-fg` | `blue-300` `0.72 0.15 258` | Links, focus ring, selected text and outline | 7.57:1 on panel, 6.83:1 on raised |
+| `brand-wash` | `blue-300` at 16% | Selected nav item, node selection halo | n/a |
+
+The fill itself is 3.90:1 against the panel and 3.51:1 against a raised card,
+so a button edge stays distinguishable (3:1 non-text minimum) without a border.
+Usage is limited to: primary button fill, selected nav indicator, focus ring,
+links, selected row or node outline, and progress.
 
 ### Status
 
@@ -241,12 +247,13 @@ Work stays on one branch with small commits, as agreed.
   on `:root`, the toaster is pinned to `dark`, and shadcn's `dark:` variants
   stay inert (no `.dark` class is applied). Reversing this means adding a second
   value set to `tokens.css`, not touching components.
-- Accent: **blue** (`blue-400`, `oklch(0.70 0.16 245)`). It replaced Teal, which
-  was chosen first for staying clear of the Docker blue, but read as too green
-  on the dark surfaces. The cost is that the brand now sits near the Docker
-  mark's hue, so a running Docker service card shows two similar blues. The
-  brand is only used on actions, focus and selection, and status never uses it,
-  so the two do not carry the same meaning.
+- Accent: **blue**, fill `blue-500` (`oklch(0.56 0.22 262)`) with white text
+  (`fg-on-brand`), and `brand-fg` (`blue-300`) wherever the brand is text or a
+  ring. It replaced Teal, which was chosen first for staying clear of the Docker
+  blue, but read as too green on the dark surfaces. The cost is that the brand
+  now sits near the Docker mark's hue, so a Docker service card shows two similar
+  blues. The brand is only used on actions, focus and selection, and status never
+  uses it, so the two do not carry the same meaning.
 - Token names: semantic tokens are `surface-*`, `edge-*`, `fg-*`, `brand` and
   `status-*`, not `border-*`, `text-*` or `accent-*`. Those names are already
   taken by Tailwind utilities and shadcn tokens, so reusing them would be

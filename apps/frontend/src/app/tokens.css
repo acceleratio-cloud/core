@@ -23,9 +23,13 @@
   --neutral-700: oklch(0.7 0 0);
   --neutral-800: oklch(0.8 0 0);
   --neutral-970: oklch(0.97 0 0);
+  --neutral-1000: oklch(1 0 0);
 
-  --blue-300: oklch(0.76 0.14 245);
-  --blue-400: oklch(0.7 0.16 245);
+  /* Light blue reads on dark surfaces (links, rings); the deep blues carry
+     white text as button fills. */
+  --blue-300: oklch(0.72 0.15 258);
+  --blue-500: oklch(0.56 0.22 262);
+  --blue-600: oklch(0.52 0.22 262);
   --green-400: oklch(0.74 0.15 150);
   --amber-400: oklch(0.8 0.14 80);
   --red-400: oklch(0.7 0.19 25);
@@ -46,11 +50,14 @@
   --fg-secondary: var(--neutral-800);
   --fg-tertiary: var(--neutral-700);
   --fg-disabled: var(--neutral-450);
-  --fg-on-brand: var(--neutral-145);
+  --fg-on-brand: var(--neutral-1000);
 
-  --brand: var(--blue-400);
-  --brand-hover: var(--blue-300);
-  --brand-wash: color-mix(in oklch, var(--blue-400) 16%, transparent);
+  /* brand is a fill that carries white text. brand-fg is the same hue made
+     light enough to read as text, a link or a focus ring on dark surfaces. */
+  --brand: var(--blue-500);
+  --brand-hover: var(--blue-600);
+  --brand-fg: var(--blue-300);
+  --brand-wash: color-mix(in oklch, var(--blue-300) 16%, transparent);
 
   --status-success: var(--green-400);
   --status-warning: var(--amber-400);
@@ -80,6 +87,7 @@
 
   --color-brand: var(--brand);
   --color-brand-hover: var(--brand-hover);
+  --color-brand-fg: var(--brand-fg);
   --color-brand-wash: var(--brand-wash);
 
   --color-status-success: var(--status-success);
