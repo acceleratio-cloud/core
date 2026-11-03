@@ -47,7 +47,7 @@ const ServerNodeCard = ({ data }: NodeProps<ServerNode>) => {
   const build = [data.version, data.os].filter(Boolean).join(" · ")
 
   return (
-    <div className="relative flex w-[264px] flex-col overflow-hidden rounded-[10px] border border-border bg-white">
+    <div className="relative flex w-[264px] flex-col overflow-hidden rounded-[10px] border border-border bg-surface-raised">
       <span
         aria-hidden="true"
         className={cn("absolute inset-x-0 top-0 h-0.5", status.stripe)}

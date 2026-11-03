@@ -3,6 +3,8 @@
 @import "shadcn/tailwind.css";
 @import "./tokens.css";
 
+/* No .dark class is ever applied: the console is dark-only. The variant stays
+   so shadcn's `dark:` classes remain inert instead of following the OS. */
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
@@ -51,75 +53,41 @@
 }
 
 :root {
-  /* This app is light-theme only. Keeps native controls and scrollbars light too. */
-  color-scheme: light;
+  /* Dark-only. Keeps native controls, scrollbars and autofill dark too. */
+  color-scheme: dark;
   /* shadcn names, aliased to the semantic tokens in tokens.css. */
   --background: var(--surface-panel);
   --foreground: var(--fg-primary);
-  --card: var(--surface-panel);
+  --card: var(--surface-raised);
   --card-foreground: var(--fg-primary);
-  --popover: var(--surface-panel);
+  --popover: var(--surface-raised);
   --popover-foreground: var(--fg-primary);
   --primary: var(--brand);
-  --primary-foreground: var(--fg-inverse);
-  --secondary: var(--surface-canvas);
+  --primary-foreground: var(--fg-on-brand);
+  --secondary: var(--surface-muted);
   --secondary-foreground: var(--fg-primary);
-  --muted: var(--surface-canvas);
+  --muted: var(--surface-muted);
   --muted-foreground: var(--fg-tertiary);
-  --accent: var(--surface-canvas);
+  --accent: var(--surface-muted);
   --accent-foreground: var(--fg-primary);
   --destructive: var(--status-danger);
   --border: var(--edge-default);
   --input: var(--edge-control);
   --ring: var(--brand);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
+  --chart-1: var(--neutral-800);
+  --chart-2: var(--neutral-700);
+  --chart-3: var(--neutral-560);
+  --chart-4: var(--neutral-450);
+  --chart-5: var(--neutral-320);
   --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
-}
-
-.dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --sidebar: var(--surface-panel);
+  --sidebar-foreground: var(--fg-primary);
+  --sidebar-primary: var(--brand);
+  --sidebar-primary-foreground: var(--fg-on-brand);
+  --sidebar-accent: var(--surface-muted);
+  --sidebar-accent-foreground: var(--fg-primary);
+  --sidebar-border: var(--edge-default);
+  --sidebar-ring: var(--brand);
 }
 
 @layer base {
@@ -132,6 +100,26 @@
   html {
     @apply font-sans;
   }
+}
+
+/* -------------------------------- React Flow ------------------------------- */
+
+/* React Flow reads --xy-<name> before its light --xy-<name>-default, so these
+   win regardless of stylesheet order. Node and pane backgrounds are set by the
+   components that own them. */
+.react-flow {
+  --xy-edge-stroke: var(--edge-control);
+  --xy-edge-stroke-selected: var(--fg-secondary);
+  --xy-handle-background-color: var(--edge-control);
+  --xy-handle-border-color: var(--surface-raised);
+  --xy-node-background-color: var(--surface-raised);
+  --xy-node-border: 1px solid var(--edge-default);
+  --xy-node-color: var(--fg-primary);
+  --xy-background-pattern-color: var(--edge-default);
+  --xy-controls-button-background-color: var(--surface-raised);
+  --xy-controls-button-background-color-hover: var(--surface-muted);
+  --xy-controls-button-border-color: var(--edge-default);
+  --xy-controls-box-shadow: none;
 }
 
 /* ---------------------------------- Toasts --------------------------------- */

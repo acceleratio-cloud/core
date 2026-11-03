@@ -15,7 +15,7 @@ export const SettingsNav = ({ activeId, onSelect }: SettingsNavProps) => {
   return (
     <nav
       aria-label="Settings"
-      className="flex gap-1 overflow-x-auto rounded-lg border border-border bg-white p-1.5 lg:sticky lg:top-6 lg:flex-col lg:overflow-visible"
+      className="flex gap-1 overflow-x-auto rounded-lg border border-border bg-surface-raised p-1.5 lg:sticky lg:top-6 lg:flex-col lg:overflow-visible"
     >
       {SETTINGS_SECTIONS.map((section) => {
         const Icon = section.icon

@@ -1,9 +1,11 @@
 # Design brief: Acceleratio console design system
 
-Status: approved, accent chosen (Teal). Phase 2 (tokens) is implemented in
-`apps/frontend/src/app/tokens.css`. The rest is not built yet. This brief
-replaces the visual decisions in [DESIGN.md](../DESIGN.md); DESIGN.md is
-rewritten in phase 7, and until then the two disagree on color and shadow.
+Status: approved. Accent is Teal and the console is **dark only**. Tokens are
+implemented in `apps/frontend/src/app/tokens.css` and every existing screen
+reads them. Primitives, lint, `/design` and visual tests are not built yet.
+This brief replaces the visual decisions in [DESIGN.md](../DESIGN.md);
+DESIGN.md is rewritten in phase 7, and until then the two disagree on color,
+theme and shadow.
 
 ## Why this exists
 
@@ -59,87 +61,101 @@ Three tiers. Components only read tier 2 or 3.
 The existing shadcn tokens (`--background`, `--primary`, `--muted`, …) stay as
 aliases of tier 2, so current `ui/` components keep working during migration.
 
-### Surfaces (light only)
+### Surfaces (dark only)
 
 | Token | Role | Value (oklch) |
 | --- | --- | --- |
-| `surface-canvas` | App ground behind the shell | `0.97 0 0` |
-| `surface-board` | Pan-and-zoom workspaces (graph canvases) | `0.92 0 0` |
-| `surface-panel` | Main content panel, dialogs, menus | `1 0 0` |
-| `surface-raised` | Cards and floating bars on a board | `1 0 0` plus `border-default` |
-| `surface-sunken` | Wells, table headers, code blocks | `0.975 0 0` |
+| `surface-canvas` | App ground behind the shell | `0.12 0 0` |
+| `surface-board` | Pan-and-zoom workspaces (graph canvases) | `0.145 0 0` |
+| `surface-sunken` | Input fill, wells, code blocks | `0.145 0 0` |
+| `surface-panel` | Main content panel | `0.175 0 0` |
+| `surface-raised` | Cards, dialogs, menus, floating bars | `0.225 0 0` |
+| `surface-muted` | Hover, selected and disabled fills | `0.28 0 0` |
 
-Rule: `surface-raised` is only ever placed on `surface-board`,
-`surface-sunken` or `surface-canvas`, never on `surface-panel` without a border.
+Higher means closer to the user: canvas is the lowest layer, raised and muted
+sit above the panel. Inputs are the exception, they are sunken into whatever
+they sit on.
 
-Measured luminance contrast between neighbors (computed by
-[`contrast.py`](./contrast.py); phase 2 turns it into a CI check):
+Measured luminance contrast between neighbors (from `check:contrast`):
 
 | Pair | Ratio |
 | --- | --- |
-| white card on board `0.92` | 1.27:1 |
-| board `0.92` on canvas `0.97` | 1.16:1 |
-| panel (white) on canvas `0.97` | 1.09:1 |
+| raised vs board | 1.16:1 |
+| raised vs panel | 1.11:1 |
+| panel vs canvas | 1.07:1 |
+| panel vs board | 1.04:1 |
+| muted vs raised | 1.17:1 |
 
-The earlier board value `0.945` gave only 1.18:1 against a white card, which
-is why cards and floating bars visually merged with it. At `0.92` the step is
-clearly visible while text on the board still passes AA.
+These steps are small. In a dark UI the eye separates layers mostly by edges,
+so every surface that sits on another one carries `edge-default` (1.50:1 against
+the panel, 1.35:1 against raised). Do not rely on tone alone to separate two
+panels. `surface-panel` against `surface-board` is the weakest pair; if the
+project canvas reads as flat in review, lower `surface-board` before adding
+shadows.
 
-### Borders
+### Edges
 
-| Token | Use | Value | vs panel | vs board `0.92` |
+| Token | Use | Value | vs panel | vs raised |
 | --- | --- | --- | --- | --- |
-| `border-subtle` | Dividers inside a surface | `0.93 0 0` | 1.23:1 | n/a |
-| `border-default` | Card and panel edges | `0.87 0 0` | 1.48:1 | n/a |
-| `border-control` | Input, select, checkbox boundary | `0.60 0 0` | 3.95:1 | 3.12:1 |
+| `edge-subtle` | Dividers inside a surface | `0.25 0 0` | decorative | decorative |
+| `edge-default` | Card and panel edges | `0.32 0 0` | 1.50:1 | 1.35:1 |
+| `edge-control` | Input, select, checkbox boundary | `0.56 0 0` | 4.08:1 | 3.68:1 |
 
-Borders that are the only cue for a control use `border-control` (WCAG 1.4.11,
-3:1 minimum). Everything else is decorative and may be lighter. For reference,
-today's `--input` (`0.822`) measures 1.73:1 on white and fails.
+Edges that are the only cue for a control use `edge-control` (WCAG 1.4.11, 3:1
+minimum). Everything else is decorative and may be lighter.
 
 ### Text
 
-| Token | Value | Ratio on panel | Ratio on board `0.92` |
-| --- | --- | --- | --- |
-| `text-primary` | `0.145 0 0` | 19.79:1 | 15.62:1 |
-| `text-secondary` | `0.44 0 0` | 7.77:1 | 6.13:1 |
-| `text-tertiary` | `0.50 0 0` | 6.00:1 | 4.74:1 |
-| `text-disabled` | `0.70 0 0` | exempt (inactive) | exempt |
-
-`text-tertiary` replaces today's Slate (`0.556`), which measures 4.73:1 on
-white but 4.53:1 on Enamel and 4.03:1 on a `0.94` board, so it fails AA for
-body text on tinted surfaces. All ratios in this brief are computed, not
-estimated.
-
-### Accent
-
-One hue, one scale. The three candidates are rendered in
-[`mock/index.html`](./mock/index.html); only one is chosen.
-
-| Candidate | Hue | `accent-600` (action) | White text on it | Character |
+| Token | Value | on panel | on raised | on muted |
 | --- | --- | --- | --- | --- |
-| A. Indigo | 268 | `0.50 0.19 268` | 6.31:1 | Calm, technical, common in dev tooling |
-| B. Teal | 195 | `0.52 0.10 195` | 5.15:1 | Distinct from status colors, "infrastructure" feel |
-| C. Blue | 252 | `0.52 0.19 252` | 5.45:1 | Familiar, but close to the Docker logo and `info` |
+| `fg-primary` | `0.97 0 0` | 17.39:1 | 16.06:1 | 14.67:1 |
+| `fg-secondary` | `0.80 0 0` | 10.15:1 | 9.15:1 | 8.56:1 |
+| `fg-tertiary` | `0.70 0 0` | 7.10:1 | 6.40:1 | 5.46:1 |
+| `fg-disabled` | `0.45 0 0` | exempt (inactive) | exempt | exempt |
 
-All three pass 4.5:1 for white text. Accent usage is limited to: primary button
-fill, selected nav item indicator, focus ring, links, selected row or node
-outline, and progress.
+Primary text is `0.97`, not pure white, to limit glare on large dark areas.
+`fg-on-brand` is dark (`0.145`), because the brand fill is light in this theme.
+All ratios are computed by `check:contrast`, not estimated.
+
+### Brand
+
+One hue, one scale. Teal was chosen from three candidates rendered in
+[`mock/index.html`](./mock/index.html). The mock shows the light theme; the dark
+values below replace it.
+
+| Token | Value | Use |
+| --- | --- | --- |
+| `brand` | `teal-400` `0.74 0.11 195` | Primary button fill, focus ring, links, selection |
+| `brand-hover` | `teal-300` `0.80 0.10 195` | Hover on brand fills |
+| `brand-wash` | brand at 16% | Selected nav item, node selection halo |
+
+Brand on panel is 8.61:1, dark text on the brand fill is 8.99:1. Usage is
+limited to: primary button fill, selected nav indicator, focus ring, links,
+selected row or node outline, and progress.
 
 ### Status
 
-Status colors are separate from the accent and carry fixed meaning.
+Status colors are separate from the brand and carry fixed meaning.
 
-| Status | Icon | Label example | Foreground | On panel | Wash |
-| --- | --- | --- | --- | --- | --- |
-| success | filled circle | Running | green `0.52 0.14 150` | 5.17:1 | green 8% |
-| warning | triangle | Degraded | amber `0.55 0.13 75` | 4.95:1 | amber 10% |
-| danger | filled square | Failed | red `0.54 0.22 27` | 5.67:1 | red 8% |
-| neutral | hollow circle | Draft | `text-secondary` | none |
-| progress | spinner | Deploying | accent | accent 8% |
+| Status | Shape | Label example | Foreground | On raised |
+| --- | --- | --- | --- | --- |
+| success | filled circle | Running | `green-400` `0.74 0.15 150` | 7.87:1 |
+| warning | triangle | Degraded | `amber-400` `0.80 0.14 80` | 9.03:1 |
+| danger | filled square | Failed | `red-400` `0.70 0.19 25` | 5.88:1 |
+| neutral | hollow circle | Draft | `fg-secondary` | 9.15:1 |
+| progress | spinner | Deploying | `brand` | 7.76:1 |
 
 Shape differs per status so the set stays distinguishable in grayscale.
 This supersedes the "One Signal Rule" in `DESIGN.md`.
+
+### Overlays and depth
+
+- `scrim` (`black` at 60%) dims the page behind dialogs.
+- `shadow-float` for floating bars, `shadow-modal` for dialogs and the sign-in
+  card. Shadows are barely visible on dark grounds, so floating layers also
+  keep an `edge-default` border.
+- React Flow variables (edges, handles, node fill, controls) are overridden in
+  `globals.css` from the same tokens, so graph canvases follow the theme.
 
 ## Typography
 
@@ -220,20 +236,26 @@ Work stays on one branch with small commits, as agreed.
 
 ## Decisions
 
-- Accent: **B. Teal** (`--teal-600`, `oklch(0.52 0.10 195)`). Chosen because it
-  stays clear of the status colors and the Docker blue.
+- Theme: **dark only**. No light theme, no toggle. `color-scheme: dark` is set
+  on `:root`, the toaster is pinned to `dark`, and shadcn's `dark:` variants
+  stay inert (no `.dark` class is applied). Reversing this means adding a second
+  value set to `tokens.css`, not touching components.
+- Accent: **B. Teal**. In the dark theme it is `teal-400`
+  (`oklch(0.74 0.11 195)`); the light value `0.52 0.10 195` was used only in the
+  mock. Chosen because it stays clear of the status colors and the Docker blue.
 - Token names: semantic tokens are `surface-*`, `edge-*`, `fg-*`, `brand` and
   `status-*`, not `border-*`, `text-*` or `accent-*`. Those names are already
   taken by Tailwind utilities and shadcn tokens, so reusing them would be
   ambiguous. `--primary`, `--ring` and the other shadcn tokens are now aliases
   of the semantic tokens, which turns primary buttons and focus rings teal.
 - `bun run check:contrast` (`apps/frontend/scripts/check-contrast.mjs`) reads
-  `tokens.css` and checks 28 text, control-border and focus pairs. It passes.
+  `tokens.css` and checks 40 text, control-border and focus pairs. It passes.
 
 ## Open decisions
 
-- Whether dark mode is in scope. This brief assumes light only, as `DESIGN.md`
-  does today; the token tiers leave room to add it later.
+- Docker's brand blue (`#008fe2`) is the one raw color left in the app, in
+  `docker-icon.tsx`. It is a third-party mark, so it stays, and it is the
+  allowed exception for the lint rule.
 - Whether application developers outside the operator team get console access
   at launch (open in `PRODUCT.md`). It affects density and default views.
 - Target accessibility conformance document (VPAT or similar) for procurement.

@@ -111,6 +111,13 @@ components:
 
 # Design System: Acceleratio Cloud Console
 
+> **Superseded in part.** The console is now dark-only with a Teal brand color
+> and chromatic status colors. Colors, theme, elevation, the shell and the
+> status rules below describe the earlier light design and are replaced by
+> [design-brief/README.md](./design-brief/README.md) and
+> `apps/frontend/src/app/tokens.css`. Typography, spacing and the auth panel
+> sections still apply until this file is rewritten.
+
 ## Overview
 
 **Creative North Star: "The Control Room"**

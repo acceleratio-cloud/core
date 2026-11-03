@@ -48,26 +48,43 @@ const ratio = (fg, bg) => {
 const TEXT = 4.5
 const NON_TEXT = 3
 
-const surfaces = ["surface-panel", "surface-board", "surface-canvas", "surface-sunken"]
+const surfaces = [
+  "surface-panel",
+  "surface-board",
+  "surface-canvas",
+  "surface-sunken",
+  "surface-raised",
+  "surface-muted",
+]
 const pairs = [
   ...["fg-primary", "fg-secondary", "fg-tertiary"].flatMap((fg) =>
     surfaces.map((bg) => ({ fg, bg, min: TEXT, kind: "text" })),
   ),
   ...["brand", "status-success", "status-warning", "status-danger"].flatMap((fg) =>
-    ["surface-panel", "surface-sunken"].map((bg) => ({ fg, bg, min: TEXT, kind: "text" })),
+    ["surface-panel", "surface-board", "surface-raised"].map((bg) => ({
+      fg,
+      bg,
+      min: TEXT,
+      kind: "text",
+    })),
   ),
-  { fg: "fg-inverse", bg: "brand", min: TEXT, kind: "text" },
-  { fg: "fg-inverse", bg: "brand-hover", min: TEXT, kind: "text" },
-  ...["surface-panel", "surface-board", "surface-sunken"].flatMap((bg) => [
+  { fg: "fg-on-brand", bg: "brand", min: TEXT, kind: "text" },
+  { fg: "fg-on-brand", bg: "brand-hover", min: TEXT, kind: "text" },
+  ...["surface-panel", "surface-board", "surface-sunken", "surface-raised"].flatMap((bg) => [
     { fg: "edge-control", bg, min: NON_TEXT, kind: "control border" },
     { fg: "brand", bg, min: NON_TEXT, kind: "focus ring" },
   ]),
 ]
 
 const info = [
+  ["surface-raised", "surface-board"],
+  ["surface-raised", "surface-panel"],
   ["surface-panel", "surface-board"],
-  ["surface-board", "surface-canvas"],
   ["surface-panel", "surface-canvas"],
+  ["surface-muted", "surface-raised"],
+  ["edge-default", "surface-raised"],
+  ["edge-default", "surface-panel"],
+  ["edge-default", "surface-canvas"],
 ]
 
 let failures = 0
@@ -80,7 +97,7 @@ for (const { fg, bg, min, kind } of pairs) {
   )
 }
 
-console.log("\nSurface steps (informational, no threshold):")
+console.log("\nSteps (informational, no threshold):")
 for (const [a, b] of info) {
   console.log(`      ${ratio(a, b).toFixed(3)}:1  ${a} vs ${b}`)
 }

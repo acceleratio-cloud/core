@@ -18,7 +18,7 @@ const statusStyles: Record<
   },
   running: {
     label: 'Running',
-    dot: 'bg-emerald-500',
+    dot: 'bg-status-success',
     text: 'text-foreground',
   },
   stopped: {
@@ -41,8 +41,9 @@ type WorkloadStatusProps = {
 };
 
 /**
- * Presentational status for a workload. Everything is achromatic except
- * `failed`, which is the only state that may take Signal Red.
+ * Presentational status for a workload. `running` and `failed` take the
+ * success and danger status colors; every state also keeps its own label and
+ * dot style so meaning never depends on color alone.
  */
 export const WorkloadStatus = ({
   status,

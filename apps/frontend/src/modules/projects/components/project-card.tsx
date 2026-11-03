@@ -17,10 +17,10 @@ export const ProjectCard = ({ project }: { project: Project }) => {
   return (
     <Link
       href={`/project/${project.id}`}
-      className="group flex min-h-32 flex-col rounded-lg border border-border bg-white p-4 outline-none transition-colors hover:border-input hover:bg-muted/40 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+      className="group flex min-h-32 flex-col rounded-lg border border-border bg-surface-raised p-4 outline-none transition-colors hover:border-input hover:bg-muted/40 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
     >
       <div className="flex items-center gap-3">
-        <span className="flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-muted/60 text-muted-foreground transition-colors group-hover:bg-white">
+        <span className="flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-muted/60 text-muted-foreground transition-colors group-hover:bg-surface-panel">
           <Boxes aria-hidden="true" strokeWidth={1.75} className="size-4" />
         </span>
 
@@ -48,7 +48,7 @@ export const ProjectCard = ({ project }: { project: Project }) => {
 
 export const ProjectCardSkeleton = () => {
   return (
-    <div className="flex min-h-32 flex-col rounded-lg border border-border bg-white p-4">
+    <div className="flex min-h-32 flex-col rounded-lg border border-border bg-surface-raised p-4">
       <div className="flex items-center gap-3">
         <Skeleton className="size-8 shrink-0" />
         <Skeleton className="h-4 min-w-0 flex-1" />
