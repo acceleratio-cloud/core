@@ -7,7 +7,10 @@ import {
   WorkloadFailureNotice,
   WorkloadIdentitySection,
 } from '@/modules/workloads/components/workload-details/workload-common-sections';
-import { WorkloadActions } from '../workload-actions';
+import {
+  WorkloadDeleteSection,
+  WorkloadLifecycleActions,
+} from '../workload-actions';
 import type { WorkloadDetailView } from './workload-detail-view';
 
 /**
@@ -44,9 +47,10 @@ export const getGenericDetailView = (
       content: (
         <DetailStack>
           <WorkloadIdentitySection workload={workload} />
+          <WorkloadDeleteSection />
         </DetailStack>
       ),
     },
   ],
-  actions: <WorkloadActions workload={workload} />,
+  headerActions: <WorkloadLifecycleActions />,
 });

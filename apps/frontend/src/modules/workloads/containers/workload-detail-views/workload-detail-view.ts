@@ -18,6 +18,6 @@ export type WorkloadDetailView = {
   icon: ReactNode;
   /** Rendered in order; the first tab is selected by default. */
   tabs: WorkloadDetailTab[];
-  /** Footer controls. Types may bring their own set of lifecycle actions. */
-  actions: ReactNode;
+  /** Header controls. Types may bring their own set of lifecycle actions. */
+  headerActions: ReactNode;
 };

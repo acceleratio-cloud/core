@@ -8,10 +8,6 @@ import type { Workload } from '@acceleratio/shared';
 import { cn } from '@/lib/utils';
 import { StatusMeter } from '@/modules/workloads/components/workload-cards/node-card-primitives';
 import { WorkloadStatusLabel } from '@/modules/workloads/components/workload-status';
-import {
-  formatAbsoluteTime,
-  formatRelativeTime,
-} from '@/modules/workloads/utils/format-time';
 import { Button } from '@/shared/components/ui/button';
 
 const chipTones: Partial<Record<Workload['status'], string>> = {
@@ -20,22 +16,23 @@ const chipTones: Partial<Record<Workload['status'], string>> = {
 };
 
 /**
- * Who the service is and where it stands: icon tile, name, kind, a status
- * chip and when it last went out. Lives inside the popup as its title.
+ * Who the service is and what you can do with it: icon tile, name, kind, a
+ * status chip and the lifecycle actions. Lives inside the popup as its title.
  */
 export const WorkloadHeader = ({
   workload,
   icon,
   kindLabel,
+  actions,
   onClose,
 }: {
   workload: Workload;
   icon: ReactNode;
   kindLabel: string;
+  /** Lifecycle controls. They take the right of the status row. */
+  actions: ReactNode;
   onClose: () => void;
 }) => {
-  const deployedAt = workload.last_deployed_at;
-
   return (
     <header className="shrink-0 bg-surface-raised px-4 pt-4 pb-3.5">
       <div className="flex items-start gap-3">
@@ -67,7 +64,7 @@ export const WorkloadHeader = ({
         </Button>
       </div>
 
-      <div className="mt-3.5 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+      <div className="mt-3.5 flex flex-wrap items-center gap-x-3 gap-y-2">
         <span
           className={cn(
             'inline-flex h-6 items-center gap-2 rounded-full border border-edge-default bg-surface-panel px-2.5 text-xs',
@@ -77,15 +74,7 @@ export const WorkloadHeader = ({
           <StatusMeter status={workload.status} />
           <WorkloadStatusLabel status={workload.status} />
         </span>
-        <span className="text-xs text-fg-tertiary tabular-nums">
-          {deployedAt ? (
-            <time dateTime={deployedAt} title={formatAbsoluteTime(deployedAt)}>
-              Deployed {formatRelativeTime(deployedAt)}
-            </time>
-          ) : (
-            'Not deployed yet'
-          )}
-        </span>
+        {actions}
       </div>
     </header>
   );

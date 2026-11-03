@@ -6,7 +6,10 @@ import {
   DockerWorkloadOverview,
 } from '@/modules/workloads/components/workload-details/docker-workload-overview';
 import { DockerIcon } from '@/shared/icons/docker-icon';
-import { WorkloadActions } from '../workload-actions';
+import {
+  WorkloadDeleteSection,
+  WorkloadLifecycleActions,
+} from '../workload-actions';
 import type { WorkloadDetailView } from './workload-detail-view';
 
 export const getDockerDetailView = (
@@ -25,8 +28,12 @@ export const getDockerDetailView = (
       id: 'configuration',
       label: 'Configuration',
       icon: SlidersHorizontal,
-      content: <DockerWorkloadConfiguration workload={workload} />,
+      content: (
+        <DockerWorkloadConfiguration workload={workload}>
+          <WorkloadDeleteSection />
+        </DockerWorkloadConfiguration>
+      ),
     },
   ],
-  actions: <WorkloadActions workload={workload} />,
+  headerActions: <WorkloadLifecycleActions />,
 });

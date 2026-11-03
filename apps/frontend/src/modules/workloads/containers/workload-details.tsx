@@ -13,6 +13,7 @@ import {
   TabsList,
   TabsTrigger,
 } from '@/shared/components/ui/tabs';
+import { WorkloadActionsProvider } from './workload-actions';
 import { resolveWorkloadDetailView } from './workload-detail-views/resolve-workload-detail-view';
 
 type WorkloadDetailsProps = {
@@ -81,58 +82,60 @@ export const WorkloadDetails = ({
               'data-[ending-style]:translate-x-[calc(100%+1rem)] data-[ending-style]:opacity-0',
             )}
           >
-            <WorkloadHeader
+            <WorkloadActionsProvider
+              key={`actions-${displayedWorkload.id}`}
               workload={displayedWorkload}
-              icon={view.icon}
-              kindLabel={view.kindLabel}
-              onClose={onClose}
-            />
-
-            <Tabs
-              key={`tabs-${displayedWorkload.id}`}
-              defaultValue={view.tabs[0]?.id}
-              className="flex min-h-0 flex-1 flex-col"
             >
-              {view.tabs.length > 1 ? (
-                <TabsList
-                  aria-label="Service sections"
-                  className="relative shrink-0 gap-1 border-edge-subtle bg-surface-raised px-2.5"
-                >
-                  {view.tabs.map(({ id, label, icon: Icon }) => (
-                    <TabsTrigger
-                      key={id}
-                      value={id}
-                      className={cn(
-                        'mb-0 h-10 gap-2 rounded-md px-2.5 text-sm after:hidden [&_svg]:size-3.5',
-                        'focus-visible:ring-2 motion-reduce:transition-none',
-                        'data-active:text-fg-primary',
-                      )}
-                    >
-                      <Icon aria-hidden="true" strokeWidth={1.75} />
-                      {label}
-                    </TabsTrigger>
-                  ))}
-                  <TabsPrimitive.Indicator
-                    aria-hidden="true"
-                    className="absolute bottom-0 left-0 h-0.5 w-(--active-tab-width) translate-x-(--active-tab-left) rounded-t-full bg-brand transition-[translate,width] duration-200 ease-out motion-reduce:transition-none"
-                  />
-                </TabsList>
-              ) : null}
+              <WorkloadHeader
+                workload={displayedWorkload}
+                icon={view.icon}
+                kindLabel={view.kindLabel}
+                actions={view.headerActions}
+                onClose={onClose}
+              />
 
-              {view.tabs.map(({ id, content }) => (
-                <TabsContent
-                  key={id}
-                  value={id}
-                  className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain bg-surface-panel p-4 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-                >
-                  {content}
-                </TabsContent>
-              ))}
-            </Tabs>
+              <Tabs
+                key={`tabs-${displayedWorkload.id}`}
+                defaultValue={view.tabs[0]?.id}
+                className="flex min-h-0 flex-1 flex-col"
+              >
+                {view.tabs.length > 1 ? (
+                  <TabsList
+                    aria-label="Service sections"
+                    className="relative shrink-0 gap-1 border-edge-subtle bg-surface-raised px-2.5"
+                  >
+                    {view.tabs.map(({ id, label, icon: Icon }) => (
+                      <TabsTrigger
+                        key={id}
+                        value={id}
+                        className={cn(
+                          'mb-0 h-10 gap-2 rounded-md px-2.5 text-sm after:hidden [&_svg]:size-3.5',
+                          'focus-visible:ring-2 motion-reduce:transition-none',
+                          'data-active:text-fg-primary',
+                        )}
+                      >
+                        <Icon aria-hidden="true" strokeWidth={1.75} />
+                        {label}
+                      </TabsTrigger>
+                    ))}
+                    <TabsPrimitive.Indicator
+                      aria-hidden="true"
+                      className="absolute bottom-0 left-0 h-0.5 w-(--active-tab-width) translate-x-(--active-tab-left) rounded-t-full bg-brand transition-[translate,width] duration-200 ease-out motion-reduce:transition-none"
+                    />
+                  </TabsList>
+                ) : null}
 
-            <div key={`actions-${displayedWorkload.id}`} className="contents">
-              {view.actions}
-            </div>
+                {view.tabs.map(({ id, content }) => (
+                  <TabsContent
+                    key={id}
+                    value={id}
+                    className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain bg-surface-panel p-4 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                  >
+                    {content}
+                  </TabsContent>
+                ))}
+              </Tabs>
+            </WorkloadActionsProvider>
           </Dialog.Popup>
         ) : null}
       </Dialog.Portal>

@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { Package } from 'lucide-react';
 
 import type { Workload } from '@acceleratio/shared';
@@ -47,11 +48,16 @@ export const DockerWorkloadOverview = ({
   );
 };
 
-/** Everything that identifies the service, in full and copyable. */
+/**
+ * Everything that identifies the service, in full and copyable. `children`
+ * render after the sections, for controls the view owns (such as delete).
+ */
 export const DockerWorkloadConfiguration = ({
   workload,
+  children,
 }: {
   workload: Workload;
+  children?: ReactNode;
 }) => {
   const reference = workload.config.docker_image;
   const { digest } = parseDockerImage(reference);
@@ -66,6 +72,7 @@ export const DockerWorkloadConfiguration = ({
       </DetailSection>
 
       <WorkloadIdentitySection workload={workload} />
+      {children}
     </DetailStack>
   );
 };
