@@ -64,8 +64,8 @@ const meterStyles: Record<
   failed: { filled: 2, tone: 'bg-status-danger' },
 };
 
-/** Slanted signal bars. Decorative: the Status row carries the label. */
-const StatusMeter = ({ status }: { status: WorkloadStatusValue }) => {
+/** Slanted signal bars. Decorative: the status label always sits beside it. */
+export const StatusMeter = ({ status }: { status: WorkloadStatusValue }) => {
   const { filled, tone, pulse } = meterStyles[status];
 
   return (

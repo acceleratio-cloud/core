@@ -33,6 +33,19 @@ const statusStyles: Record<
   },
 };
 
+/** The status word alone, in its tone, for places that draw their own marker. */
+export const WorkloadStatusLabel = ({
+  status,
+  className,
+}: {
+  status: WorkloadStatusValue;
+  className?: string;
+}) => (
+  <span className={cn('font-medium', statusStyles[status].text, className)}>
+    {statusStyles[status].label}
+  </span>
+);
+
 type WorkloadStatusProps = {
   status: WorkloadStatusValue;
   statusMessage?: string | null;

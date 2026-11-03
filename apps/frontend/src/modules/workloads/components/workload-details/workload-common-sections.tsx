@@ -20,9 +20,10 @@ export const WorkloadFailureNotice = ({ workload }: { workload: Workload }) => {
   }
 
   return (
-    <DetailNotice title="Deployment failed">
-      {workload.status_message}
-    </DetailNotice>
+    <DetailNotice
+      title="Deployment failed"
+      message={workload.status_message}
+    />
   );
 };
 
@@ -38,6 +39,7 @@ export const WorkloadDeploymentSection = ({
         value={workload.last_deployed_at}
         emptyLabel="Never"
       />
+      <TimeProperty label="Status checked" value={workload.status_observed_at} />
       <TimeProperty label="Last updated" value={workload.updated_at} />
       <TimeProperty label="Created" value={workload.created_at} />
     </PropertyList>

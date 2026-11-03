@@ -15,9 +15,12 @@ export const DetailStack = ({
 }: {
   children: ReactNode;
   className?: string;
-}) => <div className={cn('flex flex-col gap-4', className)}>{children}</div>;
+}) => <div className={cn('flex flex-col gap-5', className)}>{children}</div>;
 
-/** A framed section with the same muted header as a canvas node card. */
+/**
+ * A titled group. The title sits on the panel above the card, so the card
+ * itself is just rows divided by hairlines.
+ */
 export const DetailSection = ({
   title,
   icon: Icon,
@@ -32,16 +35,10 @@ export const DetailSection = ({
   const headingId = useId();
 
   return (
-    <section
-      aria-labelledby={headingId}
-      className={cn(
-        'overflow-hidden rounded-lg border border-edge-default bg-surface-raised',
-        className,
-      )}
-    >
+    <section aria-labelledby={headingId} className={className}>
       <h3
         id={headingId}
-        className="flex items-center gap-2 border-b border-edge-subtle bg-surface-muted/40 px-3 py-2.5 text-xs font-medium text-fg-secondary"
+        className="mb-2 flex items-center gap-1.5 px-1 text-xs font-medium text-fg-secondary"
       >
         {Icon ? (
           <Icon
@@ -52,12 +49,14 @@ export const DetailSection = ({
         ) : null}
         {title}
       </h3>
-      {children}
+      <div className="overflow-hidden rounded-lg border border-edge-default bg-surface-raised">
+        {children}
+      </div>
     </section>
   );
 };
 
-/** Compact label/value rows, inset beneath a section header. */
+/** Rows of one section, separated by hairlines. */
 export const PropertyList = ({
   children,
   className,
@@ -65,30 +64,42 @@ export const PropertyList = ({
   children: ReactNode;
   className?: string;
 }) => (
-  <dl className={cn('flex flex-col px-3 py-1.5', className)}>{children}</dl>
+  <dl className={cn('divide-y divide-edge-subtle', className)}>{children}</dl>
 );
 
-const rowClassName = 'group/row flex min-h-9 items-center gap-3 py-1.5';
-const labelClassName = 'w-28 shrink-0 text-xs leading-5 text-fg-tertiary';
-const valueClassName =
-  'min-w-0 flex-1 text-right font-mono text-xs leading-5 text-fg-primary';
+const labelClassName = 'text-xs leading-5 text-fg-tertiary';
 
+/** One line: label on the left, a short value on the right. */
 export const PropertyRow = ({
   label,
   children,
+  mono = false,
   className,
 }: {
   label: string;
   children: ReactNode;
+  /** Set for identifiers and other machine values. */
+  mono?: boolean;
   className?: string;
 }) => (
-  <div className={rowClassName}>
-    <dt className={labelClassName}>{label}</dt>
-    <dd className={cn(valueClassName, className)}>{children}</dd>
+  <div className="flex min-h-10 items-center justify-between gap-4 px-3 py-2">
+    <dt className={cn(labelClassName, 'shrink-0')}>{label}</dt>
+    <dd
+      className={cn(
+        'min-w-0 text-right text-xs leading-5 text-fg-primary',
+        mono && 'font-mono',
+        className,
+      )}
+    >
+      {children}
+    </dd>
   </div>
 );
 
-/** Identifier shown in mono, with a persistent copy affordance. */
+/**
+ * A machine value that may be long. The label sits above and the value wraps
+ * in full, so nothing is cut off, with a copy button beside it.
+ */
 export const CopyableProperty = ({
   label,
   value,
@@ -99,18 +110,18 @@ export const CopyableProperty = ({
   /** Replaces the plain value when a richer rendering is needed. */
   children?: ReactNode;
 }) => (
-  <div className={rowClassName}>
-    <dt className={labelClassName}>{label}</dt>
-    <dd className={cn(valueClassName, 'flex items-center gap-1.5')}>
-      <span title={value} className="min-w-0 flex-1 truncate">
+  <div className="flex items-start gap-2 py-2.5 pr-2 pl-3">
+    <div className="min-w-0 flex-1">
+      <dt className={labelClassName}>{label}</dt>
+      <dd className="mt-0.5 font-mono text-xs leading-5 break-all text-fg-primary">
         {children ?? value}
-      </span>
-      <CopyButton
-        value={value}
-        label={label.toLowerCase()}
-        className="-my-0.5 text-fg-tertiary"
-      />
-    </dd>
+      </dd>
+    </div>
+    <CopyButton
+      value={value}
+      label={label.toLowerCase()}
+      className="mt-2.5 text-fg-tertiary"
+    />
   </div>
 );
 
@@ -137,56 +148,44 @@ export const TimeProperty = ({
         {formatRelativeTime(value)}
       </time>
     ) : (
-      <span className="text-muted-foreground">{emptyLabel ?? '—'}</span>
+      <span className="text-fg-tertiary">{emptyLabel ?? '—'}</span>
     )}
   </PropertyRow>
 );
 
-/** The node card's failure well, with neutral, readable message text. */
+/**
+ * The node card's failure well, shown in full. Red marks only the icon and
+ * title; the message is neutral text so it stays readable, and it can be
+ * copied for a bug report.
+ */
 export const DetailNotice = ({
   title,
-  children,
+  message,
 }: {
   title: string;
-  children: ReactNode;
+  message: string;
 }) => (
   <div
     role="alert"
-    className="flex flex-col gap-2 rounded-lg border border-status-danger/50 bg-status-danger/10 p-3"
+    className="rounded-lg border border-status-danger/40 bg-status-danger/10"
   >
-    <p className="flex items-center gap-2 text-xs font-medium text-status-danger">
+    <div className="flex h-9 items-center gap-2 pr-1.5 pl-3">
       <CircleAlert
         aria-hidden="true"
         strokeWidth={1.75}
-        className="size-3.5 shrink-0"
+        className="size-3.5 shrink-0 text-status-danger"
       />
-      {title}
-    </p>
-    <p className="text-xs leading-relaxed break-words text-fg-secondary">
-      {children}
-    </p>
-  </div>
-);
-
-export const DetailEmptyState = ({
-  icon: Icon,
-  title,
-  description,
-}: {
-  icon: LucideIcon;
-  title: string;
-  description: string;
-}) => (
-  <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-lg border border-edge-default bg-surface-raised px-4 py-12 text-center">
-    <span
-      aria-hidden="true"
-      className="mb-2 flex size-10 items-center justify-center rounded-lg border border-edge-default bg-surface-sunken"
-    >
-      <Icon strokeWidth={1.75} className="size-5 text-fg-tertiary" />
-    </span>
-    <p className="text-sm font-medium text-fg-primary">{title}</p>
-    <p className="max-w-60 text-xs leading-relaxed text-fg-tertiary">
-      {description}
+      <p className="min-w-0 flex-1 truncate text-xs font-medium text-status-danger">
+        {title}
+      </p>
+      <CopyButton
+        value={message}
+        label="error message"
+        className="text-fg-secondary"
+      />
+    </div>
+    <p className="px-3 pb-3 text-xs leading-relaxed break-words text-fg-secondary select-text">
+      {message}
     </p>
   </div>
 );

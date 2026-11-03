@@ -2,12 +2,12 @@
 
 import { useState } from 'react';
 import {
-  LoaderCircle,
   Play,
   RotateCw,
   Rocket,
   Square,
   Trash2,
+  type LucideIcon,
 } from 'lucide-react';
 
 import type { Workload } from '@acceleratio/shared';
@@ -82,116 +82,80 @@ export const WorkloadActions = ({ workload }: { workload: Workload }) => {
     setIsDeleteOpen(nextOpen);
   };
 
+  const lifecycle: {
+    key: Exclude<ActionKey, 'delete'>;
+    visible: boolean;
+    primary?: boolean;
+    icon: LucideIcon;
+    label: string;
+    pendingLabel: string;
+    request: () => Promise<Workload>;
+  }[] = [
+    {
+      key: 'deploy',
+      visible: canDeploy,
+      primary: true,
+      icon: Rocket,
+      label: 'Deploy',
+      pendingLabel: 'Deploying',
+      request: () => workloadsApi.deploy(project.id, workload.id),
+    },
+    {
+      key: 'start',
+      visible: canStart,
+      icon: Play,
+      label: 'Start',
+      pendingLabel: 'Starting',
+      request: () => workloadsApi.start(project.id, workload.id),
+    },
+    {
+      key: 'restart',
+      visible: canRestart,
+      icon: RotateCw,
+      label: 'Restart',
+      pendingLabel: 'Restarting',
+      request: () => workloadsApi.restart(project.id, workload.id),
+    },
+    {
+      key: 'stop',
+      visible: canStop,
+      icon: Square,
+      label: 'Stop',
+      pendingLabel: 'Stopping',
+      request: () => workloadsApi.stop(project.id, workload.id),
+    },
+  ];
+
   return (
     <>
       <div
         role="group"
         aria-label="Service actions"
-        className="shrink-0 border-t border-edge-subtle bg-surface-muted/40 px-4 py-3"
+        className="shrink-0 border-t border-edge-default bg-surface-raised px-4 py-3"
       >
         <div className="flex flex-wrap items-center gap-2">
-          {canDeploy ? (
-            <Button
-              type="button"
-              size="sm"
-              onClick={() =>
-                void runAction('deploy', () =>
-                  workloadsApi.deploy(project.id, workload.id),
-                )
-              }
-              disabled={isBusy}
-              aria-busy={pendingAction === 'deploy'}
-            >
-              {pendingAction === 'deploy' ? (
-                <LoaderCircle
-                  aria-hidden="true"
-                  strokeWidth={1.75}
-                  className="animate-spin motion-reduce:animate-none"
-                />
-              ) : (
-                <Rocket aria-hidden="true" strokeWidth={1.75} />
-              )}
-              {pendingAction === 'deploy' ? 'Deploying...' : 'Deploy'}
-            </Button>
-          ) : null}
-
-          {canStart ? (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() =>
-                void runAction('start', () =>
-                  workloadsApi.start(project.id, workload.id),
-                )
-              }
-              disabled={isBusy}
-              aria-busy={pendingAction === 'start'}
-            >
-              {pendingAction === 'start' ? (
-                <LoaderCircle
-                  aria-hidden="true"
-                  strokeWidth={1.75}
-                  className="animate-spin motion-reduce:animate-none"
-                />
-              ) : (
-                <Play aria-hidden="true" strokeWidth={1.75} />
-              )}
-              {pendingAction === 'start' ? 'Starting...' : 'Start'}
-            </Button>
-          ) : null}
-
-          {canStop ? (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() =>
-                void runAction('stop', () =>
-                  workloadsApi.stop(project.id, workload.id),
-                )
-              }
-              disabled={isBusy}
-              aria-busy={pendingAction === 'stop'}
-            >
-              {pendingAction === 'stop' ? (
-                <LoaderCircle
-                  aria-hidden="true"
-                  strokeWidth={1.75}
-                  className="animate-spin motion-reduce:animate-none"
-                />
-              ) : (
-                <Square aria-hidden="true" strokeWidth={1.75} />
-              )}
-              {pendingAction === 'stop' ? 'Stopping...' : 'Stop'}
-            </Button>
-          ) : null}
-
-          {canRestart ? (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() =>
-                void runAction('restart', () =>
-                  workloadsApi.restart(project.id, workload.id),
-                )
-              }
-              disabled={isBusy}
-              aria-busy={pendingAction === 'restart'}
-            >
-              {pendingAction === 'restart' ? (
-                <LoaderCircle
-                  aria-hidden="true"
-                  strokeWidth={1.75}
-                  className="animate-spin motion-reduce:animate-none"
-                />
-              ) : (
-                <RotateCw aria-hidden="true" strokeWidth={1.75} />
-              )}
-              {pendingAction === 'restart' ? 'Restarting...' : 'Restart'}
-            </Button>
-          ) : null}
+          {lifecycle
+            .filter((action) => action.visible)
+            .map(
+              ({ key, primary, icon: Icon, label, pendingLabel, request }) => (
+                <Button
+                  key={key}
+                  type="button"
+                  variant={primary ? 'default' : 'outline'}
+                  size="sm"
+                  loading={pendingAction === key}
+                  disabled={isBusy}
+                  onClick={() => void runAction(key, request)}
+                >
+                  <Icon
+                    data-icon="inline-start"
+                    aria-hidden="true"
+                    strokeWidth={1.75}
+                  />
+                  {pendingAction === key ? pendingLabel : label}
+                </Button>
+              ),
+            )}
 
           <Button
             type="button"
@@ -202,7 +166,7 @@ export const WorkloadActions = ({ workload }: { workload: Workload }) => {
               setIsDeleteOpen(true);
             }}
             disabled={isBusy}
-            className="ml-auto bg-surface-sunken hover:bg-surface-panel active:bg-surface-sunken"
+            className="ml-auto"
           >
             <Trash2
               data-icon="inline-start"
@@ -246,19 +210,14 @@ export const WorkloadActions = ({ workload }: { workload: Workload }) => {
               type="button"
               variant="destructive"
               onClick={() => void handleDelete()}
-              disabled={isDeleting}
-              aria-busy={isDeleting}
+              loading={isDeleting}
             >
-              {isDeleting ? (
-                <LoaderCircle
-                  aria-hidden="true"
-                  strokeWidth={1.75}
-                  className="animate-spin motion-reduce:animate-none"
-                />
-              ) : (
-                <Trash2 aria-hidden="true" strokeWidth={1.75} />
-              )}
-              {isDeleting ? 'Deleting...' : 'Delete service'}
+              <Trash2
+                data-icon="inline-start"
+                aria-hidden="true"
+                strokeWidth={1.75}
+              />
+              {isDeleting ? 'Deleting' : 'Delete service'}
             </Button>
           </DialogFooter>
         </DialogContent>

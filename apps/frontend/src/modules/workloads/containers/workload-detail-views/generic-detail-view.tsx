@@ -1,4 +1,4 @@
-import { Box, LayoutDashboard } from 'lucide-react';
+import { Box, LayoutDashboard, SlidersHorizontal } from 'lucide-react';
 
 import type { Workload } from '@acceleratio/shared';
 import { DetailStack } from '@/modules/workloads/components/workload-details/detail-primitives';
@@ -22,7 +22,7 @@ export const getGenericDetailView = (
     <Box
       aria-hidden="true"
       strokeWidth={1.75}
-      className="size-5 text-muted-foreground"
+      className="size-5 text-fg-tertiary"
     />
   ),
   tabs: [
@@ -34,6 +34,15 @@ export const getGenericDetailView = (
         <DetailStack>
           <WorkloadFailureNotice workload={workload} />
           <WorkloadDeploymentSection workload={workload} />
+        </DetailStack>
+      ),
+    },
+    {
+      id: 'configuration',
+      label: 'Configuration',
+      icon: SlidersHorizontal,
+      content: (
+        <DetailStack>
           <WorkloadIdentitySection workload={workload} />
         </DetailStack>
       ),

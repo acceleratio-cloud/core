@@ -237,6 +237,25 @@ Five steps replace the six arbitrary sizes. Tracking: `-0.02em` at `xl`,
    otherwise "Deployed 3 hours ago". The meter is decorative, and the Status row
    carries the label. Selection is a `brand-fg` border plus an offset outline.
    The board uses a 20px dot grid in `edge-default`.
+   Selecting a card opens the service panel (`workload-details.tsx`), 560px
+   wide on `surface-raised` with `shadow-float`. Three bands, top to bottom:
+   - Header (`workload-header.tsx`): a 44px icon tile, the name (truncated,
+     full name on hover), the kind in `fg-tertiary`, and a close button. Below
+     it a status chip (the same five-bar meter plus the status word; `running`
+     and `failed` tint the chip with `status-success` and `status-danger`) and
+     "Deployed 3 hours ago" or "Not deployed yet".
+   - Tabs: Overview and Configuration, with a `brand` underline that slides
+     between them. Overview holds what changes (the failure well, the image
+     repository and tag, deployment times). Configuration holds identifiers in
+     full: image reference, digest, namespace, external name, service id. Each
+     wraps instead of truncating and has a copy button. There is no tab for
+     logs, metrics or environment variables until the API provides that data.
+   - Body and footer: sections are a small title on the panel above a bordered
+     `surface-raised` card of rows divided by `edge-subtle` hairlines (label in
+     `fg-tertiary`, value right-aligned). The failure well shows the full
+     message with a copy button and no clamp. The footer is on `surface-raised`
+     with the lifecycle actions (Deploy is the only filled button) and Delete
+     pushed right. Running actions use the Button `loading` prop.
 3. **List page.** `PageHeader` (title, description, primary action), then a
    `DataTable` or card grid on `surface-panel`.
 4. **Detail and settings.** Left section nav, right content, max readable width.

@@ -8,6 +8,7 @@ import {
   DetailStack,
   MonoBadge,
   PropertyList,
+  PropertyRow,
 } from './detail-primitives';
 import {
   WorkloadDeploymentSection,
@@ -15,31 +16,55 @@ import {
   WorkloadIdentitySection,
 } from './workload-common-sections';
 
+/** The error if there is one, a glance at the image, and the history. */
 export const DockerWorkloadOverview = ({
   workload,
 }: {
   workload: Workload;
 }) => {
   const reference = workload.config.docker_image;
-  const { repository, tag, digest } = parseDockerImage(reference);
+  const { repository, tag } = parseDockerImage(reference);
 
   return (
     <DetailStack>
       <WorkloadFailureNotice workload={workload} />
 
-      <DetailSection title="Container image" icon={Package}>
+      <DetailSection title="Image" icon={Package}>
         <PropertyList>
-          <CopyableProperty label="Image" value={reference}>
-            {repository}
-          </CopyableProperty>
-          <CopyableProperty label="Tag" value={tag}>
+          <PropertyRow label="Repository" mono>
+            <span title={reference} className="block truncate">
+              {repository}
+            </span>
+          </PropertyRow>
+          <PropertyRow label="Tag">
             <MonoBadge>{tag}</MonoBadge>
-          </CopyableProperty>
-          {digest ? <CopyableProperty label="Digest" value={digest} /> : null}
+          </PropertyRow>
         </PropertyList>
       </DetailSection>
 
       <WorkloadDeploymentSection workload={workload} />
+    </DetailStack>
+  );
+};
+
+/** Everything that identifies the service, in full and copyable. */
+export const DockerWorkloadConfiguration = ({
+  workload,
+}: {
+  workload: Workload;
+}) => {
+  const reference = workload.config.docker_image;
+  const { digest } = parseDockerImage(reference);
+
+  return (
+    <DetailStack>
+      <DetailSection title="Container image" icon={Package}>
+        <PropertyList>
+          <CopyableProperty label="Image" value={reference} />
+          {digest ? <CopyableProperty label="Digest" value={digest} /> : null}
+        </PropertyList>
+      </DetailSection>
+
       <WorkloadIdentitySection workload={workload} />
     </DetailStack>
   );
