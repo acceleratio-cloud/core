@@ -92,6 +92,8 @@ const createDatabase = () => {
   const from = jest.fn().mockReturnValue({ where: selectWhere });
   const select = jest.fn().mockReturnValue({ from });
   const returning = jest.fn();
+  const insertValues = jest.fn().mockReturnValue({ returning });
+  const insert = jest.fn().mockReturnValue({ values: insertValues });
   const updateWhere = jest.fn().mockReturnValue({ returning });
   const set = jest.fn().mockReturnValue({ where: updateWhere });
   const update = jest.fn().mockReturnValue({ set });
@@ -99,11 +101,13 @@ const createDatabase = () => {
   const remove = jest.fn().mockReturnValue({ where: deleteWhere });
 
   return {
-    db: { select, update, delete: remove } as unknown as Database,
+    db: { select, insert, update, delete: remove } as unknown as Database,
     select,
     selectWhere,
     orderBy,
     limit,
+    insert,
+    insertValues,
     update,
     set,
     returning,
@@ -205,6 +209,114 @@ describe('DockerWorkloadService.list', () => {
   });
 });
 
+describe('DockerWorkloadService.update', () => {
+  it('persists a position and publishes a position event', async () => {
+    const { service, limit, set, returning, publish, appsV1 } = createService();
+    const moved: WorkloadRow = {
+      ...baseRow,
+      position: { x: 120, y: 40 },
+      updated_at: new Date('2026-11-02T10:00:01.000Z'),
+    };
+
+    limit.mockResolvedValue([baseRow]);
+    returning.mockResolvedValue([moved]);
+
+    const result = await service.update(projectId, workloadId, {
+      position: { x: 120, y: 40 },
+    });
+
+    expect(set).toHaveBeenCalledWith({ position: { x: 120, y: 40 } });
+    expect(publish).toHaveBeenCalledWith({
+      type: 'position',
+      workload_id: workloadId,
+      project_id: projectId,
+      position: { x: 120, y: 40 },
+      updated_at: '2026-11-02T10:00:01.000Z',
+    });
+    expect(result.position).toEqual({ x: 120, y: 40 });
+    expect(appsV1.replaceNamespacedDeployment).not.toHaveBeenCalled();
+  });
+
+  it('treats a drop on the stored coordinates as a no-op', async () => {
+    const { service, limit, update, publish } = createService();
+
+    limit.mockResolvedValue([baseRow]);
+
+    const result = await service.update(projectId, workloadId, {
+      position: { x: 0, y: 0 },
+    });
+
+    expect(update).not.toHaveBeenCalled();
+    expect(publish).not.toHaveBeenCalled();
+    expect(result.position).toEqual({ x: 0, y: 0 });
+  });
+
+  it('does not publish a position event for a rename', async () => {
+    const { service, limit, returning, publish } = createService();
+    const renamed: WorkloadRow = {
+      ...baseRow,
+      name: 'Renamed',
+      updated_at: new Date('2026-11-02T10:00:01.000Z'),
+    };
+
+    limit.mockResolvedValue([baseRow]);
+    returning.mockResolvedValue([renamed]);
+
+    await service.update(projectId, workloadId, { name: 'Renamed' });
+
+    expect(publish).not.toHaveBeenCalled();
+  });
+
+  it('rejects a position with non-numeric coordinates', async () => {
+    const { service, limit, update, publish } = createService();
+
+    limit.mockResolvedValue([baseRow]);
+
+    await expect(
+      service.update(projectId, workloadId, {
+        position: { x: 'left', y: 0 } as unknown as {
+          x: number;
+          y: number;
+        },
+      }),
+    ).rejects.toThrow('position must contain numeric x and y');
+    expect(update).not.toHaveBeenCalled();
+    expect(publish).not.toHaveBeenCalled();
+  });
+});
+
+describe('DockerWorkloadService.create', () => {
+  it('places a new workload in the first free grid slot', async () => {
+    const { service, exists, selectWhere, insert, insertValues, returning } =
+      createService();
+    const created: WorkloadRow = {
+      ...baseRow,
+      position: { x: 640, y: 0 },
+    };
+
+    exists.mockResolvedValue(true);
+    selectWhere.mockResolvedValueOnce([
+      { position: { x: 0, y: 0 } },
+      { position: { x: 320, y: 0 } },
+    ]);
+    returning.mockResolvedValue([created]);
+
+    await service.create(projectId, {
+      name: 'Worker',
+      type: 'docker',
+      config: { docker_image: 'nginx:1.25' },
+    });
+
+    expect(insert).toHaveBeenCalledTimes(1);
+    expect(firstArgument(insertValues)).toMatchObject({
+      project_id: projectId,
+      name: 'Worker',
+      type: 'docker',
+      position: { x: 640, y: 0 },
+    });
+  });
+});
+
 describe('DockerWorkloadService lifecycle actions', () => {
   it('deploys a missing Deployment and publishes the optimistic status', async () => {
     const {
@@ -248,6 +360,7 @@ describe('DockerWorkloadService lifecycle actions', () => {
     expect(persisted.status_message).toBeNull();
     expect(persisted.last_deployed_at).toBeInstanceOf(Date);
     expect(publish).toHaveBeenCalledWith({
+      type: 'status',
       workload_id: workloadId,
       project_id: projectId,
       status: 'deploying',
@@ -291,6 +404,7 @@ describe('DockerWorkloadService lifecycle actions', () => {
       status_message: null,
     });
     expect(publish).toHaveBeenCalledWith({
+      type: 'status',
       workload_id: workloadId,
       project_id: projectId,
       status: 'stopped',
@@ -337,6 +451,7 @@ describe('DockerWorkloadService lifecycle actions', () => {
       before,
     );
     expect(publish).toHaveBeenCalledWith({
+      type: 'status',
       workload_id: workloadId,
       project_id: projectId,
       status: 'deploying',

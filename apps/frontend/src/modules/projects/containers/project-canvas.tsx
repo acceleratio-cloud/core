@@ -1,17 +1,21 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
-import type { Edge } from '@xyflow/react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { Edge, OnNodeDrag } from '@xyflow/react';
 import {
   Background,
   BackgroundVariant,
   ReactFlow,
   ReactFlowProvider,
+  useNodesState,
 } from '@xyflow/react';
+import { sileo } from 'sileo';
 
+import { getApiErrorMessage } from '@/api';
 import { CreateWorkloadDialog } from '@/modules/workloads/containers/create-workload-dialog';
 import { WorkloadDetails } from '@/modules/workloads/containers/workload-details';
 import { workloadNodeTypes } from '@/modules/workloads/components/workload-nodes';
+import type { WorkloadNode } from '@/modules/workloads/utils/workload-nodes';
 import { toWorkloadNodes } from '@/modules/workloads/utils/workload-nodes';
 import { CanvasLoader } from '@/shared/components/canvas-loader';
 import { ProjectHeader } from '../components/project-header';
@@ -69,33 +73,77 @@ const WorkloadFlow = ({
   onSelectWorkload: (workloadId: string) => void;
   onClearSelection: () => void;
 }) => {
-  const { workloads, isLoadingWorkloads } = useProject();
-  // Selection lives in the canvas state (it drives the details panel), so the
-  // flow is told which node is selected instead of tracking it itself.
-  const nodes = useMemo(
-    () =>
-      toWorkloadNodes(workloads).map((node) =>
-        node.id === selectedWorkloadId ? { ...node, selected: true } : node,
-      ),
-    [workloads, selectedWorkloadId],
+  const { workloads, isLoadingWorkloads, moveWorkload } = useProject();
+  // React Flow owns drag positions and node measurements. The effect keeps
+  // the local list in sync with workloads (data, remote positions, creates and
+  // deletes) without replacing a node that is currently under the pointer.
+  const [nodes, setNodes, onNodesChange] = useNodesState<WorkloadNode>([]);
+  const draggingIds = useRef(new Set<string>());
+
+  useEffect(() => {
+    setNodes((currentNodes) => {
+      const currentById = new Map(currentNodes.map((node) => [node.id, node]));
+
+      return toWorkloadNodes(workloads).map((node) => {
+        const current = currentById.get(node.id);
+        const isDragging = draggingIds.current.has(node.id);
+
+        return {
+          ...current,
+          ...node,
+          position: isDragging
+            ? (current?.position ?? node.position)
+            : node.position,
+          measured: current?.measured,
+          selected: node.id === selectedWorkloadId,
+        };
+      });
+    });
+  }, [workloads, selectedWorkloadId, setNodes]);
+
+  const handleNodeDragStart = useCallback<OnNodeDrag<WorkloadNode>>(
+    (_, node) => {
+      draggingIds.current.add(node.id);
+    },
+    [],
+  );
+
+  const handleNodeDragStop = useCallback<OnNodeDrag<WorkloadNode>>(
+    (_, node) => {
+      draggingIds.current.delete(node.id);
+
+      void moveWorkload(node.id, node.position).catch((error) => {
+        sileo.error({
+          title: 'Could not save the new position',
+          description: getApiErrorMessage(error),
+        });
+      });
+    },
+    [moveWorkload],
   );
 
   return (
     <>
+      {/* Dragging is not a selection gesture, and Backspace must not hide a
+          node locally without deleting it on the server. */}
       <ReactFlow
         nodes={nodes}
         edges={emptyEdges}
         nodeTypes={workloadNodeTypes}
+        onNodesChange={onNodesChange}
         onNodeClick={(_, node) => onSelectWorkload(node.id)}
+        onNodeDragStart={handleNodeDragStart}
+        onNodeDragStop={handleNodeDragStop}
         onPaneClick={onClearSelection}
         fitView
         fitViewOptions={{ padding: 0.2, maxZoom: 1.15 }}
         minZoom={0.3}
         maxZoom={1.5}
-        nodesDraggable={false}
         nodesConnectable={false}
         nodesFocusable={false}
         edgesFocusable={false}
+        selectNodesOnDrag={false}
+        deleteKeyCode={null}
         proOptions={{ hideAttribution: true }}
       >
         <Background

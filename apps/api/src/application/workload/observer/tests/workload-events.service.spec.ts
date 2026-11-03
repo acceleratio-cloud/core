@@ -1,5 +1,8 @@
 import type { MessageEvent } from '@nestjs/common';
-import type { WorkloadStatusEvent } from '@acceleratio/shared';
+import type {
+  WorkloadPositionEvent,
+  WorkloadStatusEvent,
+} from '@acceleratio/shared';
 import {
   HEARTBEAT_INTERVAL_MS,
   WorkloadEventsService,
@@ -12,12 +15,24 @@ const workloadId = '3f9a1b2c-4d5e-6f70-8192-a3b4c5d6e7f8';
 const createEvent = (
   overrides: Partial<WorkloadStatusEvent> = {},
 ): WorkloadStatusEvent => ({
+  type: 'status',
   workload_id: workloadId,
   project_id: projectId,
   status: 'running',
   status_message: null,
   status_observed_at: '2026-11-02T10:00:00.000Z',
   updated_at: '2026-11-02T10:00:01.000Z',
+  ...overrides,
+});
+
+const createPositionEvent = (
+  overrides: Partial<WorkloadPositionEvent> = {},
+): WorkloadPositionEvent => ({
+  type: 'position',
+  workload_id: workloadId,
+  project_id: projectId,
+  position: { x: 320, y: 120 },
+  updated_at: '2026-11-02T10:00:02.000Z',
   ...overrides,
 });
 
@@ -43,6 +58,17 @@ describe('WorkloadEventsService', () => {
     const service = new WorkloadEventsService();
     const { received, subscription } = collect(service);
     const event = createEvent();
+
+    service.publish(event);
+
+    expect(received).toEqual([{ data: event }]);
+    subscription.unsubscribe();
+  });
+
+  it('publishes position events as the default SSE message', () => {
+    const service = new WorkloadEventsService();
+    const { received, subscription } = collect(service);
+    const event = createPositionEvent();
 
     service.publish(event);
 

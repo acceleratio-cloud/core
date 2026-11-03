@@ -9,7 +9,11 @@ import * as http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import type { WorkloadStatusEvent } from '@acceleratio/shared';
+import type {
+  WorkloadEvent,
+  WorkloadPositionEvent,
+  WorkloadStatusEvent,
+} from '@acceleratio/shared';
 import { WorkloadEventsService } from '@/application/workload/observer/workload-events.service';
 import { WorkloadController } from '@/application/workload/workload.controller';
 import { WorkloadService } from '@/application/workload/workload.service';
@@ -19,6 +23,7 @@ const otherProjectId = '9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d';
 const workloadId = '3f9a1b2c-4d5e-6f70-8192-a3b4c5d6e7f8';
 
 const requestedEvent: WorkloadStatusEvent = {
+  type: 'status',
   workload_id: workloadId,
   project_id: projectId,
   status: 'running',
@@ -28,6 +33,7 @@ const requestedEvent: WorkloadStatusEvent = {
 };
 
 const otherProjectEvent: WorkloadStatusEvent = {
+  type: 'status',
   workload_id: workloadId,
   project_id: otherProjectId,
   status: 'failed',
@@ -36,13 +42,21 @@ const otherProjectEvent: WorkloadStatusEvent = {
   updated_at: '2026-11-02T10:00:01.000Z',
 };
 
+const positionEvent: WorkloadPositionEvent = {
+  type: 'position',
+  workload_id: workloadId,
+  project_id: projectId,
+  position: { x: 640, y: 300 },
+  updated_at: '2026-11-02T10:00:02.000Z',
+};
+
 /**
- * Resolves with the first status frame of the stream. Heartbeats are skipped;
+ * Resolves with the first workload frame of the stream. Heartbeats are skipped;
  * they only arrive after 20 s, so the suite never waits for one.
  */
-const readStatusEvent = (
+const readWorkloadEvent = (
   response: http.IncomingMessage,
-): Promise<WorkloadStatusEvent> =>
+): Promise<WorkloadEvent> =>
   new Promise((resolve, reject) => {
     let buffer = '';
 
@@ -69,7 +83,7 @@ const readStatusEvent = (
           .join('\n');
 
         if (data.length > 0) {
-          resolve(JSON.parse(data) as WorkloadStatusEvent);
+          resolve(JSON.parse(data) as WorkloadEvent);
 
           return;
         }
@@ -77,11 +91,11 @@ const readStatusEvent = (
     });
     response.on('error', reject);
     response.on('end', () => {
-      reject(new Error('SSE stream ended before a status event'));
+      reject(new Error('SSE stream ended before a workload event'));
     });
   });
 
-describe('Workload status events (e2e)', () => {
+describe('Workload events (e2e)', () => {
   let app: INestApplication;
   let events: WorkloadEventsService;
   let request: http.ClientRequest | undefined;
@@ -131,7 +145,7 @@ describe('Workload status events (e2e)', () => {
     expect(response.headers['content-type']).toContain('text/event-stream');
     expect(response.headers['x-accel-buffering']).toBe('no');
 
-    const received = readStatusEvent(response);
+    const received = readWorkloadEvent(response);
 
     events.publish(otherProjectEvent);
 
@@ -141,5 +155,33 @@ describe('Workload status events (e2e)', () => {
     events.publish(requestedEvent);
 
     await expect(received).resolves.toEqual(requestedEvent);
+  }, 15_000);
+
+  it('streams position frames', async () => {
+    const server = app.getHttpServer() as http.Server;
+    const address = server.address() as AddressInfo;
+    const host = address.family === 'IPv6' ? '::1' : '127.0.0.1';
+
+    const client = http.get({
+      host,
+      port: address.port,
+      path: `/projects/${projectId}/workloads/events`,
+      headers: { accept: 'text/event-stream' },
+    });
+
+    request = client;
+
+    const response = await new Promise<http.IncomingMessage>(
+      (resolve, reject) => {
+        client.once('response', resolve);
+        client.once('error', reject);
+      },
+    );
+
+    const received = readWorkloadEvent(response);
+
+    events.publish(positionEvent);
+
+    await expect(received).resolves.toEqual(positionEvent);
   }, 15_000);
 });

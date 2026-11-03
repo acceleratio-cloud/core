@@ -39,6 +39,7 @@ export interface Workload {
 }
 
 export interface WorkloadStatusEvent {
+  type: "status";
   workload_id: string;
   project_id: string;
   status: WorkloadStatus;
@@ -46,6 +47,16 @@ export interface WorkloadStatusEvent {
   status_observed_at: string | null;
   updated_at: string;
 }
+
+export interface WorkloadPositionEvent {
+  type: "position";
+  workload_id: string;
+  project_id: string;
+  position: WorkloadPosition;
+  updated_at: string;
+}
+
+export type WorkloadEvent = WorkloadStatusEvent | WorkloadPositionEvent;
 
 export interface CreateWorkloadPayload {
   name: string;

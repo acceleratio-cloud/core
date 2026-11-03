@@ -117,8 +117,10 @@ Invariants:
   is generated once on create, and never changes.
 - `type` selects the shape of `config`. Today the only value is `docker`, whose config carries the
   image reference. Adding a type means adding an enum value and a config schema together.
-- `position` is the canvas coordinate `{ "x": number, "y": number }`; both keys are required and the
-  default is `{ "x": 0, "y": 0 }`.
+- `position` is the canvas coordinate `{ "x": number, "y": number }`; both keys are required. The
+  column default is `{ "x": 0, "y": 0 }`, while the API places new workloads in the first free slot of
+  the project's four-column canvas grid. Existing rows that still sat at the origin were backfilled
+  into the same grid.
 - `status` starts as `draft` and is constrained by the `workload_status` enum. `status_message`
   carries the operator-facing explanation for the current status; `last_deployed_at` records when a
   deploy action last ran, not when the deployment finished rolling out. `status_observed_at` records

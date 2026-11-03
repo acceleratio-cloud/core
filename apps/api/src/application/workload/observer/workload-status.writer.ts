@@ -391,6 +391,7 @@ export class WorkloadStatusWriter {
     }
 
     const event: WorkloadStatusEvent = {
+      type: 'status',
       workload_id: updated.id,
       project_id: updated.project_id,
       status: updated.status,

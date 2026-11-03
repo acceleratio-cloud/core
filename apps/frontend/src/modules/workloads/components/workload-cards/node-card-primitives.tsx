@@ -40,7 +40,8 @@ export const NodeCard = ({
 }) => (
   <div
     className={cn(
-      'w-66 cursor-pointer overflow-hidden rounded-lg border bg-surface-raised shadow-float',
+      'w-66 cursor-grab overflow-hidden rounded-lg border bg-surface-raised shadow-float',
+      'active:cursor-grabbing',
       'outline-1 outline-offset-3 transition-[border-color,outline-color] duration-150 ease-out motion-reduce:transition-none',
       selected
         ? 'border-brand-fg/70 outline-brand-fg/30'

@@ -14,7 +14,8 @@ import {
 import type {
   Project,
   Workload,
-  WorkloadStatusEvent,
+  WorkloadEvent,
+  WorkloadPosition,
 } from '@acceleratio/shared';
 import { getApiErrorMessage } from '@/api';
 import { workloadsApi } from '@/api/workloads';
@@ -26,6 +27,10 @@ type ProjectContextValue = {
   workloadsError: string | null;
   addWorkload: (workload: Workload) => void;
   replaceWorkload: (workload: Workload) => void;
+  moveWorkload: (
+    workloadId: string,
+    position: WorkloadPosition,
+  ) => Promise<void>;
   refreshWorkloads: () => Promise<void>;
 };
 
@@ -47,39 +52,65 @@ const STREAM_UNAVAILABLE_MESSAGE =
 const isNullableString = (value: unknown): value is string | null =>
   value === null || typeof value === 'string';
 
-const isWorkloadStatusEvent = (
-  value: unknown,
-): value is WorkloadStatusEvent => {
+const isWorkloadPosition = (value: unknown): value is WorkloadPosition => {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+
+  const position = value as Record<string, unknown>;
+
+  return (
+    typeof position.x === 'number' &&
+    Number.isFinite(position.x) &&
+    typeof position.y === 'number' &&
+    Number.isFinite(position.y)
+  );
+};
+
+const isWorkloadEvent = (value: unknown): value is WorkloadEvent => {
   if (typeof value !== 'object' || value === null) {
     return false;
   }
 
   const event = value as Record<string, unknown>;
 
+  if (
+    typeof event.workload_id !== 'string' ||
+    typeof event.project_id !== 'string' ||
+    typeof event.updated_at !== 'string'
+  ) {
+    return false;
+  }
+
+  if (event.type === 'position') {
+    return isWorkloadPosition(event.position);
+  }
+
+  if (event.type !== 'status') {
+    return false;
+  }
+
   return (
-    typeof event.workload_id === 'string' &&
-    typeof event.project_id === 'string' &&
     typeof event.status === 'string' &&
     WORKLOAD_STATUSES.has(event.status) &&
     isNullableString(event.status_message) &&
-    isNullableString(event.status_observed_at) &&
-    typeof event.updated_at === 'string'
+    isNullableString(event.status_observed_at)
   );
 };
 
-const parseWorkloadStatusEvent = (data: string): WorkloadStatusEvent | null => {
+const parseWorkloadEvent = (data: string): WorkloadEvent | null => {
   try {
     const event: unknown = JSON.parse(data);
 
-    return isWorkloadStatusEvent(event) ? event : null;
+    return isWorkloadEvent(event) ? event : null;
   } catch {
     return null;
   }
 };
 
-const applyWorkloadStatusEvent = (
+const applyWorkloadEvent = (
   workloads: Workload[],
-  event: WorkloadStatusEvent,
+  event: WorkloadEvent,
 ): Workload[] => {
   let changed = false;
 
@@ -92,6 +123,14 @@ const applyWorkloadStatusEvent = (
     }
 
     changed = true;
+
+    if (event.type === 'position') {
+      return {
+        ...workload,
+        position: event.position,
+        updated_at: event.updated_at,
+      };
+    }
 
     return {
       ...workload,
@@ -235,6 +274,61 @@ export const ProjectProvider = ({
     );
   }, []);
 
+  /**
+   * Canvas drop persistence. The position is applied before the request so the
+   * node does not snap back while the PATCH is in flight; a failed request
+   * restores the previous coordinates and reconciles with the server.
+   */
+  const moveWorkload = useCallback(
+    async (workloadId: string, position: WorkloadPosition) => {
+      const previous = workloadsRef.current.find(
+        (workload) => workload.id === workloadId,
+      );
+
+      if (!previous) {
+        return;
+      }
+
+      setWorkloads((currentWorkloads) =>
+        currentWorkloads.map((workload) =>
+          workload.id === workloadId
+            ? { ...workload, position: { x: position.x, y: position.y } }
+            : workload,
+        ),
+      );
+
+      try {
+        const updated = await workloadsApi.update(project.id, workloadId, {
+          position,
+        });
+
+        replaceWorkload(updated);
+      } catch (error) {
+        setWorkloads((currentWorkloads) =>
+          currentWorkloads.map((workload) => {
+            if (workload.id !== workloadId) {
+              return workload;
+            }
+
+            // A concurrent event moved the node while the request was in
+            // flight; keep that position instead of rolling it back.
+            if (
+              workload.position.x !== position.x ||
+              workload.position.y !== position.y
+            ) {
+              return workload;
+            }
+
+            return { ...workload, position: previous.position };
+          }),
+        );
+        void refreshWorkloads();
+        throw error;
+      }
+    },
+    [project.id, refreshWorkloads, replaceWorkload],
+  );
+
   useEffect(() => {
     let source: EventSource | null = null;
     let reconnectTimer: number | null = null;
@@ -255,7 +349,7 @@ export const ProjectProvider = ({
       };
 
       nextSource.onmessage = (message) => {
-        const event = parseWorkloadStatusEvent(message.data);
+        const event = parseWorkloadEvent(message.data);
 
         if (!event || event.project_id !== project.id) {
           return;
@@ -271,7 +365,7 @@ export const ProjectProvider = ({
         }
 
         setWorkloads((currentWorkloads) =>
-          applyWorkloadStatusEvent(currentWorkloads, event),
+          applyWorkloadEvent(currentWorkloads, event),
         );
       };
 
@@ -357,6 +451,7 @@ export const ProjectProvider = ({
       workloadsError,
       addWorkload,
       replaceWorkload,
+      moveWorkload,
       refreshWorkloads,
     }),
     [
@@ -366,6 +461,7 @@ export const ProjectProvider = ({
       workloadsError,
       addWorkload,
       replaceWorkload,
+      moveWorkload,
       refreshWorkloads,
     ],
   );

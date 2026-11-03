@@ -315,6 +315,7 @@ describe('WorkloadStatusWriter.write', () => {
     expect(database.update).toHaveBeenCalledTimes(1);
     expect(events.publish).toHaveBeenCalledTimes(1);
     expect(events.publish).toHaveBeenCalledWith({
+      type: 'status',
       workload_id: workloadId,
       project_id: projectId,
       status: 'running',

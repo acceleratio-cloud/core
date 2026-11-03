@@ -366,15 +366,20 @@ calls.
 
 - `GET /projects/:projectId/workloads/events` is the project-scoped stream (`@Sse`), declared before
   `:id` so the path is not parsed as a UUID. It sets `X-Accel-Buffering: no`.
-- Status frames are unnamed `data:` messages carrying `WorkloadStatusEvent`; a named `heartbeat` event
-  follows every 20 s. The writer publishes on change and `persistState` publishes action states.
+- Frames are unnamed `data:` messages carrying `WorkloadEvent`: a `WorkloadStatusEvent` with
+  `type: 'status'` or a `WorkloadPositionEvent` with `type: 'position'`; a named `heartbeat` event
+  follows every 20 s. The writer publishes status changes, `persistState` publishes action states, and
+  `update` publishes the new coordinates when a PATCH changes `position`.
+- Canvas drags are local while the pointer moves and persist once on drop through
+  `PATCH /workloads/:id` with `position`; other sessions receive the position frame and move the node
+  after the drop. Concurrent drags are last-write-wins, gated by `updated_at`.
 - The console opens an `EventSource` with credentials, ignores events older than the row's `updated_at`,
   and merges the rest by `workload_id`; an event that names an unknown workload refreshes the list. The
-  stream carries status only, so the list is also re-read on every stream open (including the first,
-  which clears an error from a failed initial load), on a 60 s reconcile, and when the tab becomes
-  visible; that reconciliation picks up workloads created or deleted by other clients. An HTTP error
-  closes the stream permanently, so the console re-creates the `EventSource` after a delay. The list
-  reconciliation is not status polling.
+  stream carries status and position changes, so the list is also re-read on every stream open
+  (including the first, which clears an error from a failed initial load), on a 60 s reconcile, and when
+  the tab becomes visible; that reconciliation picks up workloads created or deleted by other clients.
+  An HTTP error closes the stream permanently, so the console re-creates the `EventSource` after a
+  delay. The list reconciliation is not status polling.
 - The controller method is `events()` and the injected service is `workloadEvents`: an instance property
   named `events` would shadow the route handler.
 
@@ -426,7 +431,7 @@ duplicate status events; a leader lock is future work.
 - Rows are mapped to contract objects by a private `to<Name>(row)` helper; timestamps become ISO
   strings there.
 - Updates build a partial `updates` object and skip the query entirely when nothing changed.
-- Named constants at module scope instead of inline literals: `NAME_MAX_LENGTH`, `DEFAULT_POSITION`.
+- Named constants at module scope instead of inline literals: `NAME_MAX_LENGTH`, `POSITION_STEP_X`.
 
 ## Schemas
 
@@ -435,7 +440,10 @@ duplicate status events; a leader lock is future work.
 - Table names are singular (`project`, `workload`); columns and TypeScript keys are snake_case
   (`project_id`, `created_at`), so a row maps to the contract without renaming fields.
 - Indexes are named `<table>_<column>_idx`; enums use `pgEnum('<name>_type', [...])`.
-- Timestamps use `defaultNow().notNull()`, with `$onUpdate(() => new Date())` on `updated_at`.
+- Timestamps use `defaultNow().notNull()`, with `$onUpdate` returning SQL on `updated_at` that picks
+  the greater of `now()::timestamp` and the stored value plus one microsecond. The SQL clock matches
+  the insert default's timezone, and the guard keeps `updated_at` monotonic for legacy rows written
+  when a JavaScript `Date` was bound as UTC.
 - Foreign keys declare the delete behavior: `.references(() => project.id, { onDelete: 'cascade' })`.
 - `drizzle.config.ts` picks up `src/application/**/schemas/*.schema.ts` automatically. The better-auth
   tables stay in `vendor/db/schema.ts` and keep better-auth's camelCase keys (`emailVerified`,
@@ -445,7 +453,8 @@ duplicate status events; a leader lock is future work.
   `bun run db:migrate`. `bun run db:check` verifies the journal, snapshots and SQL files agree without
   a database. Commit the schema edit, the SQL file, the new snapshot and `_journal.json` together; the
   table reference and data-model invariants live in [DATABASE.md](./DATABASE.md). Migration `0005_*`
-  adds `status_observed_at` to `workload`.
+  adds `status_observed_at` to `workload`; `0006_*` backfills existing origin positions into the
+  canvas grid.
 
 ## Code style
 

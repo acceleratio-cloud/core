@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import type { MessageEvent } from '@nestjs/common';
-import type { WorkloadStatusEvent } from '@acceleratio/shared';
+import type { WorkloadEvent } from '@acceleratio/shared';
 import { filter, interval, map, merge, Subject } from 'rxjs';
 import type { Observable } from 'rxjs';
 
@@ -12,19 +12,20 @@ const HEARTBEAT: MessageEvent = {
 };
 
 /**
- * Fan-out for workload status changes. The controller exposes `toSse` per
- * project; the writer and the action paths publish into the same subject.
+ * Fan-out for workload changes. The controller exposes `toSse` per project;
+ * the status writer, the type services and the action paths publish into the
+ * same subject.
  */
 @Injectable()
 export class WorkloadEventsService {
-  private readonly events = new Subject<WorkloadStatusEvent>();
+  private readonly events = new Subject<WorkloadEvent>();
 
-  publish(event: WorkloadStatusEvent): void {
+  publish(event: WorkloadEvent): void {
     this.events.next(event);
   }
 
   toSse(projectId: string): Observable<MessageEvent> {
-    const statuses: Observable<MessageEvent> = this.events.pipe(
+    const changes: Observable<MessageEvent> = this.events.pipe(
       filter((event) => event.project_id === projectId),
       map((event) => ({ data: event })),
     );
@@ -34,6 +35,6 @@ export class WorkloadEventsService {
       HEARTBEAT_INTERVAL_MS,
     ).pipe(map(() => HEARTBEAT));
 
-    return merge(statuses, heartbeat);
+    return merge(changes, heartbeat);
   }
 }

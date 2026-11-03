@@ -1,4 +1,5 @@
 import type { WorkloadConfig, WorkloadPosition } from '@acceleratio/shared';
+import { sql } from 'drizzle-orm';
 import {
   index,
   jsonb,
@@ -46,9 +47,15 @@ export const workload = pgTable(
     status_observed_at: timestamp('status_observed_at'),
     last_deployed_at: timestamp('last_deployed_at'),
     created_at: timestamp('created_at').defaultNow().notNull(),
+    // Use the database clock (same timezone as `defaultNow`) and never move
+    // `updated_at` backwards: a JavaScript Date would be bound as UTC into a
+    // `timestamp` column, and legacy rows may already hold a later wall clock.
     updated_at: timestamp('updated_at')
       .defaultNow()
-      .$onUpdate(() => new Date())
+      .$onUpdate(
+        () =>
+          sql`greatest(now()::timestamp, updated_at + interval '1 microsecond')`,
+      )
       .notNull(),
   },
   (table) => [
