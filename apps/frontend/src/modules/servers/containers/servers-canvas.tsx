@@ -127,8 +127,8 @@ const ServersGraph = () => {
         >
           <Background
             variant={BackgroundVariant.Dots}
-            gap={16}
-            size={1}
+            gap={160}
+            size={0}
             color="var(--edge-default)"
           />
           <CanvasControls />
