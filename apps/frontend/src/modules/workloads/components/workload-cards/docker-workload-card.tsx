@@ -1,58 +1,58 @@
 'use client';
 
 import type { Node, NodeProps } from '@xyflow/react';
+import { Activity, Package, Tag } from 'lucide-react';
 
 import type { Workload } from '@acceleratio/shared';
 import { WorkloadStatus } from '@/modules/workloads/components/workload-status';
+import { parseDockerImage } from '@/modules/workloads/utils/parse-docker-image';
 import { DockerIcon } from '@/shared/icons/docker-icon';
+import {
+  NodeCard,
+  NodeHeader,
+  NodeNotice,
+  NodeRow,
+  NodeRows,
+  WorkloadNodeFooter,
+} from './node-card-primitives';
 
 export type DockerWorkloadNode = Node<
   Workload & Record<string, unknown>,
   'docker'
 >;
 
-const dateFormatter = new Intl.DateTimeFormat('en-GB', {
-  day: 'numeric',
-  month: 'short',
-  hour: '2-digit',
-  minute: '2-digit',
-});
+export const DockerWorkloadCard = ({
+  data,
+  selected,
+}: NodeProps<DockerWorkloadNode>) => {
+  const reference = data.config.docker_image;
+  const { repository, tag } = parseDockerImage(reference);
 
-const formatDate = (value: string) => dateFormatter.format(new Date(value));
+  return (
+    <NodeCard selected={selected}>
+      <NodeHeader
+        icon={<DockerIcon className="size-4" />}
+        title={data.name}
+        status={data.status}
+      />
 
-export const DockerWorkloadCard = ({ data }: NodeProps<DockerWorkloadNode>) => (
-  <div className="w-[240px] overflow-hidden rounded-lg border border-border bg-card p-3">
-    <div className="flex items-center gap-2.5">
-      <DockerIcon className="size-6" />
+      <NodeRows>
+        <NodeRow icon={Activity} label="Status">
+          <WorkloadStatus status={data.status} compact className="items-end" />
+        </NodeRow>
+        <NodeRow icon={Package} label="Image" title={reference}>
+          {repository}
+        </NodeRow>
+        <NodeRow icon={Tag} label="Tag" title={tag}>
+          {tag}
+        </NodeRow>
+      </NodeRows>
 
-      <div className="min-w-0 flex-1 space-y-0.5">
-        <div
-          title={data.name}
-          className="truncate text-sm leading-none font-medium tracking-tight text-foreground"
-        >
-          {data.name}
-        </div>
-        <div
-          title={data.config.docker_image}
-          className="truncate text-xs text-muted-foreground"
-        >
-          {data.config.docker_image}
-        </div>
-      </div>
-    </div>
+      {data.status === 'failed' && data.status_message ? (
+        <NodeNotice key={data.status_message}>{data.status_message}</NodeNotice>
+      ) : null}
 
-    <div className="mt-2 flex items-center justify-between gap-2 border-t border-border pt-2">
-      <WorkloadStatus status={data.status} compact className="min-w-0" />
-
-      <span className="shrink-0 truncate text-[10px] leading-none text-muted-foreground tabular-nums">
-        {data.last_deployed_at ? (
-          <time dateTime={data.last_deployed_at} title={data.last_deployed_at}>
-            Deployed {formatDate(data.last_deployed_at)}
-          </time>
-        ) : (
-          'Never deployed'
-        )}
-      </span>
-    </div>
-  </div>
-);
+      <WorkloadNodeFooter workload={data} />
+    </NodeCard>
+  );
+};

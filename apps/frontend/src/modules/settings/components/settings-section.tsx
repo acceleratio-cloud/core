@@ -16,7 +16,7 @@ export const SettingsSection = ({
   return (
     <section
       aria-labelledby={`${id}-title`}
-      className="rounded-lg border border-border bg-white"
+      className="rounded-lg border border-border bg-surface-raised"
     >
       <header className="border-b border-border px-6 py-5">
         <h2

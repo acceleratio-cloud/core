@@ -132,7 +132,7 @@ const ProjectsEmptyIllustration = () => {
 
 export const ProjectsEmptyState = ({ onCreate }: { onCreate: () => void }) => {
   return (
-    <div className="mt-6 flex min-h-80 flex-col items-center justify-center rounded-lg border border-border bg-white px-6 py-14 text-center">
+    <div className="mt-6 flex min-h-80 flex-col items-center justify-center rounded-lg border border-border bg-surface-raised px-6 py-14 text-center">
       <ProjectsEmptyIllustration />
 
       <h2 className="mt-2 text-sm font-medium text-foreground">
@@ -143,7 +143,7 @@ export const ProjectsEmptyState = ({ onCreate }: { onCreate: () => void }) => {
       </p>
 
       <Button variant="outline" onClick={onCreate} className="mt-6">
-        <Plus aria-hidden="true" strokeWidth={2} className="size-4" />
+        <Plus data-icon="inline-start" aria-hidden="true" strokeWidth={2} />
         New project
       </Button>
     </div>

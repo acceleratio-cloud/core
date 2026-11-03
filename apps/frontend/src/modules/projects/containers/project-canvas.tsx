@@ -32,21 +32,26 @@ export const ProjectCanvas = () => {
 
   return (
     <ReactFlowProvider>
-      <ProjectHeader />
-      <div className="min-h-0 flex-1 relative">
-        <div className="absolute top-2 right-4 z-10">
-          <CreateWorkloadDialog />
+      <div className="relative min-h-0 flex-1 bg-surface-board">
+        <div className="pointer-events-none absolute inset-x-3 top-3 z-10 flex items-center justify-between gap-3">
+          <div className="pointer-events-auto min-w-0">
+            <ProjectHeader />
+          </div>
+          <div className="pointer-events-auto shrink-0">
+            <CreateWorkloadDialog />
+          </div>
         </div>
         {workloadsError ? (
           <p
             role="alert"
-            className="absolute top-2 left-4 z-10 max-w-sm rounded-md border border-destructive/30 bg-background px-3 py-2 text-xs leading-relaxed text-destructive"
+            className="absolute top-16 left-3 z-10 max-w-sm rounded-md border border-destructive/30 bg-background px-3 py-2 text-xs leading-relaxed text-destructive"
           >
             {workloadsError}
           </p>
         ) : null}
         <WorkloadDetails workload={selectedWorkload} onClose={closeDetails} />
         <WorkloadFlow
+          selectedWorkloadId={selectedWorkloadId}
           onSelectWorkload={setSelectedWorkloadId}
           onClearSelection={closeDetails}
         />
@@ -56,14 +61,24 @@ export const ProjectCanvas = () => {
 };
 
 const WorkloadFlow = ({
+  selectedWorkloadId,
   onSelectWorkload,
   onClearSelection,
 }: {
+  selectedWorkloadId: string | null;
   onSelectWorkload: (workloadId: string) => void;
   onClearSelection: () => void;
 }) => {
   const { workloads, isLoadingWorkloads } = useProject();
-  const nodes = useMemo(() => toWorkloadNodes(workloads), [workloads]);
+  // Selection lives in the canvas state (it drives the details panel), so the
+  // flow is told which node is selected instead of tracking it itself.
+  const nodes = useMemo(
+    () =>
+      toWorkloadNodes(workloads).map((node) =>
+        node.id === selectedWorkloadId ? { ...node, selected: true } : node,
+      ),
+    [workloads, selectedWorkloadId],
+  );
 
   return (
     <>
@@ -82,13 +97,12 @@ const WorkloadFlow = ({
         nodesFocusable={false}
         edgesFocusable={false}
         proOptions={{ hideAttribution: true }}
-        className="bg-white"
       >
         <Background
           variant={BackgroundVariant.Dots}
-          gap={14}
+          gap={20}
           size={1}
-          color="rgba(0, 0, 0, 0.3)"
+          color="var(--edge-default)"
         />
       </ReactFlow>
 

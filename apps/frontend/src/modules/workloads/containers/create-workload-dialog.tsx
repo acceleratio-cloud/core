@@ -169,7 +169,7 @@ const WorkloadKindOption = ({
             ? 'border-border bg-muted/40 text-muted-foreground/50'
             : selected
               ? 'border-primary-foreground/20 bg-primary-foreground/10 text-primary-foreground'
-              : 'border-border bg-muted/60 text-muted-foreground group-hover/option:bg-white',
+              : 'border-border bg-muted/60 text-muted-foreground group-hover/option:bg-muted',
         )}
       >
         <Icon strokeWidth={1.75} className="size-4" />

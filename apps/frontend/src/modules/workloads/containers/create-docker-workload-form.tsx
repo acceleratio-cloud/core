@@ -117,7 +117,7 @@ export const CreateDockerWorkloadForm = ({
 
         <DialogFooter>
           <Button type="button" variant="ghost" onClick={onBack}>
-            <ArrowLeft aria-hidden="true" className="size-4" />
+            <ArrowLeft data-icon="inline-start" aria-hidden="true" />
             Back
           </Button>
           <Button type="submit" disabled={isSubmitting}>

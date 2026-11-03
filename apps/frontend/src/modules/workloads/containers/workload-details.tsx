@@ -59,7 +59,7 @@ export const WorkloadDetails = ({
     <aside
       aria-label="Service details"
       className={cn(
-        'absolute top-18 right-4 z-10 flex bottom-4 w-[min(680px,calc(100vw-2rem))] flex-col overflow-hidden',
+        'absolute top-16 right-3 z-10 flex bottom-3 w-[min(680px,calc(100vw-2rem))] flex-col overflow-hidden',
         'rounded-lg border border-border bg-popover text-popover-foreground shadow-sm',
         'animate-in fade-in slide-in-from-right-1 duration-150 ease-out motion-reduce:animate-none',
       )}

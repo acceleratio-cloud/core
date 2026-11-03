@@ -109,7 +109,7 @@ const ServersGraph = () => {
         </ul>
       </div>
 
-      <div className="relative min-h-0 flex-1 border bg-zinc-50 rounded-2xl m-4 mt-0 shadow-md">
+      <div className="relative min-h-0 flex-1 overflow-hidden rounded-2xl border border-border bg-surface-board m-4 mt-0">
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -124,13 +124,12 @@ const ServersGraph = () => {
           edgesFocusable={false}
           elementsSelectable={false}
           proOptions={{ hideAttribution: true }}
-          className="bg-neutral-50"
         >
           <Background
             variant={BackgroundVariant.Dots}
-            gap={16}
-            size={1}
-            color="#dedede"
+            gap={160}
+            size={0}
+            color="var(--edge-default)"
           />
           <CanvasControls />
         </ReactFlow>

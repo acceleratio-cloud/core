@@ -49,10 +49,10 @@ export const UserMenu = () => {
     <DropdownMenu>
       <DropdownMenuTrigger
         aria-label={user?.name ? `${user.name} account menu` : "Account menu"}
-        className="group rounded-full outline-none focus-visible:ring-2 focus-visible:ring-white/70 data-[popup-open]:ring-2 data-[popup-open]:ring-white/40"
+        className="group rounded-full outline-none focus-visible:ring-2 focus-visible:ring-foreground/60 data-[popup-open]:ring-2 data-[popup-open]:ring-foreground/30"
       >
-        <Avatar className="border-white/20">
-          <AvatarFallback className="bg-white/10 text-primary-foreground transition-colors group-hover:bg-white/15">
+        <Avatar>
+          <AvatarFallback className="bg-background text-foreground transition-colors group-hover:bg-muted">
             {initials ?? (
               <User aria-hidden="true" strokeWidth={1.75} className="size-4" />
             )}
