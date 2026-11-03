@@ -1,6 +1,6 @@
 # Design brief: Acceleratio console design system
 
-Status: approved. The brand is blue and the console is **dark only**. Tokens are
+Status: approved. The brand is white and the console is **dark only**. Tokens are
 implemented in `apps/frontend/src/app/tokens.css` and every existing screen
 reads them. Primitives, lint, `/design` and visual tests are not built yet.
 This brief replaces the visual decisions in [DESIGN.md](../DESIGN.md);
@@ -114,32 +114,33 @@ minimum). Everything else is decorative and may be lighter.
 | `fg-disabled` | `0.45 0 0` | exempt (inactive) | exempt | exempt |
 
 Primary text is `0.97`, not pure white, to limit glare on large dark areas.
-`fg-on-brand` is pure white (`1 0 0`): the brand fill is a deep blue that carries
-white labels. All ratios are computed by `check:contrast`, not estimated.
+`fg-on-brand` is near-black (`0.12 0 0`): the brand fill is near-white and
+carries dark labels. All ratios are computed by `check:contrast`, not estimated.
 
 ### Brand
 
-One hue, one scale. The brand started as Teal (hue 195, picked from the three
-candidates in [`mock/index.html`](./mock/index.html), which shows the light
-theme), then moved to a blue (hue 245) and finally to a saturated blue (hue 262)
-after review of the dark UI. The dark values below replace the mock.
+The primary color is **white**: a near-white key with near-black text on
+neutral, hue-free blacks, the monochrome look of a terminal or a rack panel. The
+brand went Teal (hue 195, see [`mock/index.html`](./mock/index.html), which
+shows the light theme), then blue (hue 245), then saturated blue (hue 262),
+and finally white after review of the dark UI. The values below replace the mock.
 
-The brand needs two shades, because a fill that carries white text must be
-dark, while the same hue used as text, a link or a focus ring on a dark surface
-must be light. They are separate tokens so neither use is compromised.
+Color is reserved for meaning. The one chromatic accent is a light sky blue,
+`brand-fg`, used like a signal light: links, focus rings and selected text.
+It is never a fill.
 
 | Token | Value | Use | Check |
 | --- | --- | --- | --- |
-| `brand` | `blue-500` `0.56 0.22 262` | Fill: primary buttons, progress | white on it 4.87:1 |
-| `brand-hover` | `blue-600` `0.52 0.22 262` | Hover on the fill | white on it 5.80:1 |
-| `brand-fg` | `blue-300` `0.72 0.15 258` | Links, focus ring, selected text and outline | 7.57:1 on panel, 6.83:1 on raised |
-| `brand-wash` | `blue-300` at 16% | Selected nav item, node selection halo | n/a |
+| `brand` | `neutral-970` `0.97 0 0` | Fill: primary buttons, selected option | `fg-on-brand` on it 18.61:1 |
+| `brand-hover` | `neutral-910` `0.91 0 0` | Hover on the fill (dims, never brightens) | 15.53:1 |
+| `brand-press` | `neutral-860` `0.86 0 0` | Pressed fill | 13.26:1 |
+| `fg-on-brand` | `neutral-120` `0.12 0 0` | Text and icons on the fill | n/a |
+| `brand-fg` | `sky-300` `0.8 0.12 235` | Links, focus ring, selected text and outline | 10.35:1 on panel, 9.33:1 on raised |
+| `brand-wash` | white at 8% | Selected nav item, node selection halo | n/a |
 
-The fill itself is 3.90:1 against the panel and 3.51:1 against a raised card,
-so a button edge stays distinguishable (3:1 non-text minimum) without a border.
-Usage is limited to: primary button fill, selected nav indicator, focus ring,
-links, selected row or node outline, and progress.
-
+A white fill is the brightest thing on screen, so it is limited to one
+primary action per view. Everything else uses `outline`, `secondary` or
+`ghost`.
 ### Status
 
 Status colors are separate from the brand and carry fixed meaning.
@@ -191,14 +192,15 @@ Five steps replace the six arbitrary sizes. Tracking: `-0.02em` at `xl`,
 - **Shadow:** `none` (default), `float` (floating bars and menus, one soft
   layer plus a hairline), `modal` (dialogs). Two shadows replace six.
   Buttons add three small `key` shadows (`shadow-key`, `shadow-key-soft`,
-  `shadow-key-pressed`): a 1px inner top highlight plus a contact shadow reads
-  as a raised key, and the inset shadow reads as pressed in. No gradients.
+  `shadow-key-pressed`). The white key has a 1px inner bottom shade, dark keys a
+  1px inner top highlight, both over a contact shadow; the inset shadow reads as
+  pressed in. No gradients.
 - **Spacing:** 4px base. Allowed steps 4, 8, 12, 16, 24, 32. Page gutter 12px
   on the shell, 24px inside panels.
 - **Control heights:** `sm` 28, `md` 32, `lg` 40. Pills and inputs in the same
   row share a height.
 - **Icons:** Lucide, 16px, 1.75 stroke. 14px only inside `sm` controls.
-- **Button states:** hover moves the fill one step (`brand` to `brand-hover`);
+- **Button states:** hover dims the fill one step (`brand` to `brand-hover`);
   press moves it to `brand-press`, scales to 0.98 over 100ms, and swaps the key
   shadow for the inset one. Focus is a 2px `ring` outline with a 2px offset.
   `loading` shows a spinner, keeps the label and width, and blocks clicks
@@ -263,20 +265,20 @@ Work stays on one branch with small commits, as agreed.
   on `:root`, the toaster is pinned to `dark`, and shadcn's `dark:` variants
   stay inert (no `.dark` class is applied). Reversing this means adding a second
   value set to `tokens.css`, not touching components.
-- Accent: **blue**, fill `blue-500` (`oklch(0.56 0.22 262)`) with white text
-  (`fg-on-brand`), and `brand-fg` (`blue-300`) wherever the brand is text or a
-  ring. It replaced Teal, which was chosen first for staying clear of the Docker
-  blue, but read as too green on the dark surfaces. The cost is that the brand
-  now sits near the Docker mark's hue, so a Docker service card shows two similar
-  blues. The brand is only used on actions, focus and selection, and status never
-  uses it, so the two do not carry the same meaning.
+- Accent: **white**. Primary fills are `neutral-970` with `neutral-120` text,
+  and hover and press step down to `neutral-910` and `neutral-860`. The only
+  hue is `brand-fg` (`sky-300`, `oklch(0.8 0.12 235)`) for links, focus and
+  selection. White replaced the saturated blue, which made every primary action
+  compete with the content and sat near the Docker mark's hue. With a white
+  brand, the Docker blue on service cards no longer clashes.
 - Token names: semantic tokens are `surface-*`, `edge-*`, `fg-*`, `brand` and
   `status-*`, not `border-*`, `text-*` or `accent-*`. Those names are already
   taken by Tailwind utilities and shadcn tokens, so reusing them would be
   ambiguous. `--primary`, `--ring` and the other shadcn tokens are now aliases
-  of the semantic tokens, which gives primary buttons and focus rings the brand color.
+  of the semantic tokens, so primary buttons take `brand` and focus rings take
+  `brand-fg`.
 - `bun run check:contrast` (`apps/frontend/scripts/check-contrast.mjs`) reads
-  `tokens.css` and checks 40 text, control-border and focus pairs. It passes.
+  `tokens.css` and checks 41 text, control-border and focus pairs. It passes.
 
 ## Open decisions
 
