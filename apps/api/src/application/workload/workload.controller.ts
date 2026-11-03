@@ -17,6 +17,7 @@ import type {
   CreateWorkloadPayload,
   UpdateWorkloadPayload,
   Workload,
+  WorkloadVersion,
 } from '@acceleratio/shared';
 import type { Observable } from 'rxjs';
 import { WorkloadEventsService } from './observer/workload-events.service';
@@ -97,6 +98,41 @@ export class WorkloadController {
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<Workload> {
     return this.workloadService.restart(projectId, id);
+  }
+
+  @Get(':id/versions')
+  listVersions(
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<WorkloadVersion[]> {
+    return this.workloadService.listVersions(projectId, id);
+  }
+
+  @Get(':id/versions/:versionId')
+  getVersion(
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('versionId', ParseUUIDPipe) versionId: string,
+  ): Promise<WorkloadVersion> {
+    return this.workloadService.getVersion(projectId, id, versionId);
+  }
+
+  @Post(':id/versions/:versionId/rollback')
+  @HttpCode(HttpStatus.OK)
+  rollback(
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('versionId', ParseUUIDPipe) versionId: string,
+  ): Promise<Workload> {
+    return this.workloadService.rollback(projectId, id, versionId);
+  }
+
+  @Delete(':id/draft')
+  discardDraft(
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<Workload> {
+    return this.workloadService.discardDraft(projectId, id);
   }
 
   @Patch(':id')

@@ -6,6 +6,7 @@ import { Activity, Package, Tag } from 'lucide-react';
 import type { Workload } from '@acceleratio/shared';
 import { WorkloadStatus } from '@/modules/workloads/components/workload-status';
 import { parseDockerImage } from '@/modules/workloads/utils/parse-docker-image';
+import { effectiveConfig } from '@/modules/workloads/utils/workload-config';
 import { DockerIcon } from '@/shared/icons/docker-icon';
 import {
   NodeCard,
@@ -25,7 +26,7 @@ export const DockerWorkloadCard = ({
   data,
   selected,
 }: NodeProps<DockerWorkloadNode>) => {
-  const reference = data.config.docker_image;
+  const reference = effectiveConfig(data).docker_image;
   const { repository, tag } = parseDockerImage(reference);
 
   return (

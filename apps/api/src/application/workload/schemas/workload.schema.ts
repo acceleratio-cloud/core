@@ -1,6 +1,7 @@
 import type { WorkloadConfig, WorkloadPosition } from '@acceleratio/shared';
 import { sql } from 'drizzle-orm';
 import {
+  type AnyPgColumn,
   index,
   jsonb,
   pgEnum,
@@ -12,6 +13,7 @@ import {
   varchar,
 } from 'drizzle-orm/pg-core';
 import { project } from '../../project/schemas/project.schema';
+import { workloadVersion } from './workload-version.schema';
 
 export const workloadTypeEnum = pgEnum('workload_type', ['docker']);
 
@@ -32,8 +34,14 @@ export const workload = pgTable(
       .references(() => project.id, { onDelete: 'cascade' }),
     name: varchar('name', { length: 255 }).notNull(),
     type: workloadTypeEnum('type').notNull(),
-    // Type-specific settings. Each workload type gets its own schema later.
-    config: jsonb('config').$type<WorkloadConfig>().notNull(),
+    // Version applied to the cluster. Null until the first deploy.
+    active_version_id: uuid('active_version_id').references(
+      (): AnyPgColumn => workloadVersion.id,
+      { onDelete: 'set null' },
+    ),
+    // Type-specific settings that are not applied yet. Null when the workload
+    // has no pending changes against its active version.
+    draft_config: jsonb('draft_config').$type<WorkloadConfig>(),
     // Canvas coordinates of the workload node.
     position: jsonb('position')
       .$type<WorkloadPosition>()

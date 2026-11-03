@@ -18,12 +18,28 @@ export interface DockerWorkloadConfig {
 
 export type WorkloadConfig = DockerWorkloadConfig;
 
+/** Immutable snapshot of a config that was applied to the cluster. */
+export interface WorkloadVersion {
+  id: string;
+  workload_id: string;
+  /** 1, 2, 3, … within one workload. */
+  number: number;
+  config: WorkloadConfig;
+  /** The version a rollback copied its config from. */
+  source_version_id: string | null;
+  /** When the version was applied to the cluster. */
+  created_at: string;
+}
+
 export interface Workload {
   id: string;
   project_id: string;
   name: string;
   type: WorkloadType;
-  config: WorkloadConfig;
+  /** Version applied to the cluster; null until the first deploy. */
+  active_version: WorkloadVersion | null;
+  /** Changes that the next deploy applies; null when there are none. */
+  draft_config: WorkloadConfig | null;
   position: WorkloadPosition;
   status: WorkloadStatus;
   status_message: string | null;

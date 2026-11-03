@@ -3,6 +3,7 @@ import type {
   UpdateWorkloadPayload,
   Workload,
   WorkloadType,
+  WorkloadVersion,
 } from '@acceleratio/shared';
 
 /**
@@ -26,4 +27,12 @@ export interface WorkloadTypeService {
   stop(projectId: string, id: string): Promise<Workload>;
   restart(projectId: string, id: string): Promise<Workload>;
   remove(projectId: string, id: string): Promise<void>;
+  rollback(projectId: string, id: string, versionId: string): Promise<Workload>;
+  listVersions(projectId: string, id: string): Promise<WorkloadVersion[]>;
+  getVersion(
+    projectId: string,
+    id: string,
+    versionId: string,
+  ): Promise<WorkloadVersion>;
+  discardDraft(projectId: string, id: string): Promise<Workload>;
 }

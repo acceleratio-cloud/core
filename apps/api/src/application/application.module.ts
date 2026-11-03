@@ -17,6 +17,7 @@ import { WorkloadService } from '@/application/workload/workload.service';
 import { WorkloadStatusDeriverRegistry } from '@/application/workload/workload-status-deriver.registry';
 import { WorkloadTypeRegistry } from '@/application/workload/workload-type.registry';
 import { WorkloadTypeResolver } from '@/application/workload/workload-type.resolver';
+import { WorkloadVersionService } from '@/application/workload/workload-version.service';
 
 /**
  * Single Nest module for every application submodule. A submodule owns its
@@ -46,6 +47,7 @@ import { WorkloadTypeResolver } from '@/application/workload/workload-type.resol
     WorkloadObserverService,
     WorkloadTypeRegistry,
     WorkloadTypeResolver,
+    WorkloadVersionService,
     WorkloadService,
   ],
 })

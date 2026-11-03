@@ -50,6 +50,20 @@
       "when": 1793728484760,
       "tag": "0006_backfill_workload_positions",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793732569056,
+      "tag": "0007_workload_versions",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1793732569378,
+      "tag": "0008_drop_workload_config",
+      "breakpoints": true
     }
   ]
 }

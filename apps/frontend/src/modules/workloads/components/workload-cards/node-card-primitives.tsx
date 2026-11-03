@@ -223,7 +223,7 @@ export const NodeNotice = ({ children }: { children: string }) => {
 };
 
 export const WorkloadNodeFooter = ({ workload }: { workload: Workload }) => {
-  if (canDeployWorkload(workload.status)) {
+  if (canDeployWorkload(workload)) {
     return <NodeDeployButton workload={workload} />;
   }
 

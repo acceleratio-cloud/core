@@ -8,6 +8,7 @@ import type { Workload } from '@acceleratio/shared';
 import { cn } from '@/lib/utils';
 import { StatusMeter } from '@/modules/workloads/components/workload-cards/node-card-primitives';
 import { WorkloadStatusLabel } from '@/modules/workloads/components/workload-status';
+import { hasPendingChanges } from '@/modules/workloads/utils/workload-config';
 import { Button } from '@/shared/components/ui/button';
 
 const chipTones: Partial<Record<Workload['status'], string>> = {
@@ -74,6 +75,11 @@ export const WorkloadHeader = ({
           <StatusMeter status={workload.status} />
           <WorkloadStatusLabel status={workload.status} />
         </span>
+        {hasPendingChanges(workload) ? (
+          <span className="inline-flex h-6 items-center rounded-full border border-dashed border-edge-control bg-surface-panel px-2.5 text-xs text-fg-secondary">
+            Pending changes
+          </span>
+        ) : null}
         {actions}
       </div>
     </header>

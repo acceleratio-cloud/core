@@ -35,14 +35,19 @@ import {
 } from '@/shared/components/ui/dialog';
 
 type LifecycleKey = 'deploy' | 'start' | 'stop' | 'restart';
-type ActionKey = LifecycleKey | 'delete';
+type ActionKey = LifecycleKey | 'delete' | 'rollback' | 'discard';
 
 type WorkloadActionsContextValue = {
   workload: Workload;
   pendingAction: ActionKey | null;
   lifecycleError: string | null;
   deleteError: string | null;
+  versionError: string | null;
+  /** Version id of the rollback in flight. */
+  rollbackTarget: string | null;
   runLifecycle: (key: LifecycleKey) => Promise<void>;
+  rollbackTo: (versionId: string) => Promise<void>;
+  discardDraft: () => Promise<void>;
   clearDeleteError: () => void;
   deleteWorkload: () => Promise<void>;
 };
@@ -50,7 +55,7 @@ type WorkloadActionsContextValue = {
 const WorkloadActionsContext =
   createContext<WorkloadActionsContextValue | null>(null);
 
-const useWorkloadActions = () => {
+export const useWorkloadActions = () => {
   const context = useContext(WorkloadActionsContext);
 
   if (!context) {
@@ -78,6 +83,8 @@ export const WorkloadActionsProvider = ({
   const [pendingAction, setPendingAction] = useState<ActionKey | null>(null);
   const [lifecycleError, setLifecycleError] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [versionError, setVersionError] = useState<string | null>(null);
+  const [rollbackTarget, setRollbackTarget] = useState<string | null>(null);
 
   const value = useMemo<WorkloadActionsContextValue>(() => {
     const runLifecycle = async (key: LifecycleKey) => {
@@ -88,6 +95,38 @@ export const WorkloadActionsProvider = ({
         replaceWorkload(await workloadsApi[key](project.id, workload.id));
       } catch (actionError) {
         setLifecycleError(getApiErrorMessage(actionError));
+      } finally {
+        setPendingAction(null);
+      }
+    };
+
+    const rollbackTo = async (versionId: string) => {
+      setPendingAction('rollback');
+      setRollbackTarget(versionId);
+      setVersionError(null);
+
+      try {
+        replaceWorkload(
+          await workloadsApi.rollback(project.id, workload.id, versionId),
+        );
+      } catch (actionError) {
+        setVersionError(getApiErrorMessage(actionError));
+      } finally {
+        setPendingAction(null);
+        setRollbackTarget(null);
+      }
+    };
+
+    const discardDraft = async () => {
+      setPendingAction('discard');
+      setVersionError(null);
+
+      try {
+        replaceWorkload(
+          await workloadsApi.discardDraft(project.id, workload.id),
+        );
+      } catch (actionError) {
+        setVersionError(getApiErrorMessage(actionError));
       } finally {
         setPendingAction(null);
       }
@@ -112,7 +151,11 @@ export const WorkloadActionsProvider = ({
       pendingAction,
       lifecycleError,
       deleteError,
+      versionError,
+      rollbackTarget,
       runLifecycle,
+      rollbackTo,
+      discardDraft,
       clearDeleteError: () => setDeleteError(null),
       deleteWorkload,
     };
@@ -121,6 +164,8 @@ export const WorkloadActionsProvider = ({
     pendingAction,
     lifecycleError,
     deleteError,
+    versionError,
+    rollbackTarget,
     project.id,
     replaceWorkload,
     refreshWorkloads,
@@ -154,7 +199,7 @@ export const WorkloadLifecycleActions = () => {
   const actions: LifecycleAction[] = [
     {
       key: 'deploy',
-      visible: canDeployWorkload(workload.status),
+      visible: canDeployWorkload(workload),
       primary: true,
       icon: Rocket,
       label: 'Deploy',

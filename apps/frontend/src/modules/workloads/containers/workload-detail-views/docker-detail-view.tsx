@@ -1,4 +1,4 @@
-import { LayoutDashboard, SlidersHorizontal } from 'lucide-react';
+import { History, LayoutDashboard, SlidersHorizontal } from 'lucide-react';
 
 import type { Workload } from '@acceleratio/shared';
 import {
@@ -10,6 +10,7 @@ import {
   WorkloadDeleteSection,
   WorkloadLifecycleActions,
 } from '../workload-actions';
+import { WorkloadVersions } from '../workload-versions';
 import type { WorkloadDetailView } from './workload-detail-view';
 
 export const getDockerDetailView = (
@@ -32,6 +33,20 @@ export const getDockerDetailView = (
         <DockerWorkloadConfiguration workload={workload}>
           <WorkloadDeleteSection />
         </DockerWorkloadConfiguration>
+      ),
+    },
+    {
+      id: 'versions',
+      label: 'Versions',
+      icon: History,
+      content: (
+        <WorkloadVersions
+          renderConfig={(config) => (
+            <span className="font-mono" title={config.docker_image}>
+              {config.docker_image}
+            </span>
+          )}
+        />
       ),
     },
   ],

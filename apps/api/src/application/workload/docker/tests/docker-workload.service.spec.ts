@@ -7,6 +7,8 @@ import type { KubernetesService } from '@/vendor/kubernetes/kubernetes.service';
 import type { WorkloadEventsService } from '../../observer/workload-events.service';
 import type { WorkloadMutationGuard } from '../../observer/workload-mutation-guard';
 import type { WorkloadRow } from '../../schemas/workload.schema';
+import type { WorkloadVersionRow } from '../../schemas/workload-version.schema';
+import type { WorkloadVersionService } from '../../workload-version.service';
 import { DockerWorkloadService } from '../docker-workload.service';
 
 // @kubernetes/client-node is ESM-only and Jest runs CommonJS. None of these
@@ -26,13 +28,34 @@ const projectId = '2f1c9a3e-8b7d-4e6f-9a0b-1c2d3e4f5a6b';
 const workloadId = '3f9a1b2c-4d5e-6f70-8192-a3b4c5d6e7f8';
 const externalName = 'my-api-3f9a1b2c';
 const namespace = `project-${projectId}`;
+const activeVersionId = '5a6b7c8d-9e0f-4a1b-8c2d-3e4f5a6b7c8d';
+const olderVersionId = '6b7c8d9e-0f1a-4b2c-9d3e-4f5a6b7c8d9e';
+
+const activeVersion: WorkloadVersionRow = {
+  id: activeVersionId,
+  workload_id: workloadId,
+  number: 2,
+  config: { docker_image: 'nginx:1.25' },
+  source_version_id: null,
+  created_at: new Date('2026-11-01T10:00:00.000Z'),
+};
+
+const olderVersion: WorkloadVersionRow = {
+  id: olderVersionId,
+  workload_id: workloadId,
+  number: 1,
+  config: { docker_image: 'nginx:1.24' },
+  source_version_id: null,
+  created_at: new Date('2026-11-01T09:10:00.000Z'),
+};
 
 const baseRow: WorkloadRow = {
   id: workloadId,
   project_id: projectId,
   name: 'My API',
   type: 'docker',
-  config: { docker_image: 'nginx:1.25' },
+  active_version_id: activeVersionId,
+  draft_config: null,
   position: { x: 0, y: 0 },
   external_name: externalName,
   status: 'running',
@@ -146,6 +169,23 @@ const createService = () => {
   const guard = { noteMutation } as unknown as WorkloadMutationGuard;
   const publish = jest.fn();
   const events = { publish } as unknown as WorkloadEventsService;
+  const versionsFake = {
+    findByIds: jest.fn((ids: string[]) => {
+      const known = [activeVersion, olderVersion];
+
+      return Promise.resolve(
+        new Map(
+          known
+            .filter((version) => ids.includes(version.id))
+            .map((version) => [version.id, version]),
+        ),
+      );
+    }),
+    list: jest.fn(),
+    get: jest.fn(),
+    record: jest.fn(),
+    clearAppliedDraft: jest.fn(),
+  };
   const service = new DockerWorkloadService(
     database.db,
     projectService,
@@ -153,6 +193,7 @@ const createService = () => {
     kubernetes,
     guard,
     events,
+    versionsFake as unknown as WorkloadVersionService,
   );
 
   return {
@@ -164,6 +205,7 @@ const createService = () => {
     exists,
     noteMutation,
     publish,
+    versions: versionsFake,
   };
 };
 
@@ -191,21 +233,30 @@ describe('DockerWorkloadService.list', () => {
     expect(update).not.toHaveBeenCalled();
   });
 
-  it('strips a legacy port from the config returned to the API', async () => {
-    const { service, orderBy, update } = createService();
-    const legacyRow = {
+  it('attaches the active version and the draft of every row', async () => {
+    const { service, orderBy, versions } = createService();
+    const draftRow: WorkloadRow = {
       ...baseRow,
-      config: { docker_image: 'nginx:1.25', port: 8080 },
-    } as WorkloadRow;
+      id: 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d',
+      active_version_id: null,
+      draft_config: { docker_image: 'redis:7' },
+      status: 'draft',
+    };
 
-    orderBy.mockResolvedValue([legacyRow]);
+    orderBy.mockResolvedValue([baseRow, draftRow]);
 
     const result = await service.list(projectId);
 
-    expect(result).toHaveLength(1);
-    expect(result[0].config).toEqual({ docker_image: 'nginx:1.25' });
-    expect(result[0].config).not.toHaveProperty('port');
-    expect(update).not.toHaveBeenCalled();
+    expect(versions.findByIds).toHaveBeenCalledTimes(1);
+    expect(versions.findByIds).toHaveBeenCalledWith([activeVersionId]);
+    expect(result[0].active_version).toMatchObject({
+      id: activeVersionId,
+      number: 2,
+      config: { docker_image: 'nginx:1.25' },
+    });
+    expect(result[0].draft_config).toBeNull();
+    expect(result[1].active_version).toBeNull();
+    expect(result[1].draft_config).toEqual({ docker_image: 'redis:7' });
   });
 });
 
@@ -312,8 +363,10 @@ describe('DockerWorkloadService.create', () => {
       project_id: projectId,
       name: 'Worker',
       type: 'docker',
+      draft_config: { docker_image: 'nginx:1.25' },
       position: { x: 640, y: 0 },
     });
+    expect(firstArgument(insertValues)).not.toHaveProperty('active_version_id');
   });
 });
 
@@ -536,5 +589,291 @@ describe('DockerWorkloadService type scope', () => {
         config: { docker_image: 'nginx:1.25' },
       }),
     ).rejects.toThrow('Unsupported workload type');
+  });
+});
+
+describe('DockerWorkloadService versions', () => {
+  const deployedState = (
+    overrides: Partial<WorkloadRow> = {},
+  ): WorkloadRow => ({
+    ...baseRow,
+    status: 'deploying',
+    updated_at: new Date('2026-11-02T10:00:01.000Z'),
+    ...overrides,
+  });
+
+  const appliedDeployment = (appsV1: {
+    createNamespacedDeployment: jest.Mock;
+  }) =>
+    (
+      firstArgument(appsV1.createNamespacedDeployment) as {
+        body: V1Deployment;
+      }
+    ).body;
+
+  it('stores a config change as a draft without touching the cluster', async () => {
+    const { service, limit, set, returning, appsV1 } = createService();
+
+    limit.mockResolvedValue([baseRow]);
+    returning.mockResolvedValue([
+      { ...baseRow, draft_config: { docker_image: 'nginx:1.26' } },
+    ]);
+
+    const result = await service.update(projectId, workloadId, {
+      config: { docker_image: ' nginx:1.26 ' },
+    });
+
+    expect(set).toHaveBeenCalledWith({
+      draft_config: { docker_image: 'nginx:1.26' },
+    });
+    expect(result.draft_config).toEqual({ docker_image: 'nginx:1.26' });
+    expect(result.active_version?.config).toEqual({
+      docker_image: 'nginx:1.25',
+    });
+    expect(appsV1.replaceNamespacedDeployment).not.toHaveBeenCalled();
+  });
+
+  it('drops the draft when the config is edited back to the active one', async () => {
+    const { service, limit, set, returning } = createService();
+    const withDraft: WorkloadRow = {
+      ...baseRow,
+      draft_config: { docker_image: 'nginx:1.26' },
+    };
+
+    limit.mockResolvedValue([withDraft]);
+    returning.mockResolvedValue([baseRow]);
+
+    await service.update(projectId, workloadId, {
+      config: { docker_image: 'nginx:1.25' },
+    });
+
+    expect(set).toHaveBeenCalledWith({ draft_config: null });
+  });
+
+  it('ignores a config equal to the active one when there is no draft', async () => {
+    const { service, limit, update } = createService();
+
+    limit.mockResolvedValue([baseRow]);
+
+    await service.update(projectId, workloadId, {
+      config: { docker_image: 'nginx:1.25' },
+    });
+
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('deploys the draft as a new version after the cluster accepts it', async () => {
+    const { service, limit, returning, appsV1, versions } = createService();
+    const withDraft: WorkloadRow = {
+      ...baseRow,
+      draft_config: { docker_image: 'nginx:1.26' },
+    };
+
+    limit.mockResolvedValue([withDraft]);
+    appsV1.readNamespacedDeployment.mockResolvedValue(undefined);
+    appsV1.createNamespacedDeployment.mockResolvedValue({});
+    returning.mockResolvedValue([deployedState()]);
+
+    await service.deploy(projectId, workloadId);
+
+    const deployment = appliedDeployment(appsV1);
+    const recorded = firstArgument(versions.record) as {
+      id: string;
+      workloadId: string;
+      config: unknown;
+      appliedDraft: unknown;
+    };
+
+    expect(deployment.spec?.template.spec?.containers[0].image).toBe(
+      'nginx:1.26',
+    );
+    expect(recorded).toMatchObject({
+      workloadId,
+      config: { docker_image: 'nginx:1.26' },
+      appliedDraft: { docker_image: 'nginx:1.26' },
+    });
+    expect(
+      deployment.spec?.template.metadata?.annotations?.[
+        'acceleratio.io/workload-version-id'
+      ],
+    ).toBe(recorded.id);
+    expect(recorded.id).not.toBe(activeVersionId);
+    expect(
+      appsV1.createNamespacedDeployment.mock.invocationCallOrder[0],
+    ).toBeLessThan(versions.record.mock.invocationCallOrder[0]);
+  });
+
+  it('reapplies the active version without a new one when there is no draft', async () => {
+    const { service, limit, returning, appsV1, versions } = createService();
+
+    limit.mockResolvedValue([baseRow]);
+    appsV1.readNamespacedDeployment.mockResolvedValue(undefined);
+    appsV1.createNamespacedDeployment.mockResolvedValue({});
+    returning.mockResolvedValue([deployedState()]);
+
+    await service.deploy(projectId, workloadId);
+
+    expect(
+      appliedDeployment(appsV1).spec?.template.metadata?.annotations?.[
+        'acceleratio.io/workload-version-id'
+      ],
+    ).toBe(activeVersionId);
+    expect(versions.record).not.toHaveBeenCalled();
+    expect(versions.clearAppliedDraft).not.toHaveBeenCalled();
+  });
+
+  it('records no version when the cluster rejects the deploy', async () => {
+    const { service, limit, appsV1, versions, set } = createService();
+
+    limit.mockResolvedValue([
+      { ...baseRow, draft_config: { docker_image: 'nginx:1.26' } },
+    ]);
+    appsV1.readNamespacedDeployment.mockResolvedValue(undefined);
+    appsV1.createNamespacedDeployment.mockRejectedValue(
+      new Error('admission denied'),
+    );
+
+    await expect(service.deploy(projectId, workloadId)).rejects.toThrow();
+    expect(versions.record).not.toHaveBeenCalled();
+    expect(set).not.toHaveBeenCalled();
+  });
+
+  it('refuses to deploy a workload with neither a draft nor a version', async () => {
+    const { service, limit, appsV1 } = createService();
+
+    limit.mockResolvedValue([
+      { ...baseRow, active_version_id: null, draft_config: null },
+    ]);
+
+    await expect(service.deploy(projectId, workloadId)).rejects.toThrow(
+      'Workload has no config to deploy',
+    );
+    expect(appsV1.readNamespacedDeployment).not.toHaveBeenCalled();
+  });
+
+  it('starts the active version and leaves the draft pending', async () => {
+    const { service, limit, returning, appsV1, versions } = createService();
+
+    limit.mockResolvedValue([
+      {
+        ...baseRow,
+        status: 'stopped',
+        draft_config: { docker_image: 'nginx:1.26' },
+      },
+    ]);
+    appsV1.readNamespacedDeployment.mockResolvedValue(undefined);
+    appsV1.createNamespacedDeployment.mockResolvedValue({});
+    returning.mockResolvedValue([deployedState()]);
+
+    await service.start(projectId, workloadId);
+
+    expect(
+      appliedDeployment(appsV1).spec?.template.spec?.containers[0].image,
+    ).toBe('nginx:1.25');
+    expect(versions.record).not.toHaveBeenCalled();
+    expect(versions.clearAppliedDraft).not.toHaveBeenCalled();
+  });
+
+  it('refuses to start a workload that was never deployed', async () => {
+    const { service, limit } = createService();
+
+    limit.mockResolvedValue([
+      {
+        ...baseRow,
+        active_version_id: null,
+        draft_config: { docker_image: 'nginx:1.26' },
+      },
+    ]);
+
+    await expect(service.start(projectId, workloadId)).rejects.toThrow(
+      'Workload is not deployed yet',
+    );
+  });
+
+  it('rolls back by applying an older config as a new version', async () => {
+    const { service, limit, returning, appsV1, versions } = createService();
+    const withDraft: WorkloadRow = {
+      ...baseRow,
+      draft_config: { docker_image: 'nginx:1.26' },
+    };
+
+    limit.mockResolvedValue([withDraft]);
+    versions.get.mockResolvedValue(olderVersion);
+    appsV1.readNamespacedDeployment.mockResolvedValue(undefined);
+    appsV1.createNamespacedDeployment.mockResolvedValue({});
+    returning.mockResolvedValue([deployedState()]);
+
+    await service.rollback(projectId, workloadId, olderVersionId);
+
+    const recorded = firstArgument(versions.record) as Record<string, unknown>;
+
+    expect(versions.get).toHaveBeenCalledWith(workloadId, olderVersionId);
+    expect(
+      appliedDeployment(appsV1).spec?.template.spec?.containers[0].image,
+    ).toBe('nginx:1.24');
+    expect(recorded).toMatchObject({
+      workloadId,
+      config: { docker_image: 'nginx:1.24' },
+      sourceVersionId: olderVersionId,
+    });
+    expect(recorded.id).not.toBe(olderVersionId);
+    // The draft stays for a later deploy.
+    expect(recorded.appliedDraft).toBeUndefined();
+  });
+
+  it('refuses to roll back to the active version', async () => {
+    const { service, limit, versions, appsV1 } = createService();
+
+    limit.mockResolvedValue([baseRow]);
+    versions.get.mockResolvedValue(activeVersion);
+
+    await expect(
+      service.rollback(projectId, workloadId, activeVersionId),
+    ).rejects.toThrow('Version is already active');
+    expect(appsV1.readNamespacedDeployment).not.toHaveBeenCalled();
+  });
+
+  it('lists versions of a workload in the project scope', async () => {
+    const { service, limit, versions } = createService();
+
+    limit.mockResolvedValue([baseRow]);
+    versions.list.mockResolvedValue([activeVersion, olderVersion]);
+
+    const result = await service.listVersions(projectId, workloadId);
+
+    expect(versions.list).toHaveBeenCalledWith(workloadId);
+    expect(result.map((version) => version.number)).toEqual([2, 1]);
+    expect(result[0].created_at).toBe('2026-11-01T10:00:00.000Z');
+  });
+
+  it('discards a draft of a deployed workload', async () => {
+    const { service, limit, set, returning } = createService();
+
+    limit.mockResolvedValue([
+      { ...baseRow, draft_config: { docker_image: 'nginx:1.26' } },
+    ]);
+    returning.mockResolvedValue([baseRow]);
+
+    const result = await service.discardDraft(projectId, workloadId);
+
+    expect(set).toHaveBeenCalledWith({ draft_config: null });
+    expect(result.draft_config).toBeNull();
+  });
+
+  it('keeps the only config of a workload that was never deployed', async () => {
+    const { service, limit, update } = createService();
+
+    limit.mockResolvedValue([
+      {
+        ...baseRow,
+        active_version_id: null,
+        draft_config: { docker_image: 'nginx:1.26' },
+      },
+    ]);
+
+    await expect(service.discardDraft(projectId, workloadId)).rejects.toThrow(
+      'its draft is its only config',
+    );
+    expect(update).not.toHaveBeenCalled();
   });
 });

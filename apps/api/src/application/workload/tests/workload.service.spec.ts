@@ -33,7 +33,8 @@ const createWorkload = (overrides: Partial<Workload> = {}): Workload => ({
   project_id: projectId,
   name: 'My API',
   type: 'docker',
-  config: { docker_image: 'nginx:1.25' },
+  active_version: null,
+  draft_config: { docker_image: 'nginx:1.25' },
   position: { x: 0, y: 0 },
   status: 'running',
   status_message: null,
@@ -57,6 +58,10 @@ const createTypeService = (type: WorkloadType) => ({
   stop: jest.fn(),
   restart: jest.fn(),
   remove: jest.fn(),
+  rollback: jest.fn(),
+  listVersions: jest.fn(),
+  getVersion: jest.fn(),
+  discardDraft: jest.fn(),
 });
 
 type FakeTypeService = ReturnType<typeof createTypeService>;

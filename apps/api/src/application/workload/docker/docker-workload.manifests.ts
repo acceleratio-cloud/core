@@ -8,6 +8,7 @@ export const PROJECT_ID_LABEL = 'acceleratio.io/project-id';
 export const WORKLOAD_ID_LABEL = 'acceleratio.io/workload-id';
 export const WORKLOAD_NAME_ANNOTATION = 'acceleratio.io/workload-name';
 export const RESTARTED_AT_ANNOTATION = 'acceleratio.io/restarted-at';
+export const WORKLOAD_VERSION_ANNOTATION = 'acceleratio.io/workload-version-id';
 
 export const CONTAINER_NAME = 'main';
 export const DEFAULT_REPLICAS = 1;
@@ -28,6 +29,11 @@ export interface WorkloadManifestInput {
   name: string;
   external_name: string;
   config: DockerWorkloadConfig;
+  /**
+   * Version the pod template runs. It changes the template hash, so applying
+   * another version always rolls the pods, even to an identical config.
+   */
+  version_id?: string;
 }
 
 export interface DeploymentOptions {
@@ -93,6 +99,10 @@ export const buildDeployment = (
   const annotations: Record<string, string> = {
     [WORKLOAD_NAME_ANNOTATION]: input.name,
   };
+
+  if (input.version_id !== undefined) {
+    annotations[WORKLOAD_VERSION_ANNOTATION] = input.version_id;
+  }
 
   if (options.restartedAt !== undefined) {
     annotations[RESTARTED_AT_ANNOTATION] = options.restartedAt;

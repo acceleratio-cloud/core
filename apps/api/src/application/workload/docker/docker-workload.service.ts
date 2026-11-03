@@ -11,6 +11,7 @@ import {
 import type { V1Deployment } from '@kubernetes/client-node';
 import type {
   CreateWorkloadPayload,
+  DockerWorkloadConfig,
   UpdateWorkloadPayload,
   Workload,
   WorkloadConfig,
@@ -18,6 +19,7 @@ import type {
   WorkloadStatus,
 } from '@acceleratio/shared';
 import { and, asc, eq } from 'drizzle-orm';
+import type { WorkloadVersion as WorkloadVersionContract } from '@acceleratio/shared';
 import { ProjectIsolationService } from '@/application/project/project-isolation.service';
 import { ProjectService } from '@/application/project/project.service';
 import {
@@ -40,11 +42,18 @@ import {
   workload,
   type WorkloadRow,
 } from '@/application/workload/schemas/workload.schema';
+import type { WorkloadVersionRow } from '@/application/workload/schemas/workload-version.schema';
 import type { WorkloadTypeService } from '@/application/workload/workload-type-service';
+import {
+  sameConfig,
+  toWorkloadVersion,
+  WorkloadVersionService,
+} from '@/application/workload/workload-version.service';
 import { normalizeDockerConfig } from './docker-workload.config';
 import {
   buildDeployment,
   RESTARTED_AT_ANNOTATION,
+  type WorkloadManifestInput,
 } from './docker-workload.manifests';
 
 const POSITION_COLUMNS = 4;
@@ -53,7 +62,23 @@ const POSITION_STEP_Y = 300;
 const UNIQUE_VIOLATION = '23505';
 const EXTERNAL_NAME_CONSTRAINT = 'workload_project_id_external_name_unique';
 const NOT_DEPLOYED_MESSAGE = 'Workload is not deployed yet';
+const NO_CONFIG_MESSAGE = 'Workload has no config to deploy';
+const ALREADY_ACTIVE_MESSAGE = 'Version is already active';
+const ONLY_DRAFT_MESSAGE =
+  'Workload has never been deployed; its draft is its only config';
 const UNSUPPORTED_TYPE_MESSAGE = 'Unsupported workload type';
+
+/** What one apply writes to the cluster and records afterwards. */
+interface ApplyPlan {
+  config: DockerWorkloadConfig;
+  /** Existing version to reapply, or the id for a new one. */
+  versionId: string;
+  /** True when the apply creates a version instead of reapplying one. */
+  newVersion: boolean;
+  sourceVersionId?: string | null;
+  /** Draft the apply consumes; cleared afterwards if nobody edited it. */
+  appliedDraft?: DockerWorkloadConfig;
+}
 
 interface WorkloadState {
   status: WorkloadStatus;
@@ -130,6 +155,7 @@ export class DockerWorkloadService implements WorkloadTypeService {
     private readonly kubernetes: KubernetesService,
     private readonly guard: WorkloadMutationGuard,
     private readonly events: WorkloadEventsService,
+    private readonly versions: WorkloadVersionService,
   ) {}
 
   async list(projectId: string): Promise<Workload[]> {
@@ -140,8 +166,20 @@ export class DockerWorkloadService implements WorkloadTypeService {
         and(eq(workload.project_id, projectId), eq(workload.type, this.type)),
       )
       .orderBy(asc(workload.created_at));
+    const active = await this.versions.findByIds(
+      rows.flatMap((row) =>
+        row.active_version_id === null ? [] : [row.active_version_id],
+      ),
+    );
 
-    return rows.map((row) => this.toWorkload(row));
+    return rows.map((row) =>
+      this.toWorkload(
+        row,
+        row.active_version_id === null
+          ? null
+          : (active.get(row.active_version_id) ?? null),
+      ),
+    );
   }
 
   async create(
@@ -170,7 +208,8 @@ export class DockerWorkloadService implements WorkloadTypeService {
       project_id: projectId,
       name,
       type: this.type,
-      config,
+      // Nothing is applied yet, so the whole config is pending.
+      draft_config: config,
       position,
       external_name: workloadExternalName(name, id),
     };
@@ -178,7 +217,7 @@ export class DockerWorkloadService implements WorkloadTypeService {
     try {
       const [row] = await this.db.insert(workload).values(values).returning();
 
-      return this.toWorkload(row);
+      return this.toWorkload(row, null);
     } catch (error) {
       if (!isExternalNameConflict(error)) {
         throw error;
@@ -199,7 +238,7 @@ export class DockerWorkloadService implements WorkloadTypeService {
         })
         .returning();
 
-      return this.toWorkload(row);
+      return this.toWorkload(row, null);
     } catch (error) {
       if (isExternalNameConflict(error)) {
         throw new ConflictException(
@@ -212,7 +251,7 @@ export class DockerWorkloadService implements WorkloadTypeService {
   }
 
   async get(projectId: string, id: string): Promise<Workload> {
-    return this.toWorkload(await this.findRow(projectId, id));
+    return this.present(await this.findRow(projectId, id));
   }
 
   async update(
@@ -223,16 +262,24 @@ export class DockerWorkloadService implements WorkloadTypeService {
     const existing = await this.findRow(projectId, id);
     const updates: {
       name?: string;
-      config?: WorkloadConfig;
+      draft_config?: WorkloadConfig | null;
       position?: WorkloadPosition;
     } = {};
+    const active = await this.activeVersion(existing);
 
     if (payload?.name !== undefined) {
       updates.name = normalizeName(payload.name);
     }
 
     if (payload?.config !== undefined) {
-      updates.config = normalizeDockerConfig(payload.config);
+      const config = normalizeDockerConfig(payload.config);
+      // Editing back to the applied config leaves nothing to deploy.
+      const draft =
+        active !== null && sameConfig(config, active.config) ? null : config;
+
+      if (!sameConfig(draft, existing.draft_config)) {
+        updates.draft_config = draft;
+      }
     }
 
     if (payload?.position !== undefined) {
@@ -249,7 +296,7 @@ export class DockerWorkloadService implements WorkloadTypeService {
     }
 
     if (Object.keys(updates).length === 0) {
-      return this.toWorkload(existing);
+      return this.toWorkload(existing, active);
     }
 
     const [row] = await this.db
@@ -257,7 +304,7 @@ export class DockerWorkloadService implements WorkloadTypeService {
       .set(updates)
       .where(eq(workload.id, existing.id))
       .returning();
-    const updated = this.toWorkload(row);
+    const updated = this.toWorkload(row, active);
 
     if (updates.position !== undefined) {
       this.events.publish({
@@ -272,16 +319,126 @@ export class DockerWorkloadService implements WorkloadTypeService {
     return updated;
   }
 
+  /**
+   * Applies the draft as a new version, or reapplies the active version when
+   * there is no draft.
+   */
   async deploy(projectId: string, id: string): Promise<Workload> {
-    return this.apply(await this.findRow(projectId, id));
+    const row = await this.findRow(projectId, id);
+    const active = await this.activeVersion(row);
+    const draft =
+      row.draft_config === null
+        ? null
+        : normalizeDockerConfig(row.draft_config);
+
+    if (draft === null && active === null) {
+      throw new ConflictException(NO_CONFIG_MESSAGE);
+    }
+
+    if (
+      draft !== null &&
+      (active === null || !sameConfig(draft, active.config))
+    ) {
+      return this.apply(row, {
+        config: draft,
+        versionId: randomUUID(),
+        newVersion: true,
+        appliedDraft: draft,
+      });
+    }
+
+    // Either no draft, or a draft that equals the applied config (left over
+    // after a rollback moved the active version under it).
+    return this.apply(row, {
+      config: normalizeDockerConfig(active!.config),
+      versionId: active!.id,
+      newVersion: false,
+      ...(draft !== null ? { appliedDraft: draft } : {}),
+    });
   }
 
   /**
-   * Starting a stopped workload applies the same manifest as deploy; the only
-   * difference is which buttons the console enables.
+   * Starting a stopped workload reapplies the active version. Pending draft
+   * changes are left for an explicit deploy.
    */
   async start(projectId: string, id: string): Promise<Workload> {
-    return this.deploy(projectId, id);
+    const row = await this.findRow(projectId, id);
+    const active = await this.activeVersion(row);
+
+    if (active === null) {
+      throw new ConflictException(NOT_DEPLOYED_MESSAGE);
+    }
+
+    return this.apply(row, {
+      config: normalizeDockerConfig(active.config),
+      versionId: active.id,
+      newVersion: false,
+    });
+  }
+
+  /**
+   * Applies the config of an earlier version as a new version. History only
+   * grows; the draft is left untouched.
+   */
+  async rollback(
+    projectId: string,
+    id: string,
+    versionId: string,
+  ): Promise<Workload> {
+    const row = await this.findRow(projectId, id);
+    const target = await this.versions.get(row.id, versionId);
+
+    if (target.id === row.active_version_id) {
+      throw new ConflictException(ALREADY_ACTIVE_MESSAGE);
+    }
+
+    return this.apply(row, {
+      config: normalizeDockerConfig(target.config),
+      versionId: randomUUID(),
+      newVersion: true,
+      sourceVersionId: target.id,
+    });
+  }
+
+  async listVersions(
+    projectId: string,
+    id: string,
+  ): Promise<WorkloadVersionContract[]> {
+    const row = await this.findRow(projectId, id);
+    const rows = await this.versions.list(row.id);
+
+    return rows.map(toWorkloadVersion);
+  }
+
+  async getVersion(
+    projectId: string,
+    id: string,
+    versionId: string,
+  ): Promise<WorkloadVersionContract> {
+    const row = await this.findRow(projectId, id);
+
+    return toWorkloadVersion(await this.versions.get(row.id, versionId));
+  }
+
+  async discardDraft(projectId: string, id: string): Promise<Workload> {
+    const row = await this.findRow(projectId, id);
+    const active = await this.activeVersion(row);
+
+    if (active === null) {
+      throw new ConflictException(ONLY_DRAFT_MESSAGE);
+    }
+
+    if (row.draft_config === null) {
+      return this.toWorkload(row, active);
+    }
+
+    const [updated] = await this.db
+      .update(workload)
+      .set({ draft_config: null })
+      .where(eq(workload.id, row.id))
+      .returning();
+
+    return this.toWorkload(updated, active);
   }
 
   async stop(projectId: string, id: string): Promise<Workload> {
@@ -389,16 +546,38 @@ export class DockerWorkloadService implements WorkloadTypeService {
       .where(and(eq(workload.id, id), eq(workload.project_id, projectId)));
   }
 
-  private async apply(row: WorkloadRow): Promise<Workload> {
+  private async apply(row: WorkloadRow, plan: ApplyPlan): Promise<Workload> {
     await this.isolation.ensure(row.project_id);
 
+    const input: WorkloadManifestInput = {
+      id: row.id,
+      project_id: row.project_id,
+      name: row.name,
+      external_name: row.external_name,
+      config: plan.config,
+      version_id: plan.versionId,
+    };
+
     try {
-      await this.upsertDeployment(row);
+      await this.upsertDeployment(input);
     } catch (error) {
       throw this.mapClusterError(error);
     }
 
     this.guard.noteMutation(row.id);
+
+    // The cluster accepted the config; only now does it become history.
+    if (plan.newVersion) {
+      await this.versions.record({
+        id: plan.versionId,
+        workloadId: row.id,
+        config: plan.config,
+        sourceVersionId: plan.sourceVersionId,
+        appliedDraft: plan.appliedDraft,
+      });
+    } else if (plan.appliedDraft !== undefined) {
+      await this.versions.clearAppliedDraft(row.id, plan.appliedDraft);
+    }
 
     return this.persistState(row.id, {
       status: 'deploying',
@@ -407,7 +586,7 @@ export class DockerWorkloadService implements WorkloadTypeService {
     });
   }
 
-  private async upsertDeployment(row: WorkloadRow): Promise<void> {
+  private async upsertDeployment(row: WorkloadManifestInput): Promise<void> {
     const namespace = projectNamespace(row.project_id);
     const existing = await this.readDeployment(row.external_name, namespace);
 
@@ -440,7 +619,7 @@ export class DockerWorkloadService implements WorkloadTypeService {
   }
 
   private async replaceDeployment(
-    row: WorkloadRow,
+    row: WorkloadManifestInput,
     resourceVersion: string | undefined,
   ): Promise<void> {
     if (resourceVersion === undefined) {
@@ -517,6 +696,8 @@ export class DockerWorkloadService implements WorkloadTypeService {
       throw new NotFoundException('Workload not found');
     }
 
+    const workloadState = await this.present(row);
+
     this.events.publish({
       type: 'status',
       workload_id: row.id,
@@ -527,7 +708,7 @@ export class DockerWorkloadService implements WorkloadTypeService {
       updated_at: row.updated_at.toISOString(),
     });
 
-    return this.toWorkload(row);
+    return workloadState;
   }
 
   private mapClusterError(error: unknown): HttpException {
@@ -597,15 +778,33 @@ export class DockerWorkloadService implements WorkloadTypeService {
     return { x, y };
   }
 
-  private toWorkload(row: WorkloadRow): Workload {
+  private async activeVersion(
+    row: WorkloadRow,
+  ): Promise<WorkloadVersionRow | null> {
+    if (row.active_version_id === null) {
+      return null;
+    }
+
+    const found = await this.versions.findByIds([row.active_version_id]);
+
+    return found.get(row.active_version_id) ?? null;
+  }
+
+  private async present(row: WorkloadRow): Promise<Workload> {
+    return this.toWorkload(row, await this.activeVersion(row));
+  }
+
+  private toWorkload(
+    row: WorkloadRow,
+    active: WorkloadVersionRow | null,
+  ): Workload {
     return {
       id: row.id,
       project_id: row.project_id,
       name: row.name,
       type: row.type,
-      // Legacy rows may still carry a port in JSONB; the contract no longer
-      // exposes one.
-      config: { docker_image: row.config.docker_image },
+      active_version: active === null ? null : toWorkloadVersion(active),
+      draft_config: row.draft_config,
       position: row.position,
       status: row.status,
       status_message: row.status_message,

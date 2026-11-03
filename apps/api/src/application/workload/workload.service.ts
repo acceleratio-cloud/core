@@ -3,6 +3,7 @@ import type {
   CreateWorkloadPayload,
   UpdateWorkloadPayload,
   Workload,
+  WorkloadVersion,
 } from '@acceleratio/shared';
 import { ProjectService } from '@/application/project/project.service';
 import type { WorkloadTypeService } from './workload-type-service';
@@ -97,6 +98,41 @@ export class WorkloadService {
     const service = await this.serviceForRow(projectId, id);
 
     return service.remove(projectId, id);
+  }
+
+  async rollback(
+    projectId: string,
+    id: string,
+    versionId: string,
+  ): Promise<Workload> {
+    const service = await this.serviceForRow(projectId, id);
+
+    return service.rollback(projectId, id, versionId);
+  }
+
+  async listVersions(
+    projectId: string,
+    id: string,
+  ): Promise<WorkloadVersion[]> {
+    const service = await this.serviceForRow(projectId, id);
+
+    return service.listVersions(projectId, id);
+  }
+
+  async getVersion(
+    projectId: string,
+    id: string,
+    versionId: string,
+  ): Promise<WorkloadVersion> {
+    const service = await this.serviceForRow(projectId, id);
+
+    return service.getVersion(projectId, id, versionId);
+  }
+
+  async discardDraft(projectId: string, id: string): Promise<Workload> {
+    const service = await this.serviceForRow(projectId, id);
+
+    return service.discardDraft(projectId, id);
   }
 
   private async serviceForRow(

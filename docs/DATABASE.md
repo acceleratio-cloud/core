@@ -29,6 +29,8 @@ erDiagram
     user ||--o{ session : "has"
     user ||--o{ account : "has"
     project ||--o{ workload : "contains"
+    workload ||--o{ workload_version : "has history"
+    workload |o--o| workload_version : "runs"
 
     user {
         text id PK
@@ -83,7 +85,8 @@ erDiagram
         uuid project_id FK
         varchar name
         workload_type type
-        jsonb config
+        uuid active_version_id FK
+        jsonb draft_config
         jsonb position
         varchar external_name
         workload_status status
@@ -92,6 +95,14 @@ erDiagram
         timestamp status_observed_at
         timestamp created_at
         timestamp updated_at
+    }
+    workload_version {
+        uuid id PK
+        uuid workload_id FK
+        integer number
+        jsonb config
+        uuid source_version_id FK
+        timestamp created_at
     }
 ```
 
@@ -108,15 +119,21 @@ Columns: `id`, `name`, `created_at`, `updated_at`.
 
 One row per deployable node on the project canvas. `project_id` scopes every read and write.
 
-Columns: `id`, `project_id`, `name`, `type`, `config`, `position`, `external_name`, `status`,
-`status_message`, `last_deployed_at`, `status_observed_at`, `created_at`, `updated_at`.
+Columns: `id`, `project_id`, `name`, `type`, `active_version_id`, `draft_config`, `position`,
+`external_name`, `status`, `status_message`, `last_deployed_at`, `status_observed_at`, `created_at`,
+`updated_at`.
 
 Invariants:
 
 - `(project_id, external_name)` is unique. `external_name` becomes the Kubernetes Deployment name,
   is generated once on create, and never changes.
-- `type` selects the shape of `config`. Today the only value is `docker`, whose config carries the
-  image reference. Adding a type means adding an enum value and a config schema together.
+- `type` selects the shape of every config of the workload (`draft_config` and its versions). Today
+  the only value is `docker`, whose config carries the image reference. Adding a type means adding an
+  enum value and a config schema together.
+- The config lives in versions, not on the row. `active_version_id` points at the
+  `workload_version` the cluster runs and is null until the first deploy. `draft_config` holds edits
+  the next deploy applies and is null when there are none. At least one of the two is set: a new
+  workload starts with a draft and no version. An edit back to the active config clears the draft.
 - `position` is the canvas coordinate `{ "x": number, "y": number }`; both keys are required. The
   column default is `{ "x": 0, "y": 0 }`, while the API places new workloads in the first free slot of
   the project's four-column canvas grid. Existing rows that still sat at the origin were backfilled
@@ -129,6 +146,26 @@ Invariants:
   is not used for ordering.
 - `workload_project_id_idx` covers lookups by project. The unique constraint doubles as the index for
   the project plus deployment name pair.
+
+### `workload_version`
+
+An immutable snapshot of a config that was applied to the cluster. A row is written only after the
+cluster accepted the Deployment and is never updated; deleting a workload cascades to its versions.
+
+Columns: `id`, `workload_id`, `number`, `config`, `source_version_id`, `created_at`.
+
+Invariants:
+
+- `(workload_id, number)` is unique. Numbers start at 1 and grow by one; the deploy locks the
+  workload row while it takes the next number.
+- A deploy with a draft writes a new version; a deploy without one reapplies the active version and
+  writes nothing. A rollback writes a new version with the old config and sets `source_version_id`
+  to the version it copied, so history only grows.
+- `created_at` is when the version was applied. The pod template carries the version id in the
+  `acceleratio.io/workload-version-id` annotation, so the cluster shows which version runs.
+- Workloads that were deployed before versions existed were backfilled with v1 holding their config at
+  `last_deployed_at`; workloads never deployed got that config as their draft (migration `0007`).
+  Migration `0008` then dropped `workload.config`.
 
 ### better-auth tables
 

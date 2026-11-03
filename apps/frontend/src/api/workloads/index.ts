@@ -2,6 +2,7 @@ import type {
   CreateWorkloadPayload,
   UpdateWorkloadPayload,
   Workload,
+  WorkloadVersion,
 } from '@acceleratio/shared';
 
 import { api } from '@/api';
@@ -63,4 +64,22 @@ export const workloadsApi = {
   stop: (projectId: string, id: string) => postAction(projectId, id, 'stop'),
   restart: (projectId: string, id: string) =>
     postAction(projectId, id, 'restart'),
+  listVersions: async (projectId: string, id: string) => {
+    const { data } = await api.get<WorkloadVersion[]>(
+      `/projects/${projectId}/workloads/${id}/versions`,
+    );
+    return data;
+  },
+  rollback: async (projectId: string, id: string, versionId: string) => {
+    const { data } = await api.post<Workload>(
+      `/projects/${projectId}/workloads/${id}/versions/${versionId}/rollback`,
+    );
+    return data;
+  },
+  discardDraft: async (projectId: string, id: string) => {
+    const { data } = await api.delete<Workload>(
+      `/projects/${projectId}/workloads/${id}/draft`,
+    );
+    return data;
+  },
 };

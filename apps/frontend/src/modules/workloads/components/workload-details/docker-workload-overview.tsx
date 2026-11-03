@@ -3,6 +3,7 @@ import { Package } from 'lucide-react';
 
 import type { Workload } from '@acceleratio/shared';
 import { parseDockerImage } from '@/modules/workloads/utils/parse-docker-image';
+import { effectiveConfig } from '@/modules/workloads/utils/workload-config';
 import {
   CopyableProperty,
   DetailSection,
@@ -23,7 +24,7 @@ export const DockerWorkloadOverview = ({
 }: {
   workload: Workload;
 }) => {
-  const reference = workload.config.docker_image;
+  const reference = effectiveConfig(workload).docker_image;
   const { repository, tag } = parseDockerImage(reference);
 
   return (
@@ -59,7 +60,7 @@ export const DockerWorkloadConfiguration = ({
   workload: Workload;
   children?: ReactNode;
 }) => {
-  const reference = workload.config.docker_image;
+  const reference = effectiveConfig(workload).docker_image;
   const { digest } = parseDockerImage(reference);
 
   return (
