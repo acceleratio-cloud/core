@@ -70,6 +70,7 @@ const pairs = [
   ),
   { fg: "fg-on-brand", bg: "brand", min: TEXT, kind: "text" },
   { fg: "fg-on-brand", bg: "brand-hover", min: TEXT, kind: "text" },
+  { fg: "fg-on-brand", bg: "brand-press", min: TEXT, kind: "text" },
   ...["surface-panel", "surface-board", "surface-sunken", "surface-raised"].flatMap((bg) => [
     { fg: "edge-control", bg, min: NON_TEXT, kind: "control border" },
     { fg: "brand-fg", bg, min: NON_TEXT, kind: "focus ring" },

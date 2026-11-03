@@ -190,11 +190,23 @@ Five steps replace the six arbitrary sizes. Tracking: `-0.02em` at `xl`,
   Nothing else.
 - **Shadow:** `none` (default), `float` (floating bars and menus, one soft
   layer plus a hairline), `modal` (dialogs). Two shadows replace six.
+  Buttons add three small `key` shadows (`shadow-key`, `shadow-key-soft`,
+  `shadow-key-pressed`): a 1px inner top highlight plus a contact shadow reads
+  as a raised key, and the inset shadow reads as pressed in. No gradients.
 - **Spacing:** 4px base. Allowed steps 4, 8, 12, 16, 24, 32. Page gutter 12px
   on the shell, 24px inside panels.
 - **Control heights:** `sm` 28, `md` 32, `lg` 40. Pills and inputs in the same
   row share a height.
 - **Icons:** Lucide, 16px, 1.75 stroke. 14px only inside `sm` controls.
+- **Button states:** hover moves the fill one step (`brand` to `brand-hover`);
+  press moves it to `brand-press`, scales to 0.98 over 100ms, and swaps the key
+  shadow for the inset one. Focus is a 2px `ring` outline with a 2px offset.
+  `loading` shows a spinner, keeps the label and width, and blocks clicks
+  without dropping keyboard focus. `motion-reduce` removes the scale.
+- **Button icons:** mark an icon with `data-icon="inline-start"` or
+  `inline-end`. The button then trims 2px of padding on that side so the icon
+  and the label sit at equal optical distance from the edges. Do not size the
+  icon with `className`; the button sets it.
 
 ## Layout patterns
 

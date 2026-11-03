@@ -64,7 +64,11 @@ export const ProjectsView = () => {
         </div>
 
         <Button onClick={() => setIsCreateOpen(true)}>
-          <Plus aria-hidden="true" strokeWidth={2} className="size-4" />
+          <Plus
+            data-icon="inline-start"
+            aria-hidden="true"
+            strokeWidth={2}
+          />
           New project
         </Button>
       </div>

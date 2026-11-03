@@ -143,7 +143,7 @@ export const ProjectsEmptyState = ({ onCreate }: { onCreate: () => void }) => {
       </p>
 
       <Button variant="outline" onClick={onCreate} className="mt-6">
-        <Plus aria-hidden="true" strokeWidth={2} className="size-4" />
+        <Plus data-icon="inline-start" aria-hidden="true" strokeWidth={2} />
         New project
       </Button>
     </div>

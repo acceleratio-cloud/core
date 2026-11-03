@@ -206,7 +206,11 @@ export const WorkloadActions = ({ workload }: { workload: Workload }) => {
             disabled={isBusy}
             className="ml-auto"
           >
-            <Trash2 aria-hidden="true" strokeWidth={1.75} />
+            <Trash2
+              data-icon="inline-start"
+              aria-hidden="true"
+              strokeWidth={1.75}
+            />
             Delete
           </Button>
         </div>

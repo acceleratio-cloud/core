@@ -30,6 +30,7 @@
   --blue-300: oklch(0.72 0.15 258);
   --blue-500: oklch(0.56 0.22 262);
   --blue-600: oklch(0.52 0.22 262);
+  --blue-700: oklch(0.47 0.21 262);
   --green-400: oklch(0.74 0.15 150);
   --amber-400: oklch(0.8 0.14 80);
   --red-400: oklch(0.7 0.19 25);
@@ -56,6 +57,7 @@
      light enough to read as text, a link or a focus ring on dark surfaces. */
   --brand: var(--blue-500);
   --brand-hover: var(--blue-600);
+  --brand-press: var(--blue-700);
   --brand-fg: var(--blue-300);
   --brand-wash: color-mix(in oklch, var(--blue-300) 16%, transparent);
 
@@ -87,6 +89,7 @@
 
   --color-brand: var(--brand);
   --color-brand-hover: var(--brand-hover);
+  --color-brand-press: var(--brand-press);
   --color-brand-fg: var(--brand-fg);
   --color-brand-wash: var(--brand-wash);
 
@@ -103,4 +106,10 @@
   --radius-surface: calc(var(--radius) * 1.4);
   --shadow-float: 0 1px 2px oklch(0 0 0 / 40%), 0 4px 12px oklch(0 0 0 / 30%);
   --shadow-modal: 0 8px 32px oklch(0 0 0 / 55%), 0 2px 8px oklch(0 0 0 / 40%);
+
+  /* Button volume without gradients: a 1px inner top highlight plus a contact
+     shadow reads as a raised key, and the inset shadow reads as pressed in. */
+  --shadow-key: inset 0 1px 0 oklch(1 0 0 / 18%), 0 1px 2px oklch(0 0 0 / 50%);
+  --shadow-key-soft: inset 0 1px 0 oklch(1 0 0 / 7%), 0 1px 2px oklch(0 0 0 / 35%);
+  --shadow-key-pressed: inset 0 1px 3px oklch(0 0 0 / 45%);
 }
