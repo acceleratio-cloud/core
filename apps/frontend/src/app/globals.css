@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
+@import "./tokens.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -52,24 +53,25 @@
 :root {
   /* This app is light-theme only. Keeps native controls and scrollbars light too. */
   color-scheme: light;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.822 0 0);
-  --input: oklch(0.822 0 0);
-  --ring: oklch(0.708 0 0);
+  /* shadcn names, aliased to the semantic tokens in tokens.css. */
+  --background: var(--surface-panel);
+  --foreground: var(--fg-primary);
+  --card: var(--surface-panel);
+  --card-foreground: var(--fg-primary);
+  --popover: var(--surface-panel);
+  --popover-foreground: var(--fg-primary);
+  --primary: var(--brand);
+  --primary-foreground: var(--fg-inverse);
+  --secondary: var(--surface-canvas);
+  --secondary-foreground: var(--fg-primary);
+  --muted: var(--surface-canvas);
+  --muted-foreground: var(--fg-tertiary);
+  --accent: var(--surface-canvas);
+  --accent-foreground: var(--fg-primary);
+  --destructive: var(--status-danger);
+  --border: var(--edge-default);
+  --input: var(--edge-control);
+  --ring: var(--brand);
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
@@ -134,14 +136,13 @@
 
 /* ---------------------------------- Toasts --------------------------------- */
 
-/* sileo paints toast text with these variables. The console reserves chroma for
-   destructive and invalid state (docs/DESIGN.md), so success, warning and info
-   stay achromatic and lean on the icon and label instead. */
+/* sileo paints toast text with these variables. Status colors come from the
+   status tokens; the icon and label still carry the meaning on their own. */
 :root {
-  --sileo-state-success: var(--foreground);
+  --sileo-state-success: var(--status-success);
   --sileo-state-loading: var(--muted-foreground);
-  --sileo-state-error: var(--destructive);
-  --sileo-state-warning: var(--foreground);
+  --sileo-state-error: var(--status-danger);
+  --sileo-state-warning: var(--status-warning);
   --sileo-state-info: var(--foreground);
   --sileo-state-action: var(--primary);
 }

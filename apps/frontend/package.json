@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "check:contrast": "node scripts/check-contrast.mjs"
   },
   "dependencies": {
     "@acceleratio/shared": "file:../../packages/shared",
