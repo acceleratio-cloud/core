@@ -119,10 +119,10 @@ const NavItem = ({ link, active }: { link: NavLink; active: boolean }) => {
       href={link.href}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "flex h-8 shrink-0 items-center gap-2 rounded-md border px-3 text-[13px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-foreground/60",
+        "flex h-8 shrink-0 items-center gap-2 rounded-md border px-3 text-[13px] outline-0 transition-[background-color,border-color,color,scale] duration-100 ease-out focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring motion-reduce:transition-none",
         active
-          ? "border-border bg-background font-medium text-foreground"
-          : "border-transparent text-muted-foreground hover:bg-foreground/5 hover:text-foreground",
+          ? "border-border bg-surface-panel font-medium text-foreground"
+          : "border-transparent text-muted-foreground hover:bg-surface-panel/60 hover:text-foreground active:scale-[0.98] motion-reduce:active:scale-100",
       )}
     >
       <Icon
