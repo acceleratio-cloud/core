@@ -14,6 +14,7 @@ import type { Workload } from '@acceleratio/shared';
 import { getApiErrorMessage } from '@/api';
 import { workloadsApi } from '@/api/workloads';
 import { useProject } from '@/modules/projects/providers/project-provider';
+import { canDeployWorkload } from '@/modules/workloads/utils/workload-capabilities';
 import { Button } from '@/shared/components/ui/button';
 import {
   Dialog,
@@ -35,10 +36,7 @@ export const WorkloadActions = ({ workload }: { workload: Workload }) => {
   const isBusy = pendingAction !== null;
   const isDeleting = pendingAction === 'delete';
 
-  const canDeploy =
-    workload.status === 'draft' ||
-    workload.status === 'failed' ||
-    workload.status === 'stopped';
+  const canDeploy = canDeployWorkload(workload.status);
   const canStart = workload.status === 'stopped';
   const canStop =
     workload.status === 'running' || workload.status === 'deploying';

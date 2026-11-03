@@ -218,6 +218,14 @@ Five steps replace the six arbitrary sizes. Tracking: `-0.02em` at `xl`,
    A `FloatingBar` pins top-left (identity and section tabs as a pill) and
    top-right (primary action). A `SidePanel` slides from the right and anchors
    below the bar through a shared offset token, so no screen hardcodes it.
+   Service cards on the board (`node-card-primitives.tsx`) are 264px wide on
+   `surface-raised` with `shadow-float`: a header with a 28px icon tile, the
+   name and a five-bar status meter; then label/value rows (icon and label in
+   `fg-tertiary`, value in mono); a danger notice when the rollout failed; and
+   a footer that shows a small Deploy button only when a deploy is possible,
+   otherwise "Deployed 3 hours ago". The meter is decorative, and the Status row
+   carries the label. Selection is a `brand-fg` border plus an offset outline.
+   The board uses a 20px dot grid in `edge-default`.
 3. **List page.** `PageHeader` (title, description, primary action), then a
    `DataTable` or card grid on `surface-panel`.
 4. **Detail and settings.** Left section nav, right content, max readable width.

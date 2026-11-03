@@ -51,6 +51,7 @@ export const ProjectCanvas = () => {
         ) : null}
         <WorkloadDetails workload={selectedWorkload} onClose={closeDetails} />
         <WorkloadFlow
+          selectedWorkloadId={selectedWorkloadId}
           onSelectWorkload={setSelectedWorkloadId}
           onClearSelection={closeDetails}
         />
@@ -60,14 +61,24 @@ export const ProjectCanvas = () => {
 };
 
 const WorkloadFlow = ({
+  selectedWorkloadId,
   onSelectWorkload,
   onClearSelection,
 }: {
+  selectedWorkloadId: string | null;
   onSelectWorkload: (workloadId: string) => void;
   onClearSelection: () => void;
 }) => {
   const { workloads, isLoadingWorkloads } = useProject();
-  const nodes = useMemo(() => toWorkloadNodes(workloads), [workloads]);
+  // Selection lives in the canvas state (it drives the details panel), so the
+  // flow is told which node is selected instead of tracking it itself.
+  const nodes = useMemo(
+    () =>
+      toWorkloadNodes(workloads).map((node) =>
+        node.id === selectedWorkloadId ? { ...node, selected: true } : node,
+      ),
+    [workloads, selectedWorkloadId],
+  );
 
   return (
     <>
@@ -89,8 +100,8 @@ const WorkloadFlow = ({
       >
         <Background
           variant={BackgroundVariant.Dots}
-          gap={140}
-          size={0}
+          gap={20}
+          size={1}
           color="var(--edge-default)"
         />
       </ReactFlow>
