@@ -3,7 +3,9 @@
 import {
   createContext,
   useContext,
+  useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -232,6 +234,13 @@ export const WorkloadDeleteSection = () => {
     deleteWorkload,
   } = useWorkloadActions();
   const [isOpen, setIsOpen] = useState(false);
+  // The panel's portal ignores pointer events, and a dialog mounted inside it
+  // inherits that, so the confirmation mounts on the body to be clickable.
+  const bodyRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    bodyRef.current = document.body;
+  }, []);
 
   const isDeleting = pendingAction === 'delete';
 
@@ -291,7 +300,7 @@ export const WorkloadDeleteSection = () => {
       </DetailSection>
 
       <Dialog open={isOpen} onOpenChange={handleOpenChange}>
-        <DialogContent showCloseButton={!isDeleting}>
+        <DialogContent container={bodyRef} showCloseButton={!isDeleting}>
           <DialogHeader>
             <DialogTitle>Delete service</DialogTitle>
             <DialogDescription>

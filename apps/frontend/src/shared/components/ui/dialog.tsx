@@ -26,12 +26,19 @@ function DialogContent({
   className,
   children,
   showCloseButton = true,
+  container,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Popup> & {
   showCloseButton?: boolean
+  /**
+   * Where to mount the dialog. A dialog opened from inside another portal
+   * mounts into that portal by default, so pass `document.body` when the
+   * parent portal is not interactive or sits in its own stacking context.
+   */
+  container?: React.ComponentProps<typeof DialogPrimitive.Portal>["container"]
 }) {
   return (
-    <DialogPrimitive.Portal>
+    <DialogPrimitive.Portal container={container}>
       <DialogPrimitive.Backdrop
         data-slot="dialog-backdrop"
         className="fixed inset-0 z-50 bg-scrim transition-opacity duration-150 ease-out data-[starting-style]:opacity-0 data-[ending-style]:opacity-0 motion-reduce:transition-none"
