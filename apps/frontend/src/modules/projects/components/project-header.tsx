@@ -27,18 +27,9 @@ export const ProjectHeader = () => {
 
   return (
     <header className="flex h-10 min-w-0 items-center gap-2.5 rounded-lg border border-border bg-surface-raised p-1 pl-1.5 shadow-float">
-      <div className="flex min-w-0 items-center gap-1.5">
-        <ProjectSwitcher />
+      <ProjectSwitcher />
 
-        <span className="hidden shrink-0 font-mono text-[11px] leading-none text-muted-foreground sm:inline">
-          {project.id.slice(0, 8)}
-        </span>
-      </div>
-
-      <Separator
-        orientation="vertical"
-        className="h-4 shrink-0 self-center!"
-      />
+      <Separator orientation="vertical" className="h-4 shrink-0 self-center!" />
 
       <nav
         aria-label="Project sections"

@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Boxes, Check, ChevronsUpDown, Plus } from 'lucide-react';
+import { Boxes, Check, Plus } from 'lucide-react';
 
 import type { Project } from '@acceleratio/shared';
 import { getApiErrorMessage } from '@/api';
@@ -78,18 +78,15 @@ export const ProjectSwitcher = () => {
             buttonVariants({ variant: 'ghost', size: 'sm' }),
             // The menu trigger resets outline-style, so focus restores it. No
             // offset: the header pill is only 4px taller than this button.
-            'h-7.5 min-w-0 max-w-40 rounded-lg px-2.5 text-[13px] font-medium tracking-tight focus-visible:outline-solid focus-visible:outline-offset-0 sm:max-w-56',
+            'h-7.5 min-w-0 flex items-center gap-2 max-w-40 rounded-lg px-2.5 text-[13px] font-medium tracking-tight focus-visible:outline-solid focus-visible:outline-offset-0 sm:max-w-56',
           )}
         >
           <span title={project.name} className="truncate">
             {project.name}
           </span>
-          <ChevronsUpDown
-            data-icon="inline-end"
-            aria-hidden="true"
-            strokeWidth={1.75}
-            className="text-muted-foreground"
-          />
+          <span className="hidden shrink-0 font-mono text-[11px] leading-none text-muted-foreground sm:inline">
+            {project.id.slice(0, 8)}
+          </span>
         </DropdownMenuTrigger>
 
         <DropdownMenuContent align="start" className="w-64">
