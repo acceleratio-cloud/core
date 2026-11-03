@@ -25,11 +25,11 @@ const buttonVariants = cva(
         default:
           "bg-primary text-primary-foreground shadow-key hover:bg-brand-hover active:bg-brand-press active:shadow-key-pressed",
         outline:
-          "border-border bg-surface-raised text-foreground shadow-key-soft hover:bg-surface-muted active:bg-surface-panel active:shadow-key-pressed aria-expanded:bg-surface-muted",
+          "border-border bg-surface-raised text-foreground shadow-key-soft hover:bg-surface-muted active:bg-edge-default active:shadow-key-pressed aria-expanded:bg-surface-muted",
         secondary:
-          "bg-secondary text-secondary-foreground shadow-key-soft hover:bg-surface-raised active:bg-surface-panel active:shadow-key-pressed aria-expanded:bg-surface-raised",
+          "bg-secondary text-secondary-foreground shadow-key-soft hover:bg-edge-default active:bg-edge-default active:shadow-key-pressed aria-expanded:bg-edge-default",
         ghost:
-          "text-foreground hover:bg-muted active:bg-surface-raised aria-expanded:bg-muted",
+          "text-foreground hover:bg-muted active:bg-edge-default aria-expanded:bg-muted",
         destructive:
           "bg-destructive/10 text-destructive hover:bg-destructive/20 active:bg-destructive/30 active:shadow-key-pressed focus-visible:outline-destructive",
         link: "text-brand-fg underline-offset-4 hover:underline active:scale-100",

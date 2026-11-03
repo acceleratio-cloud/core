@@ -1,5 +1,5 @@
 /*
-  Design tokens (dark). Spec and rationale: docs/design-brief/README.md.
+  Design tokens (light). Spec and rationale: docs/design-brief/README.md.
 
   Tier 1 (primitives) are raw values and are never used by components.
   Tier 2 (semantic) are the names components read, through the Tailwind
@@ -11,61 +11,63 @@
 :root {
   /* ---- Tier 1: primitives ---- */
   /* Neutral ramp: the number is the OKLCH lightness times 1000. */
-  --neutral-120: oklch(0.12 0 0);
-  --neutral-145: oklch(0.145 0 0);
-  --neutral-175: oklch(0.175 0 0);
-  --neutral-225: oklch(0.225 0 0);
-  --neutral-250: oklch(0.25 0 0);
-  --neutral-280: oklch(0.28 0 0);
-  --neutral-320: oklch(0.32 0 0);
-  --neutral-450: oklch(0.45 0 0);
-  --neutral-560: oklch(0.56 0 0);
+  --neutral-200: oklch(0.2 0 0);
+  --neutral-300: oklch(0.3 0 0);
+  --neutral-400: oklch(0.4 0 0);
+  --neutral-500: oklch(0.5 0 0);
+  --neutral-600: oklch(0.6 0 0);
   --neutral-700: oklch(0.7 0 0);
-  --neutral-800: oklch(0.8 0 0);
-  --neutral-860: oklch(0.86 0 0);
-  --neutral-910: oklch(0.91 0 0);
+  --neutral-890: oklch(0.89 0 0);
+  --neutral-930: oklch(0.93 0 0);
+  --neutral-940: oklch(0.94 0 0);
+  --neutral-955: oklch(0.955 0 0);
   --neutral-970: oklch(0.97 0 0);
+  --neutral-985: oklch(0.985 0 0);
+  --neutral-990: oklch(0.99 0 0);
   --neutral-1000: oklch(1 0 0);
 
-  /* The one chromatic accent: a signal-light sky blue, used sparingly. */
-  --sky-300: oklch(0.8 0.12 235);
-  --green-400: oklch(0.74 0.15 150);
-  --amber-400: oklch(0.8 0.14 80);
-  --red-400: oklch(0.7 0.19 25);
+  /* The one chromatic accent: a signal sky blue, used sparingly. Status hues
+     are dark enough to read as text on white and to hold as small fills. */
+  --sky-700: oklch(0.5 0.15 245);
+  --green-700: oklch(0.5 0.13 150);
+  --amber-700: oklch(0.5 0.11 70);
+  --red-600: oklch(0.52 0.2 27);
 
   /* ---- Tier 2: semantic ---- */
-  --surface-canvas: var(--neutral-120);
-  --surface-board: var(--neutral-145);
-  --surface-sunken: var(--neutral-145);
-  --surface-panel: var(--neutral-175);
-  --surface-raised: var(--neutral-225);
-  --surface-muted: var(--neutral-280);
+  /* Higher is closer to the user. The canvas is the lowest, tinted ground; the
+     panel and cards are whiter and sit on it. */
+  --surface-canvas: var(--neutral-955);
+  --surface-board: var(--neutral-970);
+  --surface-sunken: var(--neutral-985);
+  --surface-panel: var(--neutral-990);
+  --surface-raised: var(--neutral-1000);
+  --surface-muted: var(--neutral-940);
 
-  --edge-subtle: var(--neutral-250);
-  --edge-default: var(--neutral-320);
-  --edge-control: var(--neutral-560);
+  --edge-subtle: var(--neutral-930);
+  --edge-default: var(--neutral-890);
+  --edge-control: var(--neutral-600);
 
-  --fg-primary: var(--neutral-970);
-  --fg-secondary: var(--neutral-800);
-  --fg-tertiary: var(--neutral-700);
-  --fg-disabled: var(--neutral-450);
-  --fg-on-brand: var(--neutral-120);
+  --fg-primary: var(--neutral-200);
+  --fg-secondary: var(--neutral-400);
+  --fg-tertiary: var(--neutral-500);
+  --fg-disabled: var(--neutral-700);
+  --fg-on-brand: var(--neutral-1000);
 
-  /* brand is a near-white fill that carries near-black text; hover and press
-     dim it rather than brighten it. brand-fg is the sky accent: links, focus
-     rings and selected text, never a fill. */
-  --brand: var(--neutral-970);
-  --brand-hover: var(--neutral-910);
-  --brand-press: var(--neutral-860);
-  --brand-fg: var(--sky-300);
-  --brand-wash: color-mix(in oklch, var(--neutral-1000) 8%, transparent);
+  /* brand is a near-black fill that carries white text; hover and press move
+     it toward grey rather than darkening it further. brand-fg is the sky
+     accent: links, focus rings and selected text, never a fill. */
+  --brand: var(--neutral-200);
+  --brand-hover: var(--neutral-300);
+  --brand-press: var(--neutral-400);
+  --brand-fg: var(--sky-700);
+  --brand-wash: color-mix(in oklch, var(--neutral-200) 6%, transparent);
 
-  --status-success: var(--green-400);
-  --status-warning: var(--amber-400);
-  --status-danger: var(--red-400);
+  --status-success: var(--green-700);
+  --status-warning: var(--amber-700);
+  --status-danger: var(--red-600);
 
   /* Dims the page behind a modal; the only place raw black is a token. */
-  --scrim: oklch(0 0 0 / 60%);
+  --scrim: oklch(0 0 0 / 40%);
 }
 
 @theme inline {
@@ -103,13 +105,13 @@
 
   --radius-control: calc(var(--radius) * 0.8);
   --radius-surface: calc(var(--radius) * 1.4);
-  --shadow-float: 0 1px 2px oklch(0 0 0 / 40%), 0 4px 12px oklch(0 0 0 / 30%);
-  --shadow-modal: 0 8px 32px oklch(0 0 0 / 55%), 0 2px 8px oklch(0 0 0 / 40%);
+  --shadow-float: 0 1px 2px oklch(0 0 0 / 8%), 0 4px 14px oklch(0 0 0 / 8%);
+  --shadow-modal: 0 12px 40px oklch(0 0 0 / 18%), 0 2px 8px oklch(0 0 0 / 10%);
 
-  /* Button volume without gradients. Dark keys get a 1px inner top highlight,
-     the light brand key a 1px inner bottom shade; both sit on a contact shadow.
-     The inset shadow reads as pressed in. */
-  --shadow-key: inset 0 -1px 0 oklch(0 0 0 / 14%), 0 1px 2px oklch(0 0 0 / 50%);
-  --shadow-key-soft: inset 0 1px 0 oklch(1 0 0 / 7%), 0 1px 2px oklch(0 0 0 / 35%);
-  --shadow-key-pressed: inset 0 1px 3px oklch(0 0 0 / 45%);
+  /* Button volume without gradients. The dark brand key gets a 1px inner top
+     highlight; light keys get a 1px inner bottom shade; both sit on a contact
+     shadow. The inset shadow reads as pressed in. */
+  --shadow-key: inset 0 1px 0 oklch(1 0 0 / 16%), 0 1px 2px oklch(0 0 0 / 30%);
+  --shadow-key-soft: inset 0 -1px 0 oklch(0 0 0 / 5%), 0 1px 2px oklch(0 0 0 / 10%);
+  --shadow-key-pressed: inset 0 1px 3px oklch(0 0 0 / 22%);
 }

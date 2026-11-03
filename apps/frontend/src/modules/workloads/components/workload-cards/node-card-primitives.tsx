@@ -139,7 +139,7 @@ export const NodeRow = ({
 
 /**
  * A failure message from the cluster. Red marks only the icon and title; the
- * message itself is neutral text on a dark well, which stays readable at small
+ * message itself is neutral text on a lightly tinted well, which stays readable at small
  * sizes. Long messages clamp to three lines and expand in place.
  */
 export const NodeNotice = ({ children }: { children: string }) => {
@@ -165,7 +165,7 @@ export const NodeNotice = ({ children }: { children: string }) => {
   }, [children, expanded]);
 
   return (
-    <div className="mx-3 mb-3 rounded-md border border-destructive/50 bg-red-950/25">
+    <div className="mx-3 mb-3 rounded-md border border-status-danger/40 bg-status-danger/10">
       <div className="flex h-7 items-center gap-1.5 pr-1 pl-2.5">
         <CircleAlert
           aria-hidden="true"

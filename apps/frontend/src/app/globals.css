@@ -3,7 +3,7 @@
 @import "shadcn/tailwind.css";
 @import "./tokens.css";
 
-/* No .dark class is ever applied: the console is dark-only. The variant stays
+/* No .dark class is ever applied: the console is light-only. The variant stays
    so shadcn's `dark:` classes remain inert instead of following the OS. */
 @custom-variant dark (&:is(.dark *));
 
@@ -53,8 +53,8 @@
 }
 
 :root {
-  /* Dark-only. Keeps native controls, scrollbars and autofill dark too. */
-  color-scheme: dark;
+  /* Light-only. Keeps native controls, scrollbars and autofill light too. */
+  color-scheme: light;
   /* shadcn names, aliased to the semantic tokens in tokens.css. */
   --background: var(--surface-panel);
   --foreground: var(--fg-primary);
@@ -74,11 +74,11 @@
   --border: var(--edge-default);
   --input: var(--edge-control);
   --ring: var(--brand-fg);
-  --chart-1: var(--neutral-800);
-  --chart-2: var(--neutral-700);
-  --chart-3: var(--neutral-560);
-  --chart-4: var(--neutral-450);
-  --chart-5: var(--neutral-320);
+  --chart-1: var(--neutral-400);
+  --chart-2: var(--neutral-500);
+  --chart-3: var(--neutral-600);
+  --chart-4: var(--neutral-700);
+  --chart-5: var(--neutral-890);
   --radius: 0.75rem;
   --sidebar: var(--surface-panel);
   --sidebar-foreground: var(--fg-primary);
