@@ -123,6 +123,7 @@ export const toStorageBenchmark = (
 ): StorageBenchmark => ({
   id: row.id,
   storage_class_id: row.storage_class_id,
+  storage_class_name: row.storage_class_name,
   status: row.status,
   status_message: row.status_message,
   results: row.results,

@@ -386,3 +386,34 @@ export const formatMbps = (value: number) =>
 
 export const benchmarkHeadline = (results: StorageBenchmarkResults) =>
   `${formatIops(results.random_read_iops)} read / ${formatIops(results.random_write_iops)} write IOPS`;
+
+/** "1m 10s", "45s"; null until the run has both timestamps. */
+export const formatDuration = (
+  startedAt: string | null,
+  finishedAt: string | null,
+) => {
+  if (!startedAt || !finishedAt) {
+    return null;
+  }
+
+  const seconds = Math.max(
+    0,
+    Math.round(
+      (new Date(finishedAt).getTime() - new Date(startedAt).getTime()) / 1000,
+    ),
+  );
+  const minutes = Math.floor(seconds / 60);
+
+  return minutes > 0 ? `${minutes}m ${seconds % 60}s` : `${seconds}s`;
+};
+
+/** Signed percent change, such as "+12%"; null when there is no baseline. */
+export const formatChange = (current: number, previous: number | undefined) => {
+  if (previous === undefined || previous <= 0) {
+    return null;
+  }
+
+  const change = Math.round(((current - previous) / previous) * 100);
+
+  return change === 0 ? '±0%' : `${change > 0 ? '+' : ''}${change}%`;
+};

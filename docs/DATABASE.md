@@ -120,6 +120,7 @@ erDiagram
     storage_benchmark {
         uuid id PK
         uuid storage_class_id FK
+        varchar storage_class_name
         storage_benchmark_status status
         jsonb results
         varchar external_name
@@ -224,13 +225,15 @@ Invariants:
 
 ### `storage_benchmark`
 
-One fio run against a temporary volume of a storage profile. `storage_class_id` references
-`storage_class` with `ON DELETE CASCADE` (the history goes with its profile). `status` follows
-`pending` → `running` → `succeeded` or `failed`; `results` holds random read/write IOPS, sequential
-read/write MB/s and random latencies when it succeeded, and `status_message` explains a failure.
-`external_name` is the Job and claim name in the benchmark namespace. The partial unique index
-`storage_benchmark_active_unique` allows only one `pending` or `running` row, so one benchmark runs
-across the cluster at a time.
+One fio run against a temporary volume of a storage profile. Runs are the benchmark history and
+outlive their profile: `storage_class_id` references `storage_class` with `ON DELETE SET NULL`, and
+`storage_class_name` keeps the profile name from when the run started (migration `0011` backfilled
+it). `status` follows `pending` → `running` → `succeeded` or `failed`; `results` holds random
+read/write IOPS, sequential read/write MB/s and random latencies when it succeeded, and
+`status_message` explains a failure. `external_name` is the Job and claim name in the benchmark
+namespace. The partial unique index `storage_benchmark_active_unique` allows only one `pending` or
+`running` row, so one benchmark runs across the cluster at a time. The newest 200 finished runs are
+kept; older ones are pruned when a run finishes.
 
 ### better-auth tables
 

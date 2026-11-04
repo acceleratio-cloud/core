@@ -231,6 +231,7 @@ describe('StorageClassService.list', () => {
       {
         id: '9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a',
         storage_class_id: customId,
+        storage_class_name: 'Fast',
         status: 'succeeded',
         status_message: null,
         results: {

@@ -32,6 +32,7 @@ const clusterError = (code: number) =>
 const profile = (overrides: Partial<StorageClass> = {}) =>
   ({
     id: storageClassId,
+    name: 'Fast',
     external_name: 'sc-fast-7c1d2e3f',
     cluster_status: 'ready',
     ...overrides,
@@ -42,6 +43,7 @@ const runningRow = (
 ): StorageBenchmarkRow => ({
   id: benchmarkId,
   storage_class_id: storageClassId,
+  storage_class_name: 'Fast',
   status: 'running',
   status_message: null,
   results: null,
@@ -68,9 +70,11 @@ const report = JSON.stringify({
 
 const createService = (rows: StorageBenchmarkRow[] = []) => {
   const insertReturning = jest.fn();
-  const insert = jest.fn().mockReturnValue({
-    values: jest.fn().mockReturnValue({ returning: insertReturning }),
-  });
+  const insertValues = jest
+    .fn()
+    .mockReturnValue({ returning: insertReturning });
+  const insert = jest.fn().mockReturnValue({ values: insertValues });
+  const execute = jest.fn().mockResolvedValue(undefined);
   const updateReturning = jest.fn().mockResolvedValue([runningRow()]);
   const updateWhere = jest.fn().mockImplementation(() => {
     const result = Promise.resolve(undefined) as Promise<undefined> & {
@@ -110,7 +114,7 @@ const createService = (rows: StorageBenchmarkRow[] = []) => {
   };
   const storageClasses = { get: jest.fn().mockResolvedValue(profile()) };
   const service = new StorageBenchmarkService(
-    { select, insert, update } as unknown as Database,
+    { select, insert, update, execute } as unknown as Database,
     { coreV1, batchV1 } as unknown as KubernetesService,
     storageClasses as unknown as StorageClassService,
   );
@@ -118,6 +122,10 @@ const createService = (rows: StorageBenchmarkRow[] = []) => {
   return {
     service,
     insertReturning,
+    insertValues,
+    execute,
+    where,
+    limit,
     set,
     coreV1,
     batchV1,
@@ -135,7 +143,8 @@ afterEach(() => {
 describe('StorageBenchmarkService.start', () => {
   it('creates the namespace, a claim of the profile and the Job', async () => {
     jest.useFakeTimers();
-    const { service, insertReturning, coreV1, batchV1, set } = createService();
+    const { service, insertReturning, insertValues, coreV1, batchV1, set } =
+      createService();
 
     insertReturning.mockImplementation(() =>
       Promise.resolve([runningRow({ status: 'pending' })]),
@@ -155,6 +164,10 @@ describe('StorageBenchmarkService.start', () => {
     expect(batchV1.createNamespacedJob).toHaveBeenCalled();
     expect(lastState(set)).toMatchObject({ status: 'running' });
     expect(result.status).toBe('running');
+    // The name is kept so the run stays readable after the profile is gone.
+    expect(insertValues).toHaveBeenCalledWith(
+      expect.objectContaining({ storage_class_name: 'Fast' }),
+    );
 
     service.onModuleDestroy();
   });
@@ -258,6 +271,17 @@ describe('StorageBenchmarkService.poll', () => {
     });
   });
 
+  it('prunes old history after a run finishes', async () => {
+    const { service, batchV1, coreV1, execute } = createService([runningRow()]);
+
+    batchV1.readNamespacedJob.mockResolvedValue({ status: { failed: 1 } });
+    coreV1.readNamespacedPodLog.mockResolvedValue('');
+
+    await service.poll(benchmarkId);
+
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
   it('records the script error of a failed Job', async () => {
     const { service, batchV1, coreV1, set } = createService([runningRow()]);
 
@@ -324,5 +348,73 @@ describe('StorageBenchmarkService.poll', () => {
 
     await expect(service.poll(benchmarkId)).resolves.toBe(true);
     expect(batchV1.readNamespacedJob).not.toHaveBeenCalled();
+  });
+});
+
+describe('StorageBenchmarkService.history', () => {
+  const rowsAt = (count: number) =>
+    Array.from({ length: count }, (_, index) =>
+      runningRow({
+        id: `9d8c7b6a-5f4e-4d3c-8b2a-${String(index).padStart(12, '0')}`,
+        status: 'succeeded',
+        created_at: new Date(Date.UTC(2026, 10, 4, 12, 0, 0) - index * 60_000),
+      }),
+    );
+
+  it('returns a page and the cursor for the next one', async () => {
+    const { service, limit } = createService(rowsAt(3));
+
+    const page = await service.history({ limit: '2' });
+
+    // One extra row is read to know whether an older page exists.
+    expect(limit).toHaveBeenCalledWith(3);
+    expect(page.items).toHaveLength(2);
+    expect(page.items[0].storage_class_name).toBe('Fast');
+    expect(page.next_before).toBe(page.items[1].created_at);
+  });
+
+  it('ends the history on the last page', async () => {
+    const { service, limit } = createService(rowsAt(1));
+
+    const page = await service.history({});
+
+    expect(limit).toHaveBeenCalledWith(26);
+    expect(page.next_before).toBeNull();
+  });
+
+  it('keeps runs whose profile was deleted', async () => {
+    const { service } = createService([
+      runningRow({ storage_class_id: null, storage_class_name: 'Old SSD' }),
+    ]);
+
+    const page = await service.history({});
+
+    expect(page.items[0]).toMatchObject({
+      storage_class_id: null,
+      storage_class_name: 'Old SSD',
+    });
+  });
+
+  it.each([
+    [{ limit: '0' }, 'Limit'],
+    [{ limit: '101' }, 'Limit'],
+    [{ limit: 'ten' }, 'Limit'],
+    [{ storage_class_id: 'nope' }, 'UUID'],
+    [{ before: 'yesterday' }, 'timestamp'],
+  ])('rejects %p', async (query, message) => {
+    const { service } = createService([]);
+
+    await expect(service.history(query)).rejects.toThrow(message);
+  });
+
+  it('filters by profile and cursor', async () => {
+    const { service, where } = createService([]);
+
+    await service.history({
+      storage_class_id: storageClassId,
+      before: '2026-11-04T12:00:00.000Z',
+    });
+
+    expect(where).toHaveBeenCalledWith(expect.anything());
   });
 });

@@ -22,16 +22,22 @@ export const storageBenchmarkStatusEnum = pgEnum('storage_benchmark_status', [
 
 /**
  * One fio run against a temporary volume of a storage class. Rows are the
- * benchmark history; the Job and volume in the cluster are removed after the
- * run.
+ * benchmark history and outlive their profile; the Job and volume in the
+ * cluster are removed after the run.
  */
 export const storageBenchmark = pgTable(
   'storage_benchmark',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    storage_class_id: uuid('storage_class_id')
-      .notNull()
-      .references(() => storageClass.id, { onDelete: 'cascade' }),
+    // Null once the profile is deleted; the run stays in the history.
+    storage_class_id: uuid('storage_class_id').references(
+      () => storageClass.id,
+      { onDelete: 'set null' },
+    ),
+    // Profile name when the run started, shown after the profile is gone.
+    storage_class_name: varchar('storage_class_name', {
+      length: 255,
+    }).notNull(),
     status: storageBenchmarkStatusEnum('status').notNull().default('pending'),
     status_message: text('status_message'),
     results: jsonb('results').$type<StorageBenchmarkResults>(),

@@ -100,11 +100,21 @@ export interface StorageBenchmarkResults {
 
 export interface StorageBenchmark {
   id: string;
-  storage_class_id: string;
+  /** Null when the profile has been deleted since the run. */
+  storage_class_id: string | null;
+  /** Profile name when the run started. */
+  storage_class_name: string;
   status: StorageBenchmarkStatus;
   status_message: string | null;
   results: StorageBenchmarkResults | null;
   started_at: string | null;
   finished_at: string | null;
   created_at: string;
+}
+
+/** A page of benchmark history, newest first. */
+export interface StorageBenchmarkHistory {
+  items: StorageBenchmark[];
+  /** Pass as `before` to load older runs; null on the last page. */
+  next_before: string | null;
 }

@@ -429,7 +429,9 @@ duplicate status events; a leader lock is future work.
 - `benchmark/` runs fio on a temporary 2 GiB claim of a profile in `BENCHMARK_NAMESPACE` (default
   `acceleratio-benchmarks`) with `BENCHMARK_IMAGE` (default: Alpine pinned by digest, which installs
   fio from the Alpine mirror, so the cluster needs outbound access). `POST/GET
-  /storage-classes/:id/benchmarks`. The API polls the Job every 5 s, resumes active runs on bootstrap,
+  /storage-classes/:id/benchmarks` start a run and list a profile's recent runs; `GET
+  /storage-benchmarks?storage_class_id=&before=&limit=` pages the history of all runs, newest first
+  (25 by default, at most 100, `next_before` as the cursor), including runs of deleted profiles. The API polls the Job every 5 s, resumes active runs on bootstrap,
   parses fio's JSON from the pod log and then deletes the Job and claim, switching the volume to
   `Delete` first so `Retain` profiles leave no data. Write tests are bounded by bytes because
   SeaweedFS is append-only and overwrites would exhaust the claim's quota.

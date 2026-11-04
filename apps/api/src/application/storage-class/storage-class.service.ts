@@ -389,7 +389,11 @@ export class StorageClassService {
     );
 
     return new Map(
-      rows.map((row) => [row.storage_class_id, toStorageBenchmark(row)]),
+      rows.flatMap((row) =>
+        row.storage_class_id
+          ? [[row.storage_class_id, toStorageBenchmark(row)] as const]
+          : [],
+      ),
     );
   }
 

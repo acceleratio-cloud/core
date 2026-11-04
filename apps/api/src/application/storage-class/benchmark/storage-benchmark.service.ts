@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
+  BadRequestException,
   ConflictException,
   Inject,
   Injectable,
@@ -8,8 +9,11 @@ import {
   type OnModuleDestroy,
 } from '@nestjs/common';
 import type { V1Job } from '@kubernetes/client-node';
-import type { StorageBenchmark } from '@acceleratio/shared';
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import type {
+  StorageBenchmark,
+  StorageBenchmarkHistory,
+} from '@acceleratio/shared';
+import { and, desc, eq, inArray, lt, type SQL, sql } from 'drizzle-orm';
 import { DATABASE } from '@/vendor/db/database.constants';
 import type { Database } from '@/vendor/db/database.constants';
 import {
@@ -41,6 +45,17 @@ import {
 const UNIQUE_VIOLATION = '23505';
 const ACTIVE_CONSTRAINT = 'storage_benchmark_active_unique';
 const HISTORY_LIMIT = 10;
+export const HISTORY_PAGE_DEFAULT = 25;
+export const HISTORY_PAGE_MAX = 100;
+/** Finished runs kept; older ones are pruned when a run finishes. */
+export const HISTORY_RETENTION = 200;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export interface BenchmarkHistoryQuery {
+  storage_class_id?: string;
+  before?: string;
+  limit?: string;
+}
 const POLL_INTERVAL_MS = 5000;
 /** The Job deadline plus time for image pulls and provisioning. */
 const GIVE_UP_AFTER_MS = (ACTIVE_DEADLINE_SECONDS + 300) * 1000;
@@ -170,6 +185,63 @@ export class StorageBenchmarkService
     return rows.map(toStorageBenchmark);
   }
 
+  /**
+   * Every run across profiles, newest first, including runs of deleted
+   * profiles. `before` is the `created_at` of the last row of the previous
+   * page.
+   */
+  async history(
+    query: BenchmarkHistoryQuery,
+  ): Promise<StorageBenchmarkHistory> {
+    const limit =
+      query.limit === undefined ? HISTORY_PAGE_DEFAULT : Number(query.limit);
+
+    if (!Number.isInteger(limit) || limit < 1 || limit > HISTORY_PAGE_MAX) {
+      throw new BadRequestException(
+        `Limit must be a whole number from 1 to ${HISTORY_PAGE_MAX}`,
+      );
+    }
+
+    const conditions: SQL[] = [];
+
+    if (query.storage_class_id !== undefined) {
+      if (!UUID.test(query.storage_class_id)) {
+        throw new BadRequestException('Storage profile id must be a UUID');
+      }
+
+      conditions.push(
+        eq(storageBenchmark.storage_class_id, query.storage_class_id),
+      );
+    }
+
+    if (query.before !== undefined) {
+      const before = new Date(query.before);
+
+      if (Number.isNaN(before.getTime())) {
+        throw new BadRequestException('Before must be a timestamp');
+      }
+
+      conditions.push(lt(storageBenchmark.created_at, before));
+    }
+
+    // One extra row tells whether an older page exists.
+    const rows = await this.db
+      .select()
+      .from(storageBenchmark)
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .orderBy(desc(storageBenchmark.created_at), desc(storageBenchmark.id))
+      .limit(limit + 1);
+    const items = rows.slice(0, limit).map(toStorageBenchmark);
+
+    return {
+      items,
+      next_before:
+        rows.length > limit
+          ? (items[items.length - 1]?.created_at ?? null)
+          : null,
+    };
+  }
+
   async start(storageClassId: string): Promise<StorageBenchmark> {
     const storageClass = await this.storageClasses.get(storageClassId);
 
@@ -184,7 +256,12 @@ export class StorageBenchmarkService
     try {
       [row] = await this.db
         .insert(storageBenchmark)
-        .values({ id, storage_class_id: storageClassId, external_name: name })
+        .values({
+          id,
+          storage_class_id: storageClassId,
+          storage_class_name: storageClass.name,
+          external_name: name,
+        })
         .returning();
     } catch (error) {
       if (isActiveConflict(error)) {
@@ -426,6 +503,26 @@ export class StorageBenchmarkService
       );
 
     await this.cleanup(row.external_name);
+    await this.prune();
+  }
+
+  /** Keeps the newest finished runs; active runs are never pruned. */
+  private async prune(): Promise<void> {
+    try {
+      await this.db.execute(sql`
+        delete from ${storageBenchmark}
+        where ${storageBenchmark.id} in (
+          select ${storageBenchmark.id} from ${storageBenchmark}
+          where ${storageBenchmark.status} in ('succeeded', 'failed')
+          order by ${storageBenchmark.created_at} desc
+          offset ${HISTORY_RETENTION}
+        )
+      `);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to prune benchmark history: ${(error as Error).message}`,
+      );
+    }
   }
 
   /**

@@ -34,7 +34,17 @@ const isBenchmarkActive = (storageClass: StorageClass) =>
   storageClass.latest_benchmark?.status === 'pending' ||
   storageClass.latest_benchmark?.status === 'running';
 
-export const StorageSettings = () => {
+type StorageSettingsProps = {
+  /** Called after a benchmark starts, so the history can show it. */
+  onBenchmarkStarted?: () => void;
+  /** Called whenever the profile list changes (filter options elsewhere). */
+  onProfilesChange?: (profiles: StorageClass[]) => void;
+};
+
+export const StorageSettings = ({
+  onBenchmarkStarted,
+  onProfilesChange,
+}: StorageSettingsProps = {}) => {
   const [classes, setClasses] = useState<StorageClass[]>([]);
   const [environment, setEnvironment] = useState<StorageEnvironment | null>(
     null,
@@ -45,6 +55,10 @@ export const StorageSettings = () => {
   const [deleting, setDeleting] = useState<StorageClass | null>(null);
   const [benchmarking, setBenchmarking] = useState<StorageClass | null>(null);
   const benchmarkBusy = classes.some(isBenchmarkActive);
+
+  useEffect(() => {
+    onProfilesChange?.(classes);
+  }, [classes, onProfilesChange]);
 
   const load = useCallback(async () => {
     const [list, env] = await Promise.all([
@@ -187,6 +201,7 @@ export const StorageSettings = () => {
           : item,
       ),
     );
+    onBenchmarkStarted?.();
   };
 
   return (

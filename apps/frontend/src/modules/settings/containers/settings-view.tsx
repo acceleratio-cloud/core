@@ -7,13 +7,13 @@ import type { SettingsSectionId } from '../sections';
 import { AiProviderSettings } from './ai-provider-settings';
 import { CloudProvidersSettings } from './cloud-providers-settings';
 import { ProfileSettings } from './profile-settings';
-import { StorageSettings } from './storage-settings';
+import { StoragePanel } from './storage-panel';
 import { SystemSettings } from './system-settings';
 
 const PANELS = {
   ai: AiProviderSettings,
   cloud: CloudProvidersSettings,
-  storage: StorageSettings,
+  storage: StoragePanel,
   profile: ProfileSettings,
   system: SystemSettings,
 };
