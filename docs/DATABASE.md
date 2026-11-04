@@ -123,6 +123,11 @@ erDiagram
         varchar storage_class_name
         storage_benchmark_status status
         jsonb results
+        jsonb tests
+        varchar current_test
+        varchar failed_step
+        jsonb profile_snapshot
+        jsonb environment
         varchar external_name
         timestamp started_at
         timestamp finished_at
@@ -231,7 +236,13 @@ outlive their profile: `storage_class_id` references `storage_class` with `ON DE
 it). `status` follows `pending` → `running` → `succeeded` or `failed`; `results` holds random
 read/write IOPS, sequential read/write MB/s and random latencies when it succeeded, and
 `status_message` explains a failure. `external_name` is the Job and claim name in the benchmark
-namespace. The partial unique index `storage_benchmark_active_unique` allows only one `pending` or
+namespace. `tests` holds one entry per finished test (parameters, IOPS, bandwidth, latency
+percentiles, errors and a per-second series capped at 120 points, about 2 KB per run), written as
+each test finishes so a running benchmark shows progress; `current_test` names the test running now.
+`failed_step` is `install`, `provision`, `start`, `results` or a test name. `profile_snapshot`
+copies the profile's settings and `environment` the node count, storage servers and Kubernetes
+version when the run started (migration `0012`; older runs leave them null). The partial unique
+index `storage_benchmark_active_unique` allows only one `pending` or
 `running` row, so one benchmark runs across the cluster at a time. The newest 200 finished runs are
 kept; older ones are pruned when a run finishes.
 

@@ -3,6 +3,7 @@ import type {
   V1Namespace,
   V1PersistentVolumeClaim,
 } from '@kubernetes/client-node';
+import type { StorageBenchmarkTestName } from '@acceleratio/shared';
 import { MANAGED_BY_LABEL, MANAGED_BY_VALUE } from '../storage-class.manifests';
 
 export const BENCHMARK_ID_LABEL = 'acceleratio.io/storage-benchmark-id';
@@ -23,23 +24,34 @@ export const RUNTIME_SECONDS = 15;
 /** The Job is killed after this; the API gives up a little later. */
 export const ACTIVE_DEADLINE_SECONDS = 600;
 
-export const FIO_JSON_BEGIN = '---FIO-JSON-BEGIN---';
-export const FIO_JSON_END = '---FIO-JSON-END---';
-export const BENCHMARK_ERROR_PREFIX = 'BENCHMARK_ERROR:';
-
-export const FIO_JOB_NAMES = {
-  sequentialWrite: 'sequential-write',
-  sequentialRead: 'sequential-read',
-  randomWrite: 'random-write',
-  randomRead: 'random-read',
-} as const;
-
+export const BENCHMARK_ERROR_PREFIX = 'BENCHMARK_ERROR';
+export const TEST_START = '---TEST-START';
+export const TEST_JSON = '---TEST-JSON';
+export const TEST_JSON_END = '---TEST-JSON-END---';
+export const TEST_LOG = '---TEST-LOG';
+export const TEST_END = '---TEST-END';
+/** fio averages its bandwidth, IOPS and latency logs over this window. */
+export const LOG_AVERAGE_MS = 1000;
 /** Bytes each random-write job may write; four jobs run in parallel. */
 export const RANDOM_WRITE_BYTES_PER_JOB = '64m';
 
+export interface BenchmarkTestDefinition {
+  name: StorageBenchmarkTestName;
+  label: string;
+  pattern: 'sequential' | 'random';
+  direction: 'read' | 'write';
+  rw: string;
+  blockSize: string;
+  jobs: number;
+  /** fio options that end the test. */
+  options: string[];
+  limit: string;
+}
+
 /**
- * Four tests, one after another (`stonewall`): sequential write lays out the
- * test file once, then sequential read, 4k random write and 4k random read.
+ * The four tests, run one after another as separate fio invocations so the
+ * API can follow progress test by test. Sequential write lays out the test
+ * file once; the other tests reuse it.
  *
  * SeaweedFS stores data append-only, so every overwrite consumes new space
  * until the volume is vacuumed, and the volume quota equals the claim size.
@@ -49,58 +61,105 @@ export const RANDOM_WRITE_BYTES_PER_JOB = '64m';
  * buffered I/O is used with the page cache dropped before each test
  * (`invalidate`) and an fsync at the end of each write test.
  */
+export const BENCHMARK_TESTS: BenchmarkTestDefinition[] = [
+  {
+    name: 'sequential-write',
+    label: 'Sequential write',
+    pattern: 'sequential',
+    direction: 'write',
+    rw: 'write',
+    blockSize: '1m',
+    jobs: 1,
+    options: [],
+    limit: `Writes the ${TEST_FILE_SIZE.replace('m', ' MiB')} file once`,
+  },
+  {
+    name: 'sequential-read',
+    label: 'Sequential read',
+    pattern: 'sequential',
+    direction: 'read',
+    rw: 'read',
+    blockSize: '1m',
+    jobs: 1,
+    options: ['time_based=1', 'ramp_time=2'],
+    limit: `${RUNTIME_SECONDS} s`,
+  },
+  {
+    name: 'random-write',
+    label: 'Random 4 KiB write',
+    pattern: 'random',
+    direction: 'write',
+    rw: 'randwrite',
+    blockSize: '4k',
+    jobs: 4,
+    options: [`io_size=${RANDOM_WRITE_BYTES_PER_JOB}`],
+    limit: `${RANDOM_WRITE_BYTES_PER_JOB.replace('m', ' MiB')} per job, at most ${RUNTIME_SECONDS} s`,
+  },
+  {
+    name: 'random-read',
+    label: 'Random 4 KiB read',
+    pattern: 'random',
+    direction: 'read',
+    rw: 'randread',
+    blockSize: '4k',
+    jobs: 4,
+    options: ['time_based=1', 'ramp_time=2'],
+    limit: `${RUNTIME_SECONDS} s`,
+  },
+];
+
+export const BENCHMARK_ENGINE = 'psync';
+
 export const fioJobFile = (): string =>
   [
     '[global]',
     'directory=/data',
     'filename=fio-benchmark.dat',
     `size=${TEST_FILE_SIZE}`,
-    'ioengine=psync',
+    `ioengine=${BENCHMARK_ENGINE}`,
     'direct=0',
     'invalidate=1',
     `runtime=${RUNTIME_SECONDS}`,
     'end_fsync=1',
     'group_reporting=1',
-    'stonewall',
+    `log_avg_msec=${LOG_AVERAGE_MS}`,
     '',
-    `[${FIO_JOB_NAMES.sequentialWrite}]`,
-    'rw=write',
-    'bs=1m',
-    '',
-    `[${FIO_JOB_NAMES.sequentialRead}]`,
-    'rw=read',
-    'bs=1m',
-    'time_based=1',
-    'ramp_time=2',
-    '',
-    `[${FIO_JOB_NAMES.randomWrite}]`,
-    'rw=randwrite',
-    'bs=4k',
-    'numjobs=4',
-    `io_size=${RANDOM_WRITE_BYTES_PER_JOB}`,
-    '',
-    `[${FIO_JOB_NAMES.randomRead}]`,
-    'rw=randread',
-    'bs=4k',
-    'numjobs=4',
-    'time_based=1',
-    'ramp_time=2',
-    '',
+    ...BENCHMARK_TESTS.flatMap((test) => [
+      `[${test.name}]`,
+      `rw=${test.rw}`,
+      `bs=${test.blockSize}`,
+      ...(test.jobs > 1 ? [`numjobs=${test.jobs}`] : []),
+      ...test.options,
+      // Per-second averages for the progress charts, in /tmp/logs.
+      `write_bw_log=/tmp/logs/${test.name}`,
+      `write_iops_log=/tmp/logs/${test.name}`,
+      `write_lat_log=/tmp/logs/${test.name}`,
+      '',
+    ]),
+  ].join('\n');
+
+const runTest = (name: string): string =>
+  [
+    `echo '${TEST_START} ${name}---'`,
+    // fio reports I/O errors on stderr; the first one is the useful one
+    // (for example ENOSPC, or a disk type no server has).
+    `fio --section=${name} --output-format=json --output=/tmp/${name}.json /tmp/benchmark.fio 2>/tmp/${name}.err || { echo "${BENCHMARK_ERROR_PREFIX}[${name}]: fio could not complete: $(grep -m 1 'fio:' /tmp/${name}.err | cut -c 1-200)"; exit 3; }`,
+    `echo '${TEST_JSON} ${name}---'`,
+    `cat /tmp/${name}.json`,
+    `echo '${TEST_JSON_END}'`,
+    `for f in /tmp/logs/${name}_bw.*.log /tmp/logs/${name}_iops.*.log /tmp/logs/${name}_lat.*.log; do [ -f "$f" ] && { echo "${TEST_LOG} $(basename "$f")---"; cat "$f"; }; done`,
+    `echo '${TEST_END} ${name}---'`,
   ].join('\n');
 
 export const benchmarkScript = (): string =>
   [
     'set -eu',
-    `apk add --no-cache fio >/tmp/apk.log 2>&1 || { echo "${BENCHMARK_ERROR_PREFIX} Could not install fio. The cluster needs outbound access to the Alpine package mirror."; tail -n 5 /tmp/apk.log; exit 2; }`,
+    'mkdir -p /tmp/logs',
+    `apk add --no-cache fio >/tmp/apk.log 2>&1 || { echo "${BENCHMARK_ERROR_PREFIX}[install]: Could not install fio. The cluster needs outbound access to the Alpine package mirror."; tail -n 5 /tmp/apk.log; exit 2; }`,
     "cat > /tmp/benchmark.fio <<'FIO'",
     fioJobFile(),
     'FIO',
-    // fio reports I/O errors on stderr; the first one is the useful one
-    // (for example ENOSPC, or a disk type no server has).
-    `fio --output-format=json --output=/tmp/fio.json /tmp/benchmark.fio 2>/tmp/fio.err || { echo "${BENCHMARK_ERROR_PREFIX} fio could not complete: $(grep -m 1 'fio:' /tmp/fio.err | cut -c 1-200)"; exit 3; }`,
-    `echo '${FIO_JSON_BEGIN}'`,
-    'cat /tmp/fio.json',
-    `echo '${FIO_JSON_END}'`,
+    ...BENCHMARK_TESTS.map((test) => runTest(test.name)),
   ].join('\n');
 
 const labels = (benchmarkId: string, storageClassId: string) => ({

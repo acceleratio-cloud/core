@@ -1,4 +1,5 @@
 import type { StorageClass } from '@acceleratio/shared';
+import Link from 'next/link';
 import {
   Copy,
   Eye,
@@ -48,6 +49,18 @@ const usageLabel = (count: number | null) =>
       ? 'Not used by any volume yet'
       : `Used by ${count} ${count === 1 ? 'volume' : 'volumes'}`;
 
+const ReportLink = ({ id, label }: { id: string; label: string }) => (
+  <>
+    {' · '}
+    <Link
+      href={`/settings/storage/benchmarks/${id}`}
+      className="text-brand-fg underline-offset-4 hover:underline"
+    >
+      {label}
+    </Link>
+  </>
+);
+
 const BenchmarkSummary = ({ storageClass }: { storageClass: StorageClass }) => {
   const benchmark = storageClass.latest_benchmark;
 
@@ -63,7 +76,11 @@ const BenchmarkSummary = ({ storageClass }: { storageClass: StorageClass }) => {
           strokeWidth={1.75}
           className="size-3 animate-spin motion-reduce:animate-none"
         />
-        Benchmark running, about 2 minutes
+        Benchmark running
+        {benchmark.progress
+          ? ` · ${benchmark.progress.completed}/${benchmark.progress.total} tests`
+          : ''}
+        <ReportLink id={benchmark.id} label="Follow" />
       </span>
     );
   }
@@ -76,6 +93,7 @@ const BenchmarkSummary = ({ storageClass }: { storageClass: StorageClass }) => {
       >
         Last benchmark failed
         {benchmark.status_message ? `: ${benchmark.status_message}` : ''}
+        <ReportLink id={benchmark.id} label="Details" />
       </span>
     );
   }
@@ -90,6 +108,7 @@ const BenchmarkSummary = ({ storageClass }: { storageClass: StorageClass }) => {
       {formatMbps(results.sequential_read_mbps)} /{' '}
       {formatMbps(results.sequential_write_mbps)} MB/s ·{' '}
       <time dateTime={when}>{formatRelativeTime(when)}</time>
+      <ReportLink id={benchmark.id} label="Report" />
     </span>
   );
 };

@@ -3,6 +3,7 @@ import {
   BadRequestException,
   ConflictException,
   Inject,
+  NotFoundException,
   Injectable,
   Logger,
   type OnApplicationBootstrap,
@@ -11,9 +12,20 @@ import {
 import type { V1Job } from '@kubernetes/client-node';
 import type {
   StorageBenchmark,
+  StorageBenchmarkEnvironment,
   StorageBenchmarkHistory,
+  StorageBenchmarkReport,
 } from '@acceleratio/shared';
-import { and, desc, eq, inArray, lt, type SQL, sql } from 'drizzle-orm';
+import {
+  and,
+  desc,
+  eq,
+  inArray,
+  isNotNull,
+  lt,
+  type SQL,
+  sql,
+} from 'drizzle-orm';
 import { DATABASE } from '@/vendor/db/database.constants';
 import type { Database } from '@/vendor/db/database.constants';
 import {
@@ -39,7 +51,10 @@ import {
 import {
   benchmarkFailureMessage,
   parseBenchmarkLog,
+  summarizeTests,
   toStorageBenchmark,
+  toStorageBenchmarkReport,
+  type ParsedBenchmarkLog,
 } from './storage-benchmark.results';
 
 const UNIQUE_VIOLATION = '23505';
@@ -62,6 +77,7 @@ const GIVE_UP_AFTER_MS = (ACTIVE_DEADLINE_SECONDS + 300) * 1000;
 
 const BUSY_MESSAGE =
   'Another benchmark is running. Wait for it to finish and try again.';
+const NOT_FOUND_MESSAGE = 'Benchmark not found';
 const MISSING_CLASS_MESSAGE =
   'This storage profile is missing from the cluster, so it cannot be benchmarked';
 
@@ -242,6 +258,43 @@ export class StorageBenchmarkService
     };
   }
 
+  /** Full report: per-test detail, snapshot, and the previous run. */
+  async report(id: string): Promise<StorageBenchmarkReport> {
+    if (!UUID.test(id)) {
+      throw new BadRequestException('Benchmark id must be a UUID');
+    }
+
+    const [row] = await this.db
+      .select()
+      .from(storageBenchmark)
+      .where(eq(storageBenchmark.id, id))
+      .limit(1);
+
+    if (!row) {
+      throw new NotFoundException(NOT_FOUND_MESSAGE);
+    }
+
+    let previous: StorageBenchmarkRow | null = null;
+
+    if (row.storage_class_id) {
+      [previous = null] = await this.db
+        .select()
+        .from(storageBenchmark)
+        .where(
+          and(
+            eq(storageBenchmark.storage_class_id, row.storage_class_id),
+            eq(storageBenchmark.status, 'succeeded'),
+            isNotNull(storageBenchmark.results),
+            lt(storageBenchmark.created_at, row.created_at),
+          ),
+        )
+        .orderBy(desc(storageBenchmark.created_at))
+        .limit(1);
+    }
+
+    return toStorageBenchmarkReport(row, previous);
+  }
+
   async start(storageClassId: string): Promise<StorageBenchmark> {
     const storageClass = await this.storageClasses.get(storageClassId);
 
@@ -261,6 +314,14 @@ export class StorageBenchmarkService
           storage_class_id: storageClassId,
           storage_class_name: storageClass.name,
           external_name: name,
+          profile_snapshot: {
+            external_name: storageClass.external_name,
+            parameters: storageClass.parameters,
+            reclaim_policy: storageClass.reclaim_policy,
+            volume_binding_mode: storageClass.volume_binding_mode,
+            allow_volume_expansion: storageClass.allow_volume_expansion,
+          },
+          environment: await this.readEnvironment(),
         })
         .returning();
     } catch (error) {
@@ -297,6 +358,7 @@ export class StorageBenchmarkService
       await this.finish(row, {
         status: 'failed',
         status_message: 'The benchmark could not be started in the cluster',
+        failed_step: 'start',
       });
       throw toNestException(error);
     }
@@ -347,6 +409,7 @@ export class StorageBenchmarkService
       await this.finish(row, {
         status: 'failed',
         status_message: 'The benchmark Job is gone from the cluster',
+        failed_step: row.current_test ?? 'unknown',
       });
       return true;
     }
@@ -354,21 +417,27 @@ export class StorageBenchmarkService
     const outcome = jobOutcome(job);
 
     if (outcome === 'running') {
+      await this.recordProgress(row);
       return this.giveUpIfStale(row);
     }
 
     const log = await this.readLog(row.external_name);
+    const parsed = log ? parseBenchmarkLog(log) : null;
+    const tests = parsed?.tests ?? row.tests ?? null;
 
     if (outcome === 'succeeded') {
-      const results = log ? parseBenchmarkLog(log) : null;
+      const results = tests ? summarizeTests(tests) : null;
 
       await this.finish(
         row,
         results
-          ? { status: 'succeeded', results }
+          ? { status: 'succeeded', results, tests }
           : {
               status: 'failed',
+              tests,
+              failed_step: parsed?.failedStep ?? 'results',
               status_message: benchmarkFailureMessage(
+                parsed,
                 log,
                 'The benchmark finished without readable results.',
               ),
@@ -380,16 +449,83 @@ export class StorageBenchmarkService
     const condition = job.status?.conditions?.find(
       (item) => item.type === 'Failed' && item.status === 'True',
     );
-    const fallback =
-      condition?.reason === 'DeadlineExceeded'
-        ? 'The benchmark did not finish in time. The volume may not have been provisioned.'
-        : 'The benchmark failed.';
+    const deadline = condition?.reason === 'DeadlineExceeded';
+    const fallback = deadline
+      ? 'The benchmark did not finish in time. The volume may not have been provisioned, or writes are stuck.'
+      : 'The benchmark failed.';
 
     await this.finish(row, {
       status: 'failed',
-      status_message: benchmarkFailureMessage(log, fallback),
+      tests,
+      failed_step: this.failedStep(parsed, row, deadline),
+      status_message: benchmarkFailureMessage(parsed, log, fallback),
     });
     return true;
+  }
+
+  /**
+   * The step to blame: the script's own `[step]`, else the test that was
+   * running, else provisioning when the pod never produced output.
+   */
+  private failedStep(
+    parsed: ParsedBenchmarkLog | null,
+    row: StorageBenchmarkRow,
+    deadline: boolean,
+  ): string {
+    return (
+      parsed?.failedStep ??
+      parsed?.currentTest ??
+      row.current_test ??
+      (parsed === null && deadline ? 'provision' : 'unknown')
+    );
+  }
+
+  /** Stores finished tests and the running one while the Job runs. */
+  private async recordProgress(row: StorageBenchmarkRow): Promise<void> {
+    const log = await this.readLog(row.external_name);
+
+    if (!log) {
+      return;
+    }
+
+    const parsed = parseBenchmarkLog(log);
+    const completed = parsed.tests.length;
+
+    if (
+      completed === (row.tests?.length ?? 0) &&
+      parsed.currentTest === row.current_test
+    ) {
+      return;
+    }
+
+    await this.db
+      .update(storageBenchmark)
+      .set({ tests: parsed.tests, current_test: parsed.currentTest })
+      .where(
+        and(
+          eq(storageBenchmark.id, row.id),
+          inArray(storageBenchmark.status, ['pending', 'running']),
+        ),
+      );
+  }
+
+  /** Best-effort cluster context for the report. */
+  private async readEnvironment(): Promise<StorageBenchmarkEnvironment | null> {
+    try {
+      const [nodes, environment] = await Promise.all([
+        this.kubernetes.coreV1.listNode(),
+        this.storageClasses.environment(),
+      ]);
+
+      return {
+        nodes: nodes.items.length,
+        volume_servers: environment.volume_servers,
+        kubernetes_version:
+          nodes.items[0]?.status?.nodeInfo?.kubeletVersion ?? null,
+      };
+    } catch {
+      return null;
+    }
   }
 
   private async giveUpIfStale(row: StorageBenchmarkRow): Promise<boolean> {
@@ -402,6 +538,7 @@ export class StorageBenchmarkService
     await this.finish(row, {
       status: 'failed',
       status_message: 'The benchmark timed out',
+      failed_step: row.current_test ?? 'unknown',
     });
     return true;
   }
@@ -479,9 +616,13 @@ export class StorageBenchmarkService
         container: BENCHMARK_CONTAINER,
       });
     } catch (error) {
-      this.logger.warn(
-        `Failed to read benchmark log ${name}: ${(error as Error).message}`,
-      );
+      // 400 while the container is still being created: no log yet.
+      if (getKubernetesStatusCode(error) !== 400) {
+        this.logger.warn(
+          `Failed to read benchmark log ${name}: ${(error as Error).message}`,
+        );
+      }
+
       return null;
     }
   }
@@ -490,11 +631,16 @@ export class StorageBenchmarkService
   private async finish(
     row: StorageBenchmarkRow,
     state: Pick<StorageBenchmarkRow, 'status'> &
-      Partial<Pick<StorageBenchmarkRow, 'status_message' | 'results'>>,
+      Partial<
+        Pick<
+          StorageBenchmarkRow,
+          'status_message' | 'results' | 'tests' | 'failed_step'
+        >
+      >,
   ): Promise<void> {
     await this.db
       .update(storageBenchmark)
-      .set({ ...state, finished_at: new Date() })
+      .set({ ...state, current_test: null, finished_at: new Date() })
       .where(
         and(
           eq(storageBenchmark.id, row.id),

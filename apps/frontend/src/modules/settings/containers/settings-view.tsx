@@ -18,8 +18,12 @@ const PANELS = {
   system: SystemSettings,
 };
 
-export const SettingsView = () => {
-  const [activeId, setActiveId] = useState<SettingsSectionId>('ai');
+export const SettingsView = ({
+  initialSection = 'ai',
+}: {
+  initialSection?: SettingsSectionId;
+}) => {
+  const [activeId, setActiveId] = useState<SettingsSectionId>(initialSection);
   const ActivePanel = PANELS[activeId];
 
   return (

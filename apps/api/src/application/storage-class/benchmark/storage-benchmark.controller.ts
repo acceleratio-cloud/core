@@ -9,6 +9,7 @@ import {
 import type {
   StorageBenchmark,
   StorageBenchmarkHistory,
+  StorageBenchmarkReport,
 } from '@acceleratio/shared';
 import {
   StorageBenchmarkService,
@@ -25,6 +26,14 @@ export class StorageBenchmarkController {
     @Query() query: BenchmarkHistoryQuery,
   ): Promise<StorageBenchmarkHistory> {
     return this.storageBenchmarks.history(query);
+  }
+
+  /** One run with per-test detail, progress series and the previous run. */
+  @Get('storage-benchmarks/:id')
+  report(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<StorageBenchmarkReport> {
+    return this.storageBenchmarks.report(id);
   }
 
   @Get('storage-classes/:storageClassId/benchmarks')

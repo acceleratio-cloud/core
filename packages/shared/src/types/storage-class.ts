@@ -98,6 +98,71 @@ export interface StorageBenchmarkResults {
   random_write_latency_ms: number;
 }
 
+export type StorageBenchmarkTestName =
+  'sequential-write' | 'sequential-read' | 'random-write' | 'random-read';
+
+/** One point of a test's progress, averaged over about a second. */
+export interface StorageBenchmarkPoint {
+  /** Seconds since the test started. */
+  t: number;
+  iops: number;
+  mbps: number;
+  latency_ms: number;
+}
+
+export interface StorageBenchmarkTest {
+  name: StorageBenchmarkTestName;
+  label: string;
+  pattern: 'sequential' | 'random';
+  direction: 'read' | 'write';
+  parameters: {
+    block_size: string;
+    jobs: number;
+    engine: string;
+    direct: boolean;
+    file_size: string;
+    /** What ends the test, such as "15 s" or "64 MiB per job". */
+    limit: string;
+  };
+  iops: number;
+  bandwidth_mbps: number;
+  latency_ms: {
+    mean: number;
+    p50: number;
+    p95: number;
+    p99: number;
+    p999: number;
+    max: number;
+  };
+  runtime_seconds: number;
+  io_mb: number;
+  /** fio's error number; 0 when the test ran cleanly. */
+  error_code: number;
+  /** At most 120 points; longer tests are averaged into wider buckets. */
+  series: StorageBenchmarkPoint[];
+}
+
+export interface StorageBenchmarkProgress {
+  current_test: StorageBenchmarkTestName | null;
+  completed: number;
+  total: number;
+}
+
+/** Profile settings when the run started. */
+export interface StorageBenchmarkProfileSnapshot {
+  external_name: string;
+  parameters: StorageClassParameters | null;
+  reclaim_policy: StorageClassReclaimPolicy | null;
+  volume_binding_mode: StorageClassVolumeBindingMode | null;
+  allow_volume_expansion: boolean;
+}
+
+export interface StorageBenchmarkEnvironment {
+  nodes: number | null;
+  volume_servers: number | null;
+  kubernetes_version: string | null;
+}
+
 export interface StorageBenchmark {
   id: string;
   /** Null when the profile has been deleted since the run. */
@@ -107,6 +172,10 @@ export interface StorageBenchmark {
   status: StorageBenchmarkStatus;
   status_message: string | null;
   results: StorageBenchmarkResults | null;
+  /** Step that failed: install, provision, start, or a test name. */
+  failed_step: string | null;
+  /** Test-by-test progress; null for runs recorded before reports. */
+  progress: StorageBenchmarkProgress | null;
   started_at: string | null;
   finished_at: string | null;
   created_at: string;
@@ -117,4 +186,19 @@ export interface StorageBenchmarkHistory {
   items: StorageBenchmark[];
   /** Pass as `before` to load older runs; null on the last page. */
   next_before: string | null;
+}
+
+/** A previous run of the same profile, for comparison. */
+export interface StorageBenchmarkComparison {
+  id: string;
+  created_at: string;
+  results: StorageBenchmarkResults | null;
+  tests: Omit<StorageBenchmarkTest, 'series'>[];
+}
+
+export interface StorageBenchmarkReport extends StorageBenchmark {
+  tests: StorageBenchmarkTest[];
+  profile_snapshot: StorageBenchmarkProfileSnapshot | null;
+  environment: StorageBenchmarkEnvironment | null;
+  previous: StorageBenchmarkComparison | null;
 }

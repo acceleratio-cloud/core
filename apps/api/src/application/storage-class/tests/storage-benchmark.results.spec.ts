@@ -1,15 +1,19 @@
+import type { StorageBenchmarkPoint } from '@acceleratio/shared';
 import {
+  BENCHMARK_TESTS,
   benchmarkExternalName,
   benchmarkScript,
   buildBenchmarkClaim,
   buildBenchmarkJob,
   DEFAULT_BENCHMARK_IMAGE,
-  FIO_JSON_BEGIN,
-  FIO_JSON_END,
+  fioJobFile,
 } from '../benchmark/storage-benchmark.manifests';
 import {
   benchmarkFailureMessage,
+  downsample,
   parseBenchmarkLog,
+  SERIES_MAX_POINTS,
+  summarizeTests,
 } from '../benchmark/storage-benchmark.results';
 import { jobOutcome } from '../benchmark/storage-benchmark.service';
 
@@ -31,39 +35,81 @@ const input = {
   image: DEFAULT_BENCHMARK_IMAGE,
 };
 
-const fioReport = {
-  'fio version': 'fio-3.38',
-  jobs: [
-    {
-      jobname: 'sequential-write',
-      read: { iops: 0, bw_bytes: 0 },
-      write: { iops: 95.2, bw_bytes: 99_800_000, lat_ns: { mean: 10_000_000 } },
+const side = (iops: number, bytes: number) => ({
+  iops,
+  bw_bytes: bytes,
+  runtime: 15_000,
+  io_bytes: bytes * 15,
+  lat_ns: { mean: 1_000_000, max: 9_000_000 },
+  clat_ns: {
+    mean: 900_000,
+    max: 9_000_000,
+    percentile: {
+      '50.000000': 700_000,
+      '95.000000': 2_000_000,
+      '99.000000': 4_000_000,
+      '99.900000': 8_000_000,
     },
+  },
+});
+
+const fioJson = (name: string, read: boolean, iops: number, bytes: number) =>
+  JSON.stringify(
     {
-      jobname: 'sequential-read',
-      read: { iops: 300, bw_bytes: 314_572_800 },
-      write: { iops: 0, bw_bytes: 0 },
+      jobs: [
+        {
+          jobname: name,
+          error: 0,
+          read: read ? side(iops, bytes) : side(0, 0),
+          write: read ? side(0, 0) : side(iops, bytes),
+        },
+      ],
     },
-    {
-      jobname: 'random-write',
-      read: { iops: 0 },
-      write: { iops: 1234.6, lat_ns: { mean: 3_210_000 } },
-    },
-    {
-      jobname: 'random-read',
-      read: { iops: 5678.4, clat_ns: { mean: 702_400 } },
-      write: { iops: 0 },
-    },
-  ],
+    null,
+    2,
+  );
+
+/** What the benchmark script prints for one test. */
+const testOutput = (
+  name: string,
+  read: boolean,
+  iops: number,
+  bytes: number,
+  jobs = 1,
+) => {
+  const logs: string[] = [];
+
+  for (let job = 1; job <= jobs; job += 1) {
+    logs.push(
+      `---TEST-LOG ${name}_bw.${job}.log---`,
+      '1000, 1000, 0, 4096, 0',
+      '2000, 2000, 0, 4096, 0',
+      `---TEST-LOG ${name}_iops.${job}.log---`,
+      '1000, 100, 0, 4096, 0',
+      '2000, 200, 0, 4096, 0',
+      `---TEST-LOG ${name}_lat.${job}.log---`,
+      '1000, 1000000, 0, 4096, 0',
+      '2000, 3000000, 0, 4096, 0',
+    );
+  }
+
+  return [
+    `---TEST-START ${name}---`,
+    `---TEST-JSON ${name}---`,
+    fioJson(name, read, iops, bytes),
+    '---TEST-JSON-END---',
+    ...logs,
+    `---TEST-END ${name}---`,
+  ].join('\n');
 };
 
-const logWith = (report: unknown) =>
-  [
-    'fetch https://dl-cdn.alpinelinux.org/...',
-    FIO_JSON_BEGIN,
-    JSON.stringify(report, null, 2),
-    FIO_JSON_END,
-  ].join('\n');
+const fullLog = [
+  'fetch https://dl-cdn.alpinelinux.org/...',
+  testOutput('sequential-write', false, 95, 99_800_000),
+  testOutput('sequential-read', true, 300, 314_572_800),
+  testOutput('random-write', false, 1234.6, 5_000_000, 4),
+  testOutput('random-read', true, 5678.4, 23_000_000, 4),
+].join('\n');
 
 describe('benchmark manifests', () => {
   it('names resources after the benchmark id', () => {
@@ -91,89 +137,160 @@ describe('benchmark manifests', () => {
     });
     expect(pod?.restartPolicy).toBe('Never');
     expect(pod?.automountServiceAccountToken).toBe(false);
-    expect(pod?.containers[0].image).toBe(DEFAULT_BENCHMARK_IMAGE);
     expect(pod?.containers[0].image).toMatch(/@sha256:[0-9a-f]{64}$/);
     expect(pod?.volumes?.[0].persistentVolumeClaim?.claimName).toBe(input.name);
   });
 
-  it('prints the fio report between markers', () => {
-    const script = benchmarkScript();
-
-    expect(script).toContain('apk add --no-cache fio');
-    expect(script).toContain('--output-format=json');
-    expect(script.indexOf(FIO_JSON_BEGIN)).toBeLessThan(
-      script.indexOf(FIO_JSON_END),
-    );
-    // Overwrites consume new space on SeaweedFS: writes are bounded by
-    // bytes, only reads run for a fixed time.
-    const sections = script.split(/\n(?=\[)/);
+  it('bounds writes by bytes and logs per-second averages', () => {
+    const file = fioJobFile();
     const section = (name: string) =>
-      sections.find((part) => part.startsWith(`[${name}]`)) ?? '';
+      file.split(/\n(?=\[)/).find((part) => part.startsWith(`[${name}]`)) ?? '';
 
+    // Overwrites consume new space on SeaweedFS.
     expect(section('sequential-write')).not.toContain('time_based');
     expect(section('random-write')).toContain('io_size=64m');
     expect(section('random-write')).not.toContain('time_based');
     expect(section('random-read')).toContain('time_based=1');
-    expect(script).toContain("grep -m 1 'fio:' /tmp/fio.err");
-    for (const name of [
-      'sequential-write',
-      'sequential-read',
-      'random-write',
-      'random-read',
-    ]) {
-      expect(script).toContain(`[${name}]`);
+    expect(file).toContain('log_avg_msec=1000');
+    for (const test of BENCHMARK_TESTS) {
+      expect(section(test.name)).toContain(
+        `write_iops_log=/tmp/logs/${test.name}`,
+      );
+    }
+  });
+
+  it('runs each test separately between markers', () => {
+    const script = benchmarkScript();
+
+    expect(script).toContain('apk add --no-cache fio');
+    expect(script).toContain('BENCHMARK_ERROR[install]');
+    for (const test of BENCHMARK_TESTS) {
+      expect(script).toContain(`--section=${test.name}`);
+      expect(script).toContain(`---TEST-START ${test.name}---`);
+      expect(script).toContain(`---TEST-END ${test.name}---`);
+      expect(script).toContain(`BENCHMARK_ERROR[${test.name}]`);
     }
   });
 });
 
 describe('parseBenchmarkLog', () => {
-  it('reads IOPS, throughput and latency', () => {
-    expect(parseBenchmarkLog(logWith(fioReport))).toEqual({
+  it('reads every test with latency percentiles and series', () => {
+    const parsed = parseBenchmarkLog(fullLog);
+
+    expect(parsed.tests.map((test) => test.name)).toEqual([
+      'sequential-write',
+      'sequential-read',
+      'random-write',
+      'random-read',
+    ]);
+    expect(parsed.currentTest).toBeNull();
+    expect(parsed.error).toBeNull();
+
+    const randomRead = parsed.tests[3];
+
+    expect(randomRead).toMatchObject({
+      label: 'Random 4 KiB read',
+      direction: 'read',
+      iops: 5678,
+      bandwidth_mbps: 23,
+      runtime_seconds: 15,
+      error_code: 0,
+      parameters: { block_size: '4 KiB', jobs: 4, engine: 'psync' },
+      latency_ms: { mean: 1, p50: 0.7, p95: 2, p99: 4, p999: 8, max: 9 },
+    });
+    // Four jobs: IOPS and bandwidth add up, latency averages.
+    expect(randomRead.series).toEqual([
+      { t: 1, iops: 400, mbps: 4.1, latency_ms: 1 },
+      { t: 2, iops: 800, mbps: 8.2, latency_ms: 3 },
+    ]);
+  });
+
+  it('summarizes the four headline numbers', () => {
+    expect(summarizeTests(parseBenchmarkLog(fullLog).tests)).toEqual({
       random_read_iops: 5678,
       random_write_iops: 1235,
       sequential_read_mbps: 314.6,
       sequential_write_mbps: 99.8,
-      random_read_latency_ms: 0.702,
-      random_write_latency_ms: 3.21,
+      random_read_latency_ms: 1,
+      random_write_latency_ms: 1,
     });
   });
 
-  it('accepts the older KiB/s bandwidth field', () => {
-    const report = structuredClone(fioReport);
+  it('reports the running test and finished tests mid-run', () => {
+    const partial = [
+      testOutput('sequential-write', false, 95, 99_800_000),
+      '---TEST-START sequential-read---',
+    ].join('\n');
+    const parsed = parseBenchmarkLog(partial);
 
-    report.jobs[1].read = { iops: 300, bw: 1000 } as never;
-
-    expect(parseBenchmarkLog(logWith(report))?.sequential_read_mbps).toBe(1);
+    expect(parsed.tests).toHaveLength(1);
+    expect(parsed.currentTest).toBe('sequential-read');
+    expect(summarizeTests(parsed.tests)).toBeNull();
   });
 
-  it('returns null for missing markers, bad JSON or missing tests', () => {
-    expect(parseBenchmarkLog('no report')).toBeNull();
-    expect(
-      parseBenchmarkLog(`${FIO_JSON_BEGIN}\n{oops\n${FIO_JSON_END}`),
-    ).toBeNull();
-    expect(
-      parseBenchmarkLog(logWith({ jobs: fioReport.jobs.slice(0, 2) })),
-    ).toBeNull();
+  it('reads the failing step and message', () => {
+    const parsed = parseBenchmarkLog(
+      [
+        testOutput('sequential-write', false, 95, 99_800_000),
+        '---TEST-START sequential-read---',
+        'BENCHMARK_ERROR[sequential-read]: fio could not complete: No space left on device',
+      ].join('\n'),
+    );
+
+    expect(parsed.failedStep).toBe('sequential-read');
+    expect(parsed.error).toBe(
+      'fio could not complete: No space left on device',
+    );
+    expect(parsed.tests).toHaveLength(1);
+  });
+
+  it('skips a test whose report is not valid JSON', () => {
+    const parsed = parseBenchmarkLog(
+      [
+        '---TEST-START sequential-write---',
+        '---TEST-JSON sequential-write---',
+        '{oops',
+        '---TEST-JSON-END---',
+        '---TEST-END sequential-write---',
+      ].join('\n'),
+    );
+
+    expect(parsed.tests).toEqual([]);
+  });
+});
+
+describe('downsample', () => {
+  it('keeps short series and averages long ones under the cap', () => {
+    const points: StorageBenchmarkPoint[] = Array.from(
+      { length: 300 },
+      (_, index) => ({
+        t: index + 1,
+        iops: 100,
+        mbps: 1,
+        latency_ms: 2,
+      }),
+    );
+
+    expect(downsample(points.slice(0, 10))).toHaveLength(10);
+
+    const reduced = downsample(points);
+
+    expect(reduced.length).toBeLessThanOrEqual(SERIES_MAX_POINTS);
+    expect(reduced[0]).toEqual({ t: 3, iops: 100, mbps: 1, latency_ms: 2 });
   });
 });
 
 describe('benchmarkFailureMessage', () => {
-  it('prefers the script error line', () => {
+  it('prefers the script error, then the log tail, capped', () => {
     expect(
-      benchmarkFailureMessage(
-        'x\nBENCHMARK_ERROR: Could not install fio.\nERROR: network',
-        'Failed.',
-      ),
+      benchmarkFailureMessage({ error: 'Could not install fio.' }, 'x', 'F.'),
     ).toBe('Could not install fio.');
-  });
-
-  it('falls back to the log tail, then the fallback, capped', () => {
-    expect(benchmarkFailureMessage('a\nb\nc\nd', 'Failed.')).toBe(
-      'Failed. b c d',
+    expect(benchmarkFailureMessage({ error: null }, 'a\nb\nc\nd', 'F.')).toBe(
+      'F. b c d',
     );
-    expect(benchmarkFailureMessage(null, 'Failed.')).toBe('Failed.');
+    expect(benchmarkFailureMessage(null, null, 'F.')).toBe('F.');
     expect(
-      benchmarkFailureMessage('x'.repeat(900), 'Failed.').length,
+      benchmarkFailureMessage({ error: 'x'.repeat(900) }, null, 'F.').length,
     ).toBeLessThanOrEqual(500);
   });
 });

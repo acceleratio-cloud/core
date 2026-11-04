@@ -6,10 +6,6 @@ import {
 import type { StorageClass } from '@acceleratio/shared';
 import type { Database } from '@/vendor/db/database.constants';
 import type { KubernetesService } from '@/vendor/kubernetes/kubernetes.service';
-import {
-  FIO_JSON_BEGIN,
-  FIO_JSON_END,
-} from '../benchmark/storage-benchmark.manifests';
 import { StorageBenchmarkService } from '../benchmark/storage-benchmark.service';
 import type { StorageBenchmarkRow } from '../schemas/storage-benchmark.schema';
 import type { StorageClassService } from '../storage-class.service';
@@ -47,6 +43,11 @@ const runningRow = (
   status: 'running',
   status_message: null,
   results: null,
+  tests: null,
+  current_test: null,
+  failed_step: null,
+  profile_snapshot: null,
+  environment: null,
   external_name: name,
   started_at: new Date(),
   finished_at: null,
@@ -55,18 +56,36 @@ const runningRow = (
   ...overrides,
 });
 
-const report = JSON.stringify({
-  jobs: [
-    'sequential-write',
-    'sequential-read',
-    'random-write',
-    'random-read',
-  ].map((jobname) => ({
-    jobname,
-    read: { iops: 100, bw_bytes: 1_000_000, lat_ns: { mean: 1_000_000 } },
-    write: { iops: 50, bw_bytes: 2_000_000, lat_ns: { mean: 2_000_000 } },
-  })),
-});
+const testSection = (jobname: string, ended = true) =>
+  [
+    `---TEST-START ${jobname}---`,
+    `---TEST-JSON ${jobname}---`,
+    JSON.stringify({
+      jobs: [
+        {
+          jobname,
+          error: 0,
+          read: { iops: 100, bw_bytes: 1_000_000, lat_ns: { mean: 1_000_000 } },
+          write: {
+            iops: 50,
+            bw_bytes: 2_000_000,
+            lat_ns: { mean: 2_000_000 },
+          },
+        },
+      ],
+    }),
+    '---TEST-JSON-END---',
+    ...(ended ? [`---TEST-END ${jobname}---`] : []),
+  ].join('\n');
+
+const fullLog = [
+  'sequential-write',
+  'sequential-read',
+  'random-write',
+  'random-read',
+]
+  .map((jobname) => testSection(jobname))
+  .join('\n');
 
 const createService = (rows: StorageBenchmarkRow[] = []) => {
   const insertReturning = jest.fn();
@@ -106,13 +125,21 @@ const createService = (rows: StorageBenchmarkRow[] = []) => {
       .fn()
       .mockResolvedValue({ items: [{ metadata: { name: `${name}-abcde` } }] }),
     readNamespacedPodLog: jest.fn(),
+    listNode: jest.fn().mockResolvedValue({
+      items: [{ status: { nodeInfo: { kubeletVersion: 'v1.34.1+k3s1' } } }],
+    }),
   };
   const batchV1 = {
     createNamespacedJob: jest.fn().mockResolvedValue({}),
     readNamespacedJob: jest.fn(),
     deleteNamespacedJob: jest.fn().mockResolvedValue({}),
   };
-  const storageClasses = { get: jest.fn().mockResolvedValue(profile()) };
+  const storageClasses = {
+    get: jest.fn().mockResolvedValue(profile()),
+    environment: jest
+      .fn()
+      .mockResolvedValue({ csi_driver_installed: true, volume_servers: 1 }),
+  };
   const service = new StorageBenchmarkService(
     { select, insert, update, execute } as unknown as Database,
     { coreV1, batchV1 } as unknown as KubernetesService,
@@ -166,7 +193,17 @@ describe('StorageBenchmarkService.start', () => {
     expect(result.status).toBe('running');
     // The name is kept so the run stays readable after the profile is gone.
     expect(insertValues).toHaveBeenCalledWith(
-      expect.objectContaining({ storage_class_name: 'Fast' }),
+      expect.objectContaining({
+        storage_class_name: 'Fast',
+        profile_snapshot: expect.objectContaining({
+          external_name: 'sc-fast-7c1d2e3f',
+        }) as unknown,
+        environment: {
+          nodes: 1,
+          volume_servers: 1,
+          kubernetes_version: 'v1.34.1+k3s1',
+        },
+      }),
     );
 
     service.onModuleDestroy();
@@ -234,20 +271,64 @@ describe('StorageBenchmarkService.poll', () => {
     expect(set).not.toHaveBeenCalled();
   });
 
+  it('records finished tests and the running one while the Job runs', async () => {
+    const { service, batchV1, coreV1, set } = createService([runningRow()]);
+
+    batchV1.readNamespacedJob.mockResolvedValue({ status: { active: 1 } });
+    coreV1.readNamespacedPodLog.mockResolvedValue(
+      [
+        testSection('sequential-write'),
+        '---TEST-START sequential-read---',
+      ].join('\n'),
+    );
+
+    await expect(service.poll(benchmarkId)).resolves.toBe(false);
+    expect(lastState(set)).toMatchObject({ current_test: 'sequential-read' });
+    expect(lastState(set).tests).toHaveLength(1);
+  });
+
+  it('blames the running test when the Job fails without an error line', async () => {
+    const { service, batchV1, coreV1, set } = createService([
+      runningRow({ current_test: 'random-write' }),
+    ]);
+
+    batchV1.readNamespacedJob.mockResolvedValue({ status: { failed: 1 } });
+    coreV1.readNamespacedPodLog.mockResolvedValue(
+      [testSection('sequential-write'), '---TEST-START random-write---'].join(
+        '\n',
+      ),
+    );
+
+    await service.poll(benchmarkId);
+
+    expect(lastState(set)).toMatchObject({
+      status: 'failed',
+      failed_step: 'random-write',
+    });
+    expect(lastState(set).tests).toHaveLength(1);
+  });
+
   it('stores results and removes the Job, claim and volume', async () => {
     const { service, batchV1, coreV1, set } = createService([runningRow()]);
 
     batchV1.readNamespacedJob.mockResolvedValue({ status: { succeeded: 1 } });
-    coreV1.readNamespacedPodLog.mockResolvedValue(
-      `${FIO_JSON_BEGIN}\n${report}\n${FIO_JSON_END}`,
-    );
+    coreV1.readNamespacedPodLog.mockResolvedValue(fullLog);
 
     await expect(service.poll(benchmarkId)).resolves.toBe(true);
 
     expect(lastState(set)).toMatchObject({
       status: 'succeeded',
       results: { random_read_iops: 100, random_write_iops: 50 },
+      current_test: null,
     });
+    expect(
+      (lastState(set).tests as { name: string }[]).map((test) => test.name),
+    ).toEqual([
+      'sequential-write',
+      'sequential-read',
+      'random-write',
+      'random-read',
+    ]);
     // Retain profiles must not keep the test data: the volume is switched to
     // Delete before its claim goes.
     expect(coreV1.patchPersistentVolume).toHaveBeenCalledWith({
@@ -287,13 +368,14 @@ describe('StorageBenchmarkService.poll', () => {
 
     batchV1.readNamespacedJob.mockResolvedValue({ status: { failed: 1 } });
     coreV1.readNamespacedPodLog.mockResolvedValue(
-      'BENCHMARK_ERROR: Could not install fio.',
+      'BENCHMARK_ERROR[install]: Could not install fio.',
     );
 
     await expect(service.poll(benchmarkId)).resolves.toBe(true);
     expect(lastState(set)).toMatchObject({
       status: 'failed',
       status_message: 'Could not install fio.',
+      failed_step: 'install',
     });
   });
 
@@ -416,5 +498,54 @@ describe('StorageBenchmarkService.history', () => {
     });
 
     expect(where).toHaveBeenCalledWith(expect.anything());
+  });
+});
+
+describe('StorageBenchmarkService.report', () => {
+  it('returns the run with its previous successful run', async () => {
+    const current = runningRow({
+      status: 'succeeded',
+      tests: [],
+      created_at: new Date('2026-11-04T12:00:00.000Z'),
+    });
+    const previous = runningRow({
+      id: '1d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a',
+      status: 'succeeded',
+      results: {
+        random_read_iops: 90,
+        random_write_iops: 40,
+        sequential_read_mbps: 1,
+        sequential_write_mbps: 2,
+        random_read_latency_ms: 1,
+        random_write_latency_ms: 2,
+      },
+      created_at: new Date('2026-11-03T12:00:00.000Z'),
+    });
+    const { service, limit } = createService([]);
+
+    limit.mockResolvedValueOnce([current]).mockResolvedValueOnce([previous]);
+
+    const report = await service.report(benchmarkId);
+
+    expect(report.id).toBe(benchmarkId);
+    expect(report.tests).toEqual([]);
+    expect(report.previous).toMatchObject({
+      id: previous.id,
+      results: { random_read_iops: 90 },
+    });
+  });
+
+  it('skips the comparison for a deleted profile and 404s unknown runs', async () => {
+    const { service, limit } = createService([]);
+
+    limit.mockResolvedValueOnce([runningRow({ storage_class_id: null })]);
+    await expect(service.report(benchmarkId)).resolves.toMatchObject({
+      previous: null,
+    });
+
+    limit.mockResolvedValueOnce([]);
+    await expect(service.report(benchmarkId)).rejects.toThrow(
+      'Benchmark not found',
+    );
   });
 });

@@ -23,3 +23,8 @@ export const SETTINGS_SECTIONS: SettingsNavItem[] = [
   { id: 'profile', label: 'Profile', icon: UserRound },
   { id: 'system', label: 'System', icon: SlidersHorizontal },
 ];
+
+export const isSettingsSectionId = (
+  value: string,
+): value is SettingsSectionId =>
+  SETTINGS_SECTIONS.some((section) => section.id === value);

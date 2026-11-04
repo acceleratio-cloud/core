@@ -1,4 +1,5 @@
 import type { StorageBenchmark } from '@acceleratio/shared';
+import Link from 'next/link';
 import { LoaderCircle } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
@@ -72,6 +73,12 @@ const Status = ({ run }: { run: StorageBenchmark }) => {
           className="size-3 animate-spin motion-reduce:animate-none"
         />
         Running
+        {run.progress ? (
+          <span className="text-muted-foreground tabular-nums">
+            {' '}
+            · {run.progress.completed}/{run.progress.total}
+          </span>
+        ) : null}
       </span>
     );
   }
@@ -116,6 +123,7 @@ const HEADERS = [
   'Sequential MB/s (read / write)',
   'Started',
   'Duration',
+  'Report',
 ];
 
 export const StorageBenchmarkTable = ({ runs }: StorageBenchmarkTableProps) => {
@@ -197,8 +205,19 @@ export const StorageBenchmarkTable = ({ runs }: StorageBenchmarkTableProps) => {
                     {formatRelativeTime(started)}
                   </time>
                 </td>
-                <td className="py-2.5 whitespace-nowrap tabular-nums text-fg-secondary">
+                <td className="py-2.5 pr-4 whitespace-nowrap tabular-nums text-fg-secondary">
                   {duration ?? '—'}
+                </td>
+                <td className="py-2.5 whitespace-nowrap">
+                  <Link
+                    href={`/settings/storage/benchmarks/${run.id}`}
+                    aria-label={`Open the report of the ${run.storage_class_name} benchmark`}
+                    className="text-brand-fg underline-offset-4 hover:underline"
+                  >
+                    {run.status === 'pending' || run.status === 'running'
+                      ? 'Follow'
+                      : 'View'}
+                  </Link>
                 </td>
               </tr>
             );

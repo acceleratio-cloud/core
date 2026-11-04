@@ -431,7 +431,14 @@ duplicate status events; a leader lock is future work.
   fio from the Alpine mirror, so the cluster needs outbound access). `POST/GET
   /storage-classes/:id/benchmarks` start a run and list a profile's recent runs; `GET
   /storage-benchmarks?storage_class_id=&before=&limit=` pages the history of all runs, newest first
-  (25 by default, at most 100, `next_before` as the cursor), including runs of deleted profiles. The API polls the Job every 5 s, resumes active runs on bootstrap,
+  (25 by default, at most 100, `next_before` as the cursor), including runs of deleted profiles;
+  `GET /storage-benchmarks/:id` is the full report (per-test detail and series, profile snapshot,
+  cluster context and the previous successful run of the profile). Each test runs as its own fio
+  invocation between `---TEST-START`/`---TEST-END` markers, with 1 s averaged bandwidth, IOPS and
+  latency logs, so every poll of a running Job records finished tests and the running one. The
+  console shows the report at `/settings/storage/benchmarks/[id]` with hand-rolled SVG charts (one
+  series, one axis, crosshair, keyboard and a per-second table); `/settings?section=storage` opens
+  the Storage tab. The API polls the Job every 5 s, resumes active runs on bootstrap,
   parses fio's JSON from the pod log and then deletes the Job and claim, switching the volume to
   `Delete` first so `Retain` profiles leave no data. Write tests are bounded by bytes because
   SeaweedFS is append-only and overwrites would exhaust the claim's quota.

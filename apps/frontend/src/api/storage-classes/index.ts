@@ -2,6 +2,7 @@ import type {
   CreateStorageClassPayload,
   StorageBenchmark,
   StorageBenchmarkHistory,
+  StorageBenchmarkReport,
   StorageClass,
   StorageEnvironment,
   UpdateStorageClassPayload,
@@ -49,6 +50,12 @@ export const storageClassesApi = {
     const { data } = await api.get<StorageBenchmarkHistory>(
       '/storage-benchmarks',
       { params },
+    );
+    return data;
+  },
+  benchmarkReport: async (id: string) => {
+    const { data } = await api.get<StorageBenchmarkReport>(
+      `/storage-benchmarks/${id}`,
     );
     return data;
   },
