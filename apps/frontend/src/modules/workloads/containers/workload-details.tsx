@@ -75,7 +75,7 @@ export const WorkloadDetails = ({
             finalFocus={false}
             inert={!workload}
             className={cn(
-              'pointer-events-auto absolute top-16 right-3 bottom-3 flex w-[min(560px,calc(100%-1.5rem))] flex-col overflow-hidden',
+              'pointer-events-auto absolute top-16 right-3 bottom-3 flex w-3xl flex-col overflow-hidden',
               'rounded-lg border border-edge-default bg-surface-raised text-fg-primary shadow-float outline-none',
               'transition-[translate,opacity] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none',
               'data-[starting-style]:translate-x-[calc(100%+1rem)] data-[starting-style]:opacity-0',

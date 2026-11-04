@@ -1,4 +1,8 @@
-import type { V1Container, V1Deployment } from '@kubernetes/client-node';
+import type {
+  V1Container,
+  V1Deployment,
+  V1ResourceRequirements,
+} from '@kubernetes/client-node';
 import type { DockerWorkloadConfig } from '@acceleratio/shared';
 import { projectNamespace } from '@/common/naming';
 import { DEFAULT_CPU_MAX, DEFAULT_RAM_MAX } from './docker-workload.config';
@@ -82,19 +86,37 @@ export const cpuQuantity = (millicores: number): string =>
 export const memoryQuantity = (mib: number): string =>
   mib % 1024 === 0 ? `${mib / 1024}Gi` : `${mib}Mi`;
 
-const containerResources = (config: DockerWorkloadConfig) => {
-  const cpuLimit = Math.round((config.cpu_max ?? DEFAULT_CPU_MAX) * 1000);
-  const memoryLimit = config.ram_max ?? DEFAULT_RAM_MAX;
+/**
+ * A null limit leaves that resource unlimited; the request stays at its
+ * default so the scheduler still reserves a baseline.
+ */
+const containerResources = (
+  config: DockerWorkloadConfig,
+): V1ResourceRequirements => {
+  const cpuLimit =
+    config.cpu_max === null
+      ? null
+      : Math.round((config.cpu_max ?? DEFAULT_CPU_MAX) * 1000);
+  const memoryLimit =
+    config.ram_max === null ? null : (config.ram_max ?? DEFAULT_RAM_MAX);
+  const limits: Record<string, string> = {};
+
+  if (cpuLimit !== null) {
+    limits.cpu = cpuQuantity(cpuLimit);
+  }
+
+  if (memoryLimit !== null) {
+    limits.memory = memoryQuantity(memoryLimit);
+  }
 
   return {
     requests: {
-      cpu: cpuQuantity(Math.min(CPU_REQUEST_MILLICORES, cpuLimit)),
-      memory: memoryQuantity(Math.min(MEMORY_REQUEST_MIB, memoryLimit)),
+      cpu: cpuQuantity(Math.min(CPU_REQUEST_MILLICORES, cpuLimit ?? Infinity)),
+      memory: memoryQuantity(
+        Math.min(MEMORY_REQUEST_MIB, memoryLimit ?? Infinity),
+      ),
     },
-    limits: {
-      cpu: cpuQuantity(cpuLimit),
-      memory: memoryQuantity(memoryLimit),
-    },
+    ...(Object.keys(limits).length > 0 ? { limits } : {}),
   };
 };
 

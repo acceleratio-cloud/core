@@ -1,6 +1,9 @@
 import { BadRequestException } from '@nestjs/common';
 import type { WorkloadConfig } from '@acceleratio/shared';
-import { normalizeDockerConfig } from '../docker-workload.config';
+import {
+  newDockerConfig,
+  normalizeDockerConfig,
+} from '../docker-workload.config';
 
 const normalize = (config: Record<string, unknown>) =>
   normalizeDockerConfig(config as unknown as WorkloadConfig);
@@ -50,16 +53,16 @@ describe('normalizeDockerConfig', () => {
     });
   });
 
-  it('omits cleared settings so they compare equal to unset ones', () => {
+  it('omits cleared entrypoint and command', () => {
     expect(
-      normalize({
-        docker_image: 'nginx',
-        cpu_max: null,
-        ram_max: null,
-        entrypoint: [],
-        command: null,
-      }),
+      normalize({ docker_image: 'nginx', entrypoint: [], command: null }),
     ).toEqual({ docker_image: 'nginx' });
+  });
+
+  it('keeps a null limit, which means no limit', () => {
+    expect(
+      normalize({ docker_image: 'nginx', cpu_max: null, ram_max: null }),
+    ).toEqual({ docker_image: 'nginx', cpu_max: null, ram_max: null });
   });
 
   it.each([
@@ -79,5 +82,24 @@ describe('normalizeDockerConfig', () => {
     expect(() => normalize({ docker_image: 'nginx', [field]: value })).toThrow(
       BadRequestException,
     );
+  });
+});
+
+describe('newDockerConfig', () => {
+  it('starts a new service without limits', () => {
+    expect(newDockerConfig({ docker_image: 'nginx' })).toEqual({
+      docker_image: 'nginx',
+      cpu_max: null,
+      ram_max: null,
+    });
+  });
+
+  it('keeps limits the request sets', () => {
+    expect(
+      newDockerConfig({
+        docker_image: 'nginx',
+        cpu_max: 0.5,
+      }),
+    ).toEqual({ docker_image: 'nginx', cpu_max: 0.5, ram_max: null });
   });
 });

@@ -1,13 +1,15 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { Edge, OnNodeDrag } from '@xyflow/react';
+import type { Edge, NodeMouseHandler, OnNodeDrag } from '@xyflow/react';
 import {
   Background,
   BackgroundVariant,
   ReactFlow,
   ReactFlowProvider,
   useNodesState,
+  useReactFlow,
+  useStore,
 } from '@xyflow/react';
 import { sileo } from 'sileo';
 
@@ -22,6 +24,24 @@ import { ProjectHeader } from '../components/project-header';
 import { useProject } from '../providers/project-provider';
 
 const emptyEdges: Edge[] = [];
+
+/**
+ * Geometry of the details panel (`WorkloadDetails`: `top-16 right-3
+ * bottom-3 w-3xl`, 48rem). The camera centers a selected node in the canvas
+ * area the panel leaves visible.
+ */
+const PANEL_MAX_WIDTH = 768;
+const PANEL_INSET = 12;
+const PANEL_TOP = 64;
+/** Below this much free width beside the panel, center on the whole canvas. */
+const MIN_VISIBLE_WIDTH = 280;
+const CAMERA_DURATION_MS = 450;
+
+const easeOutCubic = (t: number) => 1 - (1 - t) ** 3;
+
+const prefersReducedMotion = () =>
+  typeof window !== 'undefined' &&
+  window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 export const ProjectCanvas = () => {
   const { workloads, workloadsError } = useProject();
@@ -74,6 +94,9 @@ const WorkloadFlow = ({
   onClearSelection: () => void;
 }) => {
   const { workloads, isLoadingWorkloads, moveWorkload } = useProject();
+  const { setCenter, getZoom } = useReactFlow();
+  const canvasWidth = useStore((state) => state.width);
+  const canvasHeight = useStore((state) => state.height);
   // React Flow owns drag positions and node measurements. The effect keeps
   // the local list in sync with workloads (data, remote positions, creates and
   // deletes) without replacing a node that is currently under the pointer.
@@ -122,6 +145,40 @@ const WorkloadFlow = ({
     [moveWorkload],
   );
 
+  // Selecting a node opens the details panel, so glide the camera to put the
+  // node in the middle of the canvas the panel leaves uncovered.
+  const handleNodeClick = useCallback<NodeMouseHandler<WorkloadNode>>(
+    (_, node) => {
+      onSelectWorkload(node.id);
+
+      const zoom = getZoom();
+      const nodeWidth = node.measured?.width ?? 0;
+      const nodeHeight = node.measured?.height ?? 0;
+      const panelWidth = Math.min(
+        PANEL_MAX_WIDTH,
+        canvasWidth - PANEL_INSET * 2,
+      );
+      const visibleWidth = canvasWidth - panelWidth - PANEL_INSET;
+      // Screen point the node should land on, in canvas pixels.
+      const targetX =
+        visibleWidth >= MIN_VISIBLE_WIDTH ? visibleWidth / 2 : canvasWidth / 2;
+      const targetY = (PANEL_TOP + canvasHeight) / 2;
+
+      // `setCenter` puts a flow point at the middle of the canvas, so shift
+      // that point by the screen offset of the target, in flow units.
+      void setCenter(
+        node.position.x + nodeWidth / 2 + (canvasWidth / 2 - targetX) / zoom,
+        node.position.y + nodeHeight / 2 + (canvasHeight / 2 - targetY) / zoom,
+        {
+          zoom,
+          duration: prefersReducedMotion() ? 0 : CAMERA_DURATION_MS,
+          ease: easeOutCubic,
+        },
+      );
+    },
+    [onSelectWorkload, getZoom, setCenter, canvasWidth, canvasHeight],
+  );
+
   return (
     <>
       {/* Dragging is not a selection gesture, and Backspace must not hide a
@@ -131,7 +188,7 @@ const WorkloadFlow = ({
         edges={emptyEdges}
         nodeTypes={workloadNodeTypes}
         onNodesChange={onNodesChange}
-        onNodeClick={(_, node) => onSelectWorkload(node.id)}
+        onNodeClick={handleNodeClick}
         onNodeDragStart={handleNodeDragStart}
         onNodeDragStop={handleNodeDragStop}
         onPaneClick={onClearSelection}

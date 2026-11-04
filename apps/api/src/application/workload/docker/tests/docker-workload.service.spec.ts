@@ -363,10 +363,33 @@ describe('DockerWorkloadService.create', () => {
       project_id: projectId,
       name: 'Worker',
       type: 'docker',
-      draft_config: { docker_image: 'nginx:1.25' },
+      draft_config: {
+        docker_image: 'nginx:1.25',
+        cpu_max: null,
+        ram_max: null,
+      },
       position: { x: 640, y: 0 },
     });
     expect(firstArgument(insertValues)).not.toHaveProperty('active_version_id');
+  });
+
+  it('keeps limits the request sets and leaves the rest unlimited', async () => {
+    const { service, exists, selectWhere, insertValues, returning } =
+      createService();
+
+    exists.mockResolvedValue(true);
+    selectWhere.mockResolvedValueOnce([]);
+    returning.mockResolvedValue([baseRow]);
+
+    await service.create(projectId, {
+      name: 'Worker',
+      type: 'docker',
+      config: { docker_image: 'nginx:1.25', ram_max: 512 },
+    });
+
+    expect(firstArgument(insertValues)).toMatchObject({
+      draft_config: { docker_image: 'nginx:1.25', cpu_max: null, ram_max: 512 },
+    });
   });
 });
 

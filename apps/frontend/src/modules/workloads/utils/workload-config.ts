@@ -9,6 +9,13 @@ export const formatCpu = (cpu: number) => `${cpu} vCPU`;
 export const formatMemory = (mib: number) =>
   mib % 1024 === 0 ? `${mib / 1024} GiB` : `${mib} MiB`;
 
+/** Absent means the default limit, null means no limit. */
+export const formatCpuLimit = (cpu: number | null | undefined) =>
+  cpu === null ? 'No limit' : formatCpu(cpu ?? DEFAULT_CPU_MAX);
+
+export const formatMemoryLimit = (mib: number | null | undefined) =>
+  mib === null ? 'No limit' : formatMemory(mib ?? DEFAULT_RAM_MAX);
+
 /**
  * The config the service is heading to: pending changes when there are any,
  * otherwise what the cluster runs. Every workload has at least one of them.

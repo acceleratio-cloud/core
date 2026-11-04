@@ -23,12 +23,16 @@ import type { WorkloadDetailView } from './workload-detail-view';
 /** What sets a version apart besides its image, or nothing at the defaults. */
 const configSummary = (config: DockerWorkloadConfig) =>
   [
-    config.cpu_max !== undefined && config.cpu_max !== DEFAULT_CPU_MAX
-      ? formatCpu(config.cpu_max)
-      : null,
-    config.ram_max !== undefined && config.ram_max !== DEFAULT_RAM_MAX
-      ? formatMemory(config.ram_max)
-      : null,
+    config.cpu_max === null
+      ? 'no CPU limit'
+      : config.cpu_max !== undefined && config.cpu_max !== DEFAULT_CPU_MAX
+        ? formatCpu(config.cpu_max)
+        : null,
+    config.ram_max === null
+      ? 'no memory limit'
+      : config.ram_max !== undefined && config.ram_max !== DEFAULT_RAM_MAX
+        ? formatMemory(config.ram_max)
+        : null,
     config.entrypoint || config.command ? 'custom command' : null,
   ]
     .filter(Boolean)

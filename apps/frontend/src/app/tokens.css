@@ -32,6 +32,9 @@
   --green-700: oklch(0.5 0.13 150);
   --amber-700: oklch(0.5 0.11 70);
   --red-600: oklch(0.52 0.2 27);
+  /* Canvas selection only: a bright amber, lighter than the amber-700 warning
+     text so the ring reads as a highlight. */
+  --amber-500: oklch(0.77 0.17 75);
 
   /* ---- Tier 2: semantic ---- */
   /* Higher is closer to the user. The canvas is the lowest, tinted ground; the
@@ -66,6 +69,11 @@
   --status-warning: var(--amber-700);
   --status-danger: var(--red-600);
 
+  /* The selected node on the project canvas: an amber ring over a faint
+     amber wash. Not used for text, focus or actions. */
+  --selection: var(--amber-500);
+  --selection-wash: color-mix(in oklch, var(--amber-500) 9%, var(--neutral-1000));
+
   /* Dims the page behind a modal; the only place raw black is a token. */
   --scrim: oklch(0 0 0 / 40%);
 }
@@ -97,6 +105,9 @@
   --color-status-success: var(--status-success);
   --color-status-warning: var(--status-warning);
   --color-status-danger: var(--status-danger);
+
+  --color-selection: var(--selection);
+  --color-selection-wash: var(--selection-wash);
 
   --color-scrim: var(--scrim);
 

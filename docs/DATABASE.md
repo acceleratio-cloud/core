@@ -130,8 +130,10 @@ Invariants:
 - `type` selects the shape of every config of the workload (`draft_config` and its versions). Today
   the only value is `docker`, whose config carries the image reference (`docker_image`) and optional
   `cpu_max` (vCPU, default 1), `ram_max` (MiB, default 1024), `entrypoint` and `command` (string
-  arrays that replace the image's ENTRYPOINT and CMD). Unset optional keys are omitted, never stored
-  as null, so older configs need no migration. Adding a type means adding an enum value and a config
+  arrays that replace the image's ENTRYPOINT and CMD). An absent limit means the default and a null
+  limit means no limit. New services are created with both limits null; configs stored before that
+  keep their 1 vCPU / 1 GiB default. Empty entrypoint/command lists are omitted, so older configs
+  need no migration. Adding a type means adding an enum value and a config
   schema together.
 - The config lives in versions, not on the row. `active_version_id` points at the
   `workload_version` the cluster runs and is null until the first deploy. `draft_config` holds edits

@@ -14,10 +14,13 @@ export const ARG_MAX_LENGTH = 4096;
 
 type ArgsField = 'entrypoint' | 'command';
 
-/** vCPU kept to millicore precision, the finest Kubernetes resolves. */
-const normalizeCpuMax = (value: unknown): number | undefined => {
+/**
+ * vCPU kept to millicore precision, the finest Kubernetes resolves. Null
+ * removes the limit; absent keeps the default.
+ */
+const normalizeCpuMax = (value: unknown): number | null | undefined => {
   if (value === undefined || value === null) {
-    return undefined;
+    return value;
   }
 
   if (
@@ -34,9 +37,10 @@ const normalizeCpuMax = (value: unknown): number | undefined => {
   return Math.round(value * 1000) / 1000;
 };
 
-const normalizeRamMax = (value: unknown): number | undefined => {
+/** MiB. Null removes the limit; absent keeps the default. */
+const normalizeRamMax = (value: unknown): number | null | undefined => {
   if (value === undefined || value === null) {
-    return undefined;
+    return value;
   }
 
   if (
@@ -88,10 +92,11 @@ const normalizeArgs = (
 };
 
 /**
- * Validates a Docker config and keeps only the known keys. Unset optional
- * keys are omitted rather than stored as null, so a config that never used
- * them compares equal to one that cleared them. A legacy `port` from JSONB is
- * dropped here and never reaches the API contract.
+ * Validates a Docker config and keeps only the known keys. An absent limit
+ * means the default and stays absent; a null limit means "no limit" and is
+ * kept. Empty entrypoint/command lists are omitted, so a config that never
+ * set them compares equal to one that cleared them. A legacy `port` from
+ * JSONB is dropped here and never reaches the API contract.
  */
 export const normalizeDockerConfig = (
   config: WorkloadConfig | undefined,
@@ -126,4 +131,21 @@ export const normalizeDockerConfig = (
   }
 
   return normalized;
+};
+
+/**
+ * The config a new service starts with. Limits the request leaves out are
+ * stored as null, so new services run without CPU or memory limits. Configs
+ * stored before this default keep the absent-means-1-vCPU/1-GiB meaning.
+ */
+export const newDockerConfig = (
+  config: WorkloadConfig | undefined,
+): DockerWorkloadConfig => {
+  const normalized = normalizeDockerConfig(config);
+
+  return {
+    ...normalized,
+    cpu_max: normalized.cpu_max ?? null,
+    ram_max: normalized.ram_max ?? null,
+  };
 };

@@ -5,11 +5,9 @@ import type { Workload } from '@acceleratio/shared';
 import { parseDockerImage } from '@/modules/workloads/utils/parse-docker-image';
 import { formatShellArgs } from '@/modules/workloads/utils/shell-args';
 import {
-  DEFAULT_CPU_MAX,
-  DEFAULT_RAM_MAX,
   effectiveConfig,
-  formatCpu,
-  formatMemory,
+  formatCpuLimit,
+  formatMemoryLimit,
 } from '@/modules/workloads/utils/workload-config';
 import {
   CopyableProperty,
@@ -22,7 +20,6 @@ import {
 import {
   WorkloadDeploymentSection,
   WorkloadFailureNotice,
-  WorkloadIdentitySection,
 } from './workload-common-sections';
 
 /**
@@ -59,10 +56,10 @@ export const DockerWorkloadOverview = ({
       <DetailSection title="Resources" icon={Cpu}>
         <PropertyList>
           <PropertyRow label="CPU limit">
-            {formatCpu(config.cpu_max ?? DEFAULT_CPU_MAX)}
+            {formatCpuLimit(config.cpu_max)}
           </PropertyRow>
           <PropertyRow label="Memory limit">
-            {formatMemory(config.ram_max ?? DEFAULT_RAM_MAX)}
+            {formatMemoryLimit(config.ram_max)}
           </PropertyRow>
         </PropertyList>
       </DetailSection>
@@ -92,9 +89,9 @@ export const DockerWorkloadOverview = ({
 };
 
 /**
- * The editable container settings, then everything that identifies the
- * service, in full and copyable. `editor` and `children` are controls the
- * view owns: the config form first, delete after the sections.
+ * The editable settings, then the image digest when there is one. `editor`
+ * and `children` are controls the view owns: the config form first, delete
+ * last.
  */
 export const DockerWorkloadConfiguration = ({
   workload,
@@ -119,7 +116,6 @@ export const DockerWorkloadConfiguration = ({
         </DetailSection>
       ) : null}
 
-      <WorkloadIdentitySection workload={workload} />
       {children}
     </DetailStack>
   );

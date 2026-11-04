@@ -140,6 +140,29 @@ describe('buildDeployment', () => {
     });
   });
 
+  it('leaves a resource with a null limit unlimited', () => {
+    const container = buildDeployment({
+      ...input,
+      config: { docker_image: 'nginx:1.25', cpu_max: null, ram_max: 512 },
+    }).spec?.template?.spec?.containers?.[0];
+
+    expect(container?.resources).toEqual({
+      requests: { cpu: CPU_REQUEST, memory: MEMORY_REQUEST },
+      limits: { memory: '512Mi' },
+    });
+  });
+
+  it('declares no limits when both are null', () => {
+    const container = buildDeployment({
+      ...input,
+      config: { docker_image: 'nginx:1.25', cpu_max: null, ram_max: null },
+    }).spec?.template?.spec?.containers?.[0];
+
+    expect(container?.resources).toEqual({
+      requests: { cpu: CPU_REQUEST, memory: MEMORY_REQUEST },
+    });
+  });
+
   it('maps entrypoint to command and command to args', () => {
     const container = buildDeployment({
       ...input,

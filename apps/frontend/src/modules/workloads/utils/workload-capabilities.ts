@@ -2,12 +2,33 @@ import type { Workload } from '@acceleratio/shared';
 
 import { hasPendingChanges } from './workload-config';
 
+export interface DeployAction {
+  label: string;
+  pendingLabel: string;
+}
+
 /**
- * A deploy can start from a draft, a failed rollout, or a stopped service,
- * and from any status once a deployed service has pending changes.
+ * What the deploy action means for this service right now, or null when it
+ * has nothing to do:
+ * - never deployed: Deploy its first version (unless that rollout is running);
+ * - deployed with pending changes: Apply changes, from any status;
+ * - a failed rollout with no pending changes: Redeploy the active version.
+ * A stopped service with no pending changes is brought back with Start.
  */
-export const canDeployWorkload = (workload: Workload) =>
-  workload.status === 'draft' ||
-  workload.status === 'failed' ||
-  workload.status === 'stopped' ||
-  hasPendingChanges(workload);
+export const deployAction = (workload: Workload): DeployAction | null => {
+  if (workload.active_version === null) {
+    return workload.status === 'deploying'
+      ? null
+      : { label: 'Deploy', pendingLabel: 'Deploying' };
+  }
+
+  if (hasPendingChanges(workload)) {
+    return { label: 'Apply changes', pendingLabel: 'Applying' };
+  }
+
+  if (workload.status === 'failed') {
+    return { label: 'Redeploy', pendingLabel: 'Redeploying' };
+  }
+
+  return null;
+};

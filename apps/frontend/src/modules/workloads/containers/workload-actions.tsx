@@ -23,7 +23,7 @@ import { getApiErrorMessage } from '@/api';
 import { workloadsApi } from '@/api/workloads';
 import { useProject } from '@/modules/projects/providers/project-provider';
 import { DetailSection } from '@/modules/workloads/components/workload-details/detail-primitives';
-import { canDeployWorkload } from '@/modules/workloads/utils/workload-capabilities';
+import { deployAction } from '@/modules/workloads/utils/workload-capabilities';
 import { Button } from '@/shared/components/ui/button';
 import {
   Dialog,
@@ -200,32 +200,37 @@ type LifecycleAction = {
   visible: boolean;
   primary?: boolean;
   icon: LucideIcon;
+  /** Colors the icon of an outline button by what the action does. */
+  iconTone?: string;
   label: string;
   pendingLabel: string;
 };
 
 /**
- * Deploy, Start, Restart and Stop for the panel header. Only the actions the
- * current status allows are shown, and Deploy is the only filled button.
- * Renders as a fragment so the header can place the group and its error.
+ * Deploy, Start, Restart and Stop at the top right of the panel header. Only
+ * the actions the current status allows are shown. The deploy action (Deploy,
+ * Apply changes or Redeploy, see `deployAction`) is the one solid button; the rest are outline buttons whose icon color hints at the action.
+ * Renders as a fragment so the header can place the buttons and their error.
  */
 export const WorkloadLifecycleActions = () => {
   const { workload, pendingAction, lifecycleError, runLifecycle } =
     useWorkloadActions();
+  const deploy = deployAction(workload);
 
   const actions: LifecycleAction[] = [
     {
       key: 'deploy',
-      visible: canDeployWorkload(workload),
+      visible: deploy !== null,
       primary: true,
       icon: Rocket,
-      label: 'Deploy',
-      pendingLabel: 'Deploying',
+      label: deploy?.label ?? 'Deploy',
+      pendingLabel: deploy?.pendingLabel ?? 'Deploying',
     },
     {
       key: 'start',
       visible: workload.status === 'stopped',
       icon: Play,
+      iconTone: 'text-status-success',
       label: 'Start',
       pendingLabel: 'Starting',
     },
@@ -233,6 +238,7 @@ export const WorkloadLifecycleActions = () => {
       key: 'restart',
       visible: workload.status === 'running',
       icon: RotateCw,
+      iconTone: 'text-fg-secondary',
       label: 'Restart',
       pendingLabel: 'Restarting',
     },
@@ -240,26 +246,31 @@ export const WorkloadLifecycleActions = () => {
       key: 'stop',
       visible: workload.status === 'running' || workload.status === 'deploying',
       icon: Square,
+      iconTone: 'text-status-danger',
       label: 'Stop',
       pendingLabel: 'Stopping',
     },
   ];
+
+  const visible = actions.filter((action) => action.visible);
+
+  if (visible.length === 0) {
+    return null;
+  }
 
   return (
     <>
       <div
         role="group"
         aria-label="Service actions"
-        className="ml-auto flex flex-wrap items-center gap-2"
+        className="flex flex-wrap justify-end gap-2"
       >
-        {actions
-          .filter((action) => action.visible)
-          .map(({ key, primary, icon: Icon, label, pendingLabel }) => (
+        {visible.map(
+          ({ key, primary, icon: Icon, iconTone, label, pendingLabel }) => (
             <Button
               key={key}
               type="button"
               variant={primary ? 'default' : 'outline'}
-              size="sm"
               loading={pendingAction === key}
               disabled={pendingAction !== null}
               onClick={() => void runLifecycle(key)}
@@ -268,16 +279,18 @@ export const WorkloadLifecycleActions = () => {
                 data-icon="inline-start"
                 aria-hidden="true"
                 strokeWidth={1.75}
+                className={iconTone}
               />
               {pendingAction === key ? pendingLabel : label}
             </Button>
-          ))}
+          ),
+        )}
       </div>
 
       {lifecycleError ? (
         <p
           role="alert"
-          className="basis-full text-xs leading-relaxed text-destructive"
+          className="text-right text-xs leading-relaxed text-destructive"
         >
           {lifecycleError}
         </p>

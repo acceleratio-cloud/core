@@ -49,7 +49,10 @@ import {
   toWorkloadVersion,
   WorkloadVersionService,
 } from '@/application/workload/workload-version.service';
-import { normalizeDockerConfig } from './docker-workload.config';
+import {
+  newDockerConfig,
+  normalizeDockerConfig,
+} from './docker-workload.config';
 import {
   buildDeployment,
   RESTARTED_AT_ANNOTATION,
@@ -198,7 +201,7 @@ export class DockerWorkloadService implements WorkloadTypeService {
     }
 
     const name = normalizeName(payload?.name);
-    const config = normalizeDockerConfig(payload?.config);
+    const config = newDockerConfig(payload?.config);
     const position = await this.nextPosition(projectId);
     // The id is generated here rather than by the database so external_name can
     // be computed before the single insert statement.

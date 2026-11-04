@@ -135,7 +135,9 @@ It is never a fill.
 | `brand-press` | `neutral-400` `0.4 0 0` | Pressed fill | 9.21:1 |
 | `fg-on-brand` | `neutral-1000` `1 0 0` | Text and icons on the fill | n/a |
 | `brand-fg` | `sky-700` `0.5 0.15 245` | Links, focus ring, selected text and outline | 5.67:1 on panel, 5.83:1 on raised |
-| `brand-wash` | `neutral-200` at 6% | Selected nav item, node selection halo | n/a |
+| `brand-wash` | `neutral-200` at 6% | Selected nav item | n/a |
+| `selection` | `amber-500` `0.77 0.17 75` | Ring of the selected canvas node; never text, focus or actions | n/a |
+| `selection-wash` | `amber-500` at 9% over white | Fill of the selected canvas node | n/a |
 
 A black fill is the heaviest thing on screen, so it is limited to one primary
 action per view. Everything else uses `outline`, `secondary` or `ghost`.
@@ -235,7 +237,8 @@ Five steps replace the six arbitrary sizes. Tracking: `-0.02em` at `xl`,
    only, the message in `fg-secondary`, three lines then "Show more"); and a
    footer that shows a small Deploy button only when a deploy is possible,
    otherwise "Deployed 3 hours ago". The meter is decorative, and the Status row
-   carries the label. Selection is a `brand-fg` border plus an offset outline.
+   carries the label. Selection is a `selection` (amber) border and offset outline over a
+   `selection-wash` fill, so the open service stands out on a busy board.
    The board uses a 20px dot grid in `edge-default`.
    Selecting a card opens the service panel (`workload-details.tsx`), 560px
    wide on `surface-raised` with `shadow-float`. Two bands, top to bottom:

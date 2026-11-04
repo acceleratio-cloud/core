@@ -22,7 +22,10 @@ import {
   formatAbsoluteTime,
   formatRelativeTime,
 } from '@/modules/workloads/utils/format-time';
-import { canDeployWorkload } from '@/modules/workloads/utils/workload-capabilities';
+import {
+  deployAction,
+  type DeployAction,
+} from '@/modules/workloads/utils/workload-capabilities';
 import { Button } from '@/shared/components/ui/button';
 
 /**
@@ -40,12 +43,12 @@ export const NodeCard = ({
 }) => (
   <div
     className={cn(
-      'w-66 cursor-grab overflow-hidden rounded-lg border bg-surface-raised shadow-float',
+      'w-66 cursor-grab overflow-hidden rounded-lg border shadow-float',
       'active:cursor-grabbing',
-      'outline-1 outline-offset-3 transition-[border-color,outline-color] duration-150 ease-out motion-reduce:transition-none',
+      'outline-2 outline-offset-2 transition-[border-color,outline-color,background-color] duration-150 ease-out motion-reduce:transition-none',
       selected
-        ? 'border-brand-fg/70 outline-brand-fg/30'
-        : 'border-border outline-transparent hover:border-edge-control',
+        ? 'border-selection bg-selection-wash outline-selection/35'
+        : 'border-border bg-surface-raised outline-transparent hover:border-edge-control',
     )}
   >
     {children}
@@ -223,8 +226,10 @@ export const NodeNotice = ({ children }: { children: string }) => {
 };
 
 export const WorkloadNodeFooter = ({ workload }: { workload: Workload }) => {
-  if (canDeployWorkload(workload)) {
-    return <NodeDeployButton workload={workload} />;
+  const action = deployAction(workload);
+
+  if (action) {
+    return <NodeDeployButton workload={workload} action={action} />;
   }
 
   const deployedAt = workload.last_deployed_at;
@@ -256,7 +261,13 @@ export const WorkloadNodeFooter = ({ workload }: { workload: Workload }) => {
   );
 };
 
-const NodeDeployButton = ({ workload }: { workload: Workload }) => {
+const NodeDeployButton = ({
+  workload,
+  action,
+}: {
+  workload: Workload;
+  action: DeployAction;
+}) => {
   const { project, replaceWorkload } = useProject();
   const [isPending, setIsPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -279,7 +290,7 @@ const NodeDeployButton = ({ workload }: { workload: Workload }) => {
       <Button
         type="button"
         size="sm"
-        aria-label={`Deploy ${workload.name}`}
+        aria-label={`${action.label}: ${workload.name}`}
         loading={isPending}
         // The card opens the details panel on click; Deploy should not.
         onClick={(event) => {
@@ -288,8 +299,12 @@ const NodeDeployButton = ({ workload }: { workload: Workload }) => {
         }}
         className="nodrag nopan w-full"
       >
-        <Rocket data-icon="inline-start" aria-hidden="true" strokeWidth={1.75} />
-        {isPending ? 'Deploying' : 'Deploy'}
+        <Rocket
+          data-icon="inline-start"
+          aria-hidden="true"
+          strokeWidth={1.75}
+        />
+        {isPending ? action.pendingLabel : action.label}
       </Button>
       {error ? (
         <p
