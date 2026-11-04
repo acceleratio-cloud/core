@@ -113,8 +113,10 @@ export const BenchmarkChart = ({
     }
   };
 
+  // `relative` keeps the sr-only readout inside the chart, so it never
+  // stretches the page and adds a second scrollbar.
   return (
-    <figure className="min-w-0">
+    <figure className="relative min-w-0">
       <figcaption className="mb-2 text-[12px] font-medium text-fg-secondary">
         {title} over time
       </figcaption>
