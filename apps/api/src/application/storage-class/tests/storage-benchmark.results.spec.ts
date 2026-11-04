@@ -15,7 +15,7 @@ import {
   SERIES_MAX_POINTS,
   summarizeTests,
 } from '../benchmark/storage-benchmark.results';
-import { jobOutcome } from '../benchmark/storage-benchmark.service';
+import { jobOutcome } from '@/vendor/kubernetes/job-outcome';
 
 // The service module imports the Kubernetes service; only the pure
 // `jobOutcome` helper is used here.

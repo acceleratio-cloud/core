@@ -31,6 +31,11 @@ const DNS_PORTS = [
   { port: '53', protocol: 'UDP' },
   { port: '53', protocol: 'TCP' },
 ];
+// The SeaweedFS S3 gateway runs in the filer pods. Only its S3 port is
+// opened, and every request still needs a bucket's own keys.
+const S3_PORTS = [{ port: '8333', protocol: 'TCP' }];
+const s3Namespace = (): string =>
+  process.env.SEAWEEDFS_NAMESPACE?.trim() || 'seaweedfs';
 const CRD_MISSING_MESSAGE =
   'CiliumNetworkPolicy CRD is not installed; project isolation cannot be enforced';
 
@@ -294,6 +299,18 @@ export class ProjectIsolationService {
               },
             ],
             toPorts: [{ ports: DNS_PORTS }],
+          },
+          {
+            toEndpoints: [
+              {
+                matchLabels: {
+                  [NAMESPACE_LABEL]: s3Namespace(),
+                  'app.kubernetes.io/name': 'seaweedfs',
+                  'app.kubernetes.io/component': 'filer',
+                },
+              },
+            ],
+            toPorts: [{ ports: S3_PORTS }],
           },
           { toEntities: ['world'] },
         ],

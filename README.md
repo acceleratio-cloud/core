@@ -86,6 +86,13 @@ create and use custom classes. Data lives inside the k3d node container and is
 deleted with the cluster. The CSI driver needs `/dev/fuse` in the node; set
 `SEAWEEDFS=0` to skip SeaweedFS (k3s `local-path` then stays the default).
 
+The SeaweedFS S3 gateway runs with authentication on, as on a VPS, so S3 bucket
+services can be created locally. A cluster created before S3 was enabled has no
+gateway: recreate it with `make cluster-down && make cluster-up`. The API finds
+SeaweedFS through `SEAWEEDFS_NAMESPACE`, `SEAWEEDFS_MASTER`, `SEAWEEDFS_FILER`,
+`SEAWEEDFS_S3_ENDPOINT` and `SEAWEEDFS_SHELL_IMAGE`; the defaults match both
+installers.
+
 The local cluster reads the k3s, Cilium and SeaweedFS chart versions from
 `deploy/install.sh`, so local development and the VPS installer move together.
 Override them with `K3S_VERSION`, `K3S_IMAGE`, `CILIUM_VERSION`,

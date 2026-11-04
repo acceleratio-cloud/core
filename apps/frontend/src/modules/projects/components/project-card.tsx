@@ -8,6 +8,8 @@ import type { Project, Workload } from '@acceleratio/shared';
 import { workloadsApi } from '@/api/workloads';
 import { WorkloadStatus } from '@/modules/workloads/components/workload-status';
 import { Skeleton } from '@/shared/components/ui/skeleton';
+import { bucketStatusLabel } from '@/modules/workloads/utils/s3-bucket';
+import { BucketIcon } from '@/shared/icons/bucket-icon';
 import { DockerIcon } from '@/shared/icons/docker-icon';
 
 /** Tiles in the preview grid. Past this, the last tile counts the rest. */
@@ -75,12 +77,24 @@ const PreviewGrid = ({ children }: { children: ReactNode }) => (
 const WorkloadTile = ({ workload }: { workload: Workload }) => (
   <div className="flex min-w-0 flex-col justify-between rounded-md border border-border bg-surface-raised px-2 py-1.5 shadow-xs transition-colors group-hover:border-edge-control">
     <div className="flex min-w-0 items-center gap-1.5">
-      <DockerIcon className="size-3.5 shrink-0" />
+      {workload.type === 's3_bucket' ? (
+        <BucketIcon className="size-3.5 shrink-0" />
+      ) : (
+        <DockerIcon className="size-3.5 shrink-0" />
+      )}
       <span className="min-w-0 truncate text-xs leading-tight font-medium text-foreground">
         {workload.name}
       </span>
     </div>
-    <WorkloadStatus status={workload.status} compact />
+    <WorkloadStatus
+      status={workload.status}
+      label={
+        workload.type === 's3_bucket'
+          ? bucketStatusLabel(workload.status)
+          : undefined
+      }
+      compact
+    />
   </div>
 );
 

@@ -97,7 +97,12 @@ const createDatabase = (rows: StorageClassRow[]) => {
     void count;
     return Promise.resolve(rows.slice(0, 1));
   });
-  const where = jest.fn().mockReturnValue({ limit });
+  // S3 buckets on a profile: `select({ value: count() }).from().where()`
+  // is awaited directly, while row lookups chain `.limit()`.
+  const bucketCount = { value: 0 };
+  const where = jest.fn(() =>
+    Object.assign(Promise.resolve([bucketCount]), { limit }),
+  );
   const from = jest.fn().mockReturnValue({ orderBy, where });
   const select = jest.fn().mockReturnValue({ from });
 
@@ -144,6 +149,7 @@ const createDatabase = (rows: StorageClassRow[]) => {
     txDelete,
     transaction,
     benchmarkOrderBy,
+    bucketCount,
   };
 };
 
@@ -485,6 +491,20 @@ describe('StorageClassService.remove', () => {
     await expect(service.remove(customId)).rejects.toThrow(
       'Storage class is used by 2 volumes. Delete them first.',
     );
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
+  it('is blocked while S3 buckets use the class', async () => {
+    const { service, storageV1, transaction, bucketCount } = createService([
+      customRow,
+    ]);
+
+    bucketCount.value = 1;
+
+    await expect(service.remove(customId)).rejects.toThrow(
+      'Storage class is used by 1 S3 bucket. Delete them first.',
+    );
+    expect(storageV1.deleteStorageClass).not.toHaveBeenCalled();
     expect(transaction).not.toHaveBeenCalled();
   });
 

@@ -300,7 +300,12 @@ export const WorkloadLifecycleActions = () => {
 };
 
 /** The Configuration tab's last section: delete, behind a confirmation. */
-export const WorkloadDeleteSection = () => {
+export const WorkloadDeleteSection = ({
+  consequence = 'Removes its Deployment from the cluster.',
+}: {
+  /** What deleting destroys, in one sentence. */
+  consequence?: string;
+} = {}) => {
   const {
     workload,
     pendingAction,
@@ -341,7 +346,7 @@ export const WorkloadDeleteSection = () => {
               Delete this service
             </p>
             <p className="mt-0.5 text-xs leading-relaxed text-fg-tertiary">
-              Removes its Deployment from the cluster. This cannot be undone.
+              {consequence} This cannot be undone.
             </p>
           </div>
           <Button
@@ -379,8 +384,7 @@ export const WorkloadDeleteSection = () => {
           <DialogHeader>
             <DialogTitle>Delete service</DialogTitle>
             <DialogDescription>
-              Delete {workload.name}? This removes its Deployment from the
-              cluster. This cannot be undone.
+              Delete {workload.name}? {consequence} This cannot be undone.
             </DialogDescription>
           </DialogHeader>
 

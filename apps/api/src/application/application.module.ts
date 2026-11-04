@@ -11,6 +11,9 @@ import { StorageClassController } from '@/application/storage-class/storage-clas
 import { StorageClassService } from '@/application/storage-class/storage-class.service';
 import { DockerWorkloadStatusDeriver } from '@/application/workload/docker/docker-workload.deriver';
 import { DockerWorkloadService } from '@/application/workload/docker/docker-workload.service';
+import { S3BucketObjectsController } from '@/application/workload/s3-bucket/s3-bucket-objects.controller';
+import { S3BucketObjectsService } from '@/application/workload/s3-bucket/s3-bucket-objects.service';
+import { S3BucketWorkloadService } from '@/application/workload/s3-bucket/s3-bucket.service';
 import { WorkloadEventsService } from '@/application/workload/observer/workload-events.service';
 import { WorkloadMutationGuard } from '@/application/workload/observer/workload-mutation-guard';
 import { WorkloadObserverService } from '@/application/workload/observer/workload-observer.service';
@@ -22,6 +25,7 @@ import { WorkloadStatusDeriverRegistry } from '@/application/workload/workload-s
 import { WorkloadTypeRegistry } from '@/application/workload/workload-type.registry';
 import { WorkloadTypeResolver } from '@/application/workload/workload-type.resolver';
 import { WorkloadVersionService } from '@/application/workload/workload-version.service';
+import { SeaweedfsFilerClient } from '@/vendor/seaweedfs/seaweedfs-filer.client';
 
 /**
  * Single Nest module for every application submodule. A submodule owns its
@@ -38,6 +42,7 @@ import { WorkloadVersionService } from '@/application/workload/workload-version.
     StorageClassController,
     StorageBenchmarkController,
     WorkloadController,
+    S3BucketObjectsController,
   ],
   providers: [
     NodeService,
@@ -47,6 +52,9 @@ import { WorkloadVersionService } from '@/application/workload/workload-version.
     StorageBenchmarkService,
     DockerWorkloadStatusDeriver,
     DockerWorkloadService,
+    S3BucketWorkloadService,
+    S3BucketObjectsService,
+    SeaweedfsFilerClient,
     WorkloadStatusDeriverRegistry,
     WorkloadEventsService,
     WorkloadMutationGuard,

@@ -167,8 +167,10 @@ export class WorkloadStatusWriter {
 
     const deriver = this.registry.get(row.type);
 
+    // Types without a deriver (S3 buckets) own their status; the cluster
+    // snapshot has nothing to say about them.
     if (deriver === undefined) {
-      this.logger.warn(
+      this.logger.debug(
         `Skipped workload ${row.id}: no status deriver for type ${row.type}`,
       );
 

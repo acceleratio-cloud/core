@@ -148,21 +148,29 @@ Columns: `id`, `name`, `created_at`, `updated_at`.
 One row per deployable node on the project canvas. `project_id` scopes every read and write.
 
 Columns: `id`, `project_id`, `name`, `type`, `active_version_id`, `draft_config`, `position`,
-`external_name`, `status`, `status_message`, `last_deployed_at`, `status_observed_at`, `created_at`,
+`external_name`, `storage_class_id`, `status`, `status_message`, `last_deployed_at`, `status_observed_at`, `created_at`,
 `updated_at`.
 
 Invariants:
 
 - `(project_id, external_name)` is unique. `external_name` becomes the Kubernetes Deployment name,
   is generated once on create, and never changes.
-- `type` selects the shape of every config of the workload (`draft_config` and its versions). Today
-  the only value is `docker`, whose config carries the image reference (`docker_image`) and optional
+- `type` selects the shape of every config of the workload (`draft_config` and its versions). The
+  values are `docker` and `s3_bucket`. A `docker` config carries the image reference (`docker_image`) and optional
   `cpu_max` (vCPU, default 1), `ram_max` (MiB, default 1024), `entrypoint` and `command` (string
   arrays that replace the image's ENTRYPOINT and CMD). An absent limit means the default and a null
   limit means no limit. New services are created with both limits null; configs stored before that
   keep their 1 vCPU / 1 GiB default. Empty entrypoint/command lists are omitted, so older configs
   need no migration. Adding a type means adding an enum value and a config
   schema together.
+- An `s3_bucket` workload is a SeaweedFS bucket. Its `name` and `external_name` are both the bucket
+  name, which is unique across all projects (partial unique index `workload_s3_bucket_name_unique`,
+  because SeaweedFS has one bucket namespace). Its config is `{ "storage_class_id": uuid }`, recorded
+  once as version 1 and never changed; `storage_class_id` repeats it as a column so the storage
+  profile cannot be deleted while a bucket uses it. It has no draft and no Deployment: the API sets
+  its status from the provisioning Job (`deploying` until the bucket exists, then `running` or
+  `failed`). The access keys live in the Secret `s3-<bucket>` in the project namespace, never in the
+  database. For other types `storage_class_id` is null.
 - The config lives in versions, not on the row. `active_version_id` points at the
   `workload_version` the cluster runs and is null until the first deploy. `draft_config` holds edits
   the next deploy applies and is null when there are none. At least one of the two is set: a new
@@ -225,8 +233,8 @@ Invariants:
   object.
 - Resources that pick a class (volumes, buckets) reference it with
   `storage_class_id uuid references storage_class(id) on delete restrict`. The restriction is the
-  database half of the delete guard; the API also refuses to delete a class that PersistentVolumes or
-  claims in the cluster still use.
+  database half of the delete guard; the API also refuses to delete a class that PersistentVolumes,
+  claims in the cluster or S3 buckets still use.
 
 ### `storage_benchmark`
 

@@ -6,6 +6,7 @@ import type {
   WorkloadType,
 } from '@acceleratio/shared';
 import type { ProjectService } from '@/application/project/project.service';
+import type { S3BucketWorkloadService } from '../s3-bucket/s3-bucket.service';
 import type { WorkloadTypeRegistry } from '../workload-type.registry';
 import type { WorkloadTypeResolver } from '../workload-type.resolver';
 import { WorkloadService } from '../workload.service';
@@ -18,6 +19,9 @@ jest.mock('../workload-type.registry', () => ({
 }));
 jest.mock('../workload-type.resolver', () => ({
   WorkloadTypeResolver: class WorkloadTypeResolver {},
+}));
+jest.mock('../s3-bucket/s3-bucket.service', () => ({
+  S3BucketWorkloadService: class S3BucketWorkloadService {},
 }));
 jest.mock('@/application/project/project.service', () => ({
   ProjectService: class ProjectService {},
@@ -94,11 +98,16 @@ const createService = (
   registry: RegistryFake,
   resolver: ResolverFake,
   projectService: ProjectServiceFake = createProjectService(),
+  s3Buckets: { type: 's3_bucket'; credentials: jest.Mock } = {
+    type: 's3_bucket',
+    credentials: jest.fn(),
+  },
 ): WorkloadService =>
   new WorkloadService(
     registry as unknown as WorkloadTypeRegistry,
     resolver as unknown as WorkloadTypeResolver,
     projectService as unknown as ProjectService,
+    s3Buckets as unknown as S3BucketWorkloadService,
   );
 
 describe('WorkloadService.list', () => {

@@ -1,0 +1,1063 @@
+import { randomBytes, randomUUID } from 'node:crypto';
+import {
+  BadRequestException,
+  ConflictException,
+  HttpException,
+  Inject,
+  Injectable,
+  Logger,
+  NotFoundException,
+  ServiceUnavailableException,
+  type OnModuleDestroy,
+  type OnModuleInit,
+} from '@nestjs/common';
+import type { V1Job, V1Secret } from '@kubernetes/client-node';
+import type {
+  CreateWorkloadPayload,
+  S3BucketAccess,
+  S3BucketConfig,
+  S3BucketCredentials,
+  UpdateWorkloadPayload,
+  Workload,
+  WorkloadStatus,
+  WorkloadVersion as WorkloadVersionContract,
+} from '@acceleratio/shared';
+import { and, asc, eq } from 'drizzle-orm';
+import { ProjectIsolationService } from '@/application/project/project-isolation.service';
+import { ProjectService } from '@/application/project/project.service';
+import { StorageClassService } from '@/application/storage-class/storage-class.service';
+import { WorkloadEventsService } from '@/application/workload/observer/workload-events.service';
+import {
+  workload,
+  type WorkloadRow,
+} from '@/application/workload/schemas/workload.schema';
+import type { WorkloadVersionRow } from '@/application/workload/schemas/workload-version.schema';
+import {
+  nextWorkloadPosition,
+  normalizeWorkloadPosition,
+} from '@/application/workload/workload-position';
+import type { WorkloadTypeService } from '@/application/workload/workload-type-service';
+import {
+  toWorkloadVersion,
+  WorkloadVersionService,
+} from '@/application/workload/workload-version.service';
+import { projectNamespace } from '@/common/naming';
+import { DATABASE } from '@/vendor/db/database.constants';
+import type { Database } from '@/vendor/db/database.constants';
+import {
+  getKubernetesStatusCode,
+  toNestException,
+} from '@/vendor/kubernetes/kubernetes-error';
+import { jobOutcome } from '@/vendor/kubernetes/job-outcome';
+import { KubernetesService } from '@/vendor/kubernetes/kubernetes.service';
+import {
+  MANAGED_BY_LABEL,
+  MANAGED_BY_VALUE,
+} from '../docker/docker-workload.manifests';
+import { normalizeBucketConfig, normalizeBucketName } from './s3-bucket.config';
+import {
+  ACTIVE_DEADLINE_SECONDS,
+  BUCKET_ERROR_PREFIX,
+  BUCKET_WORKLOAD_LABEL,
+  bucketJobName,
+  buildBucketJob,
+  buildJobSecret,
+  buildProjectSecret,
+  DEFAULT_S3_ENDPOINT,
+  DEFAULT_SEAWEEDFS_FILER,
+  DEFAULT_SEAWEEDFS_MASTER,
+  DEFAULT_SEAWEEDFS_NAMESPACE,
+  DEFAULT_SEAWEEDFS_SHELL_IMAGE,
+  projectSecretName,
+  S3_REGION,
+  SHELL_CONTAINER,
+  type BucketJobInput,
+  type BucketKeys,
+  type BucketOperation,
+  type SeaweedfsTarget,
+} from './s3-bucket.manifests';
+
+export const UNSUPPORTED_ACTION_MESSAGE = 'Not supported for S3 buckets';
+export const LOCKED_BUCKET_MESSAGE =
+  'Bucket name and storage profile cannot change after creation';
+export const BUCKET_TAKEN_MESSAGE = 'Bucket name is already taken';
+
+const UNIQUE_VIOLATION = '23505';
+const POLL_INTERVAL_MS = 2000;
+/** The Job deadline plus time for the image pull. */
+const GIVE_UP_AFTER_MS = (ACTIVE_DEADLINE_SECONDS + 120) * 1000;
+const DELETE_WAIT_MS = 90_000;
+const ACCESS_KEY_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+
+const describeError = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
+const isUniqueViolation = (error: unknown): boolean => {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+
+  while (
+    typeof current === 'object' &&
+    current !== null &&
+    !seen.has(current)
+  ) {
+    seen.add(current);
+    const candidate = current as { code?: unknown; cause?: unknown };
+
+    if (candidate.code === UNIQUE_VIOLATION) {
+      return true;
+    }
+
+    current = candidate.cause;
+  }
+
+  return false;
+};
+
+/** AWS-shaped keys: a 20-character access key id and a 40-character secret. */
+export const generateBucketKeys = (): BucketKeys => {
+  const bytes = randomBytes(18);
+  const id = Array.from(
+    bytes,
+    (byte) => ACCESS_KEY_ALPHABET[byte % ACCESS_KEY_ALPHABET.length],
+  ).join('');
+
+  return {
+    accessKeyId: `AC${id}`,
+    secretAccessKey: randomBytes(30).toString('base64url'),
+  };
+};
+
+/** The message a failed Job left, or a generic one when it left none. */
+export const bucketErrorFromLog = (log: string | null): string => {
+  const line = (log ?? '')
+    .split('\n')
+    .reverse()
+    .find((entry) => entry.startsWith(BUCKET_ERROR_PREFIX));
+
+  return (
+    line?.slice(BUCKET_ERROR_PREFIX.length).trim() ||
+    'SeaweedFS did not finish the bucket operation'
+  );
+};
+
+const decode = (secret: V1Secret, key: string): string | undefined => {
+  const value = secret.data?.[key];
+
+  return value === undefined
+    ? undefined
+    : Buffer.from(value, 'base64').toString('utf8');
+};
+
+/**
+ * S3 buckets in SeaweedFS. A bucket has no Deployment, so the workload
+ * observer never touches it: this service owns the status. Creating a bucket
+ * runs a `weed shell` Job that makes the bucket, applies the storage
+ * profile's rules to its path and registers an identity limited to it. The
+ * keys live in a Secret in the project namespace, never in the database.
+ */
+@Injectable()
+export class S3BucketWorkloadService
+  implements WorkloadTypeService, OnModuleInit, OnModuleDestroy
+{
+  readonly type = 's3_bucket' as const;
+
+  private readonly logger = new Logger(S3BucketWorkloadService.name);
+  private readonly timers = new Map<string, NodeJS.Timeout>();
+  /** Buckets whose keys are being replaced; one rotation at a time each. */
+  private readonly rotating = new Set<string>();
+
+  constructor(
+    @Inject(DATABASE) private readonly db: Database,
+    private readonly projectService: ProjectService,
+    private readonly isolation: ProjectIsolationService,
+    private readonly kubernetes: KubernetesService,
+    private readonly events: WorkloadEventsService,
+    private readonly versions: WorkloadVersionService,
+    private readonly storageClasses: StorageClassService,
+  ) {}
+
+  /** Creates that were running when the API stopped are followed again. */
+  async onModuleInit(): Promise<void> {
+    try {
+      const rows = await this.db
+        .select({ id: workload.id, updated_at: workload.updated_at })
+        .from(workload)
+        .where(
+          and(eq(workload.type, this.type), eq(workload.status, 'deploying')),
+        );
+
+      for (const row of rows) {
+        this.follow(row.id, row.updated_at.getTime());
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Could not resume S3 bucket provisioning: ${describeError(error)}`,
+      );
+    }
+  }
+
+  onModuleDestroy(): void {
+    for (const timer of this.timers.values()) {
+      clearTimeout(timer);
+    }
+
+    this.timers.clear();
+  }
+
+  private get target(): SeaweedfsTarget {
+    return {
+      namespace:
+        process.env.SEAWEEDFS_NAMESPACE?.trim() || DEFAULT_SEAWEEDFS_NAMESPACE,
+      master: process.env.SEAWEEDFS_MASTER?.trim() || DEFAULT_SEAWEEDFS_MASTER,
+      filer: process.env.SEAWEEDFS_FILER?.trim() || DEFAULT_SEAWEEDFS_FILER,
+      image:
+        process.env.SEAWEEDFS_SHELL_IMAGE?.trim() ||
+        DEFAULT_SEAWEEDFS_SHELL_IMAGE,
+    };
+  }
+
+  private get endpoint(): string {
+    return process.env.SEAWEEDFS_S3_ENDPOINT?.trim() || DEFAULT_S3_ENDPOINT;
+  }
+
+  async list(projectId: string): Promise<Workload[]> {
+    const rows = await this.db
+      .select()
+      .from(workload)
+      .where(
+        and(eq(workload.project_id, projectId), eq(workload.type, this.type)),
+      )
+      .orderBy(asc(workload.created_at));
+
+    if (rows.length === 0) {
+      return [];
+    }
+
+    const [active, secrets] = await Promise.all([
+      this.versions.findByIds(
+        rows.flatMap((row) =>
+          row.active_version_id === null ? [] : [row.active_version_id],
+        ),
+      ),
+      this.listProjectSecrets(projectId),
+    ]);
+
+    return rows.map((row) =>
+      this.toWorkload(
+        row,
+        row.active_version_id === null
+          ? null
+          : (active.get(row.active_version_id) ?? null),
+        secrets.get(row.id) ?? null,
+      ),
+    );
+  }
+
+  async create(
+    projectId: string,
+    payload: CreateWorkloadPayload,
+  ): Promise<Workload> {
+    if (!(await this.projectService.exists(projectId))) {
+      throw new NotFoundException('Project not found');
+    }
+
+    if (payload?.type !== this.type) {
+      throw new BadRequestException('Unsupported workload type');
+    }
+
+    const bucket = normalizeBucketName(payload?.name);
+    const requested = normalizeBucketConfig(payload?.config);
+    let profile: Awaited<ReturnType<StorageClassService['resolveForBucket']>>;
+
+    try {
+      profile = await this.storageClasses.resolveForBucket(
+        requested.storage_class_id,
+      );
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw new BadRequestException('Storage profile not found');
+      }
+
+      throw error;
+    }
+
+    const id = randomUUID();
+    let row: WorkloadRow;
+
+    try {
+      [row] = await this.db
+        .insert(workload)
+        .values({
+          id,
+          project_id: projectId,
+          name: bucket,
+          type: this.type,
+          draft_config: null,
+          position: await nextWorkloadPosition(this.db, projectId),
+          external_name: bucket,
+          storage_class_id: profile.id,
+          status: 'deploying',
+          last_deployed_at: new Date(),
+        })
+        .returning();
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        throw new ConflictException(BUCKET_TAKEN_MESSAGE);
+      }
+
+      throw error;
+    }
+
+    const config: S3BucketConfig = { storage_class_id: profile.id };
+    const keys = generateBucketKeys();
+    const namespace = projectNamespace(projectId);
+
+    try {
+      await this.versions.record({ id: randomUUID(), workloadId: id, config });
+      await this.isolation.ensure(projectId);
+      await this.upsertProjectSecret(
+        buildProjectSecret({
+          workloadId: id,
+          projectId,
+          namespace,
+          bucket,
+          endpoint: this.endpoint,
+          keys,
+        }),
+      );
+
+      const input: BucketJobInput = {
+        workloadId: id,
+        projectId,
+        bucket,
+        operation: 'create',
+        parameters: profile.parameters,
+        target: this.target,
+      };
+      const job = await this.startJob(input);
+
+      await this.kubernetes.coreV1.createNamespacedSecret({
+        namespace: this.target.namespace,
+        body: buildJobSecret(input, keys, {
+          name: job.metadata!.name!,
+          uid: job.metadata!.uid!,
+        }),
+      });
+    } catch (error) {
+      // Nothing usable exists yet: drop what was made so the name is free to
+      // try again, and report why.
+      await this.ignoreNotFound(() =>
+        this.kubernetes.coreV1.deleteNamespacedSecret({
+          name: projectSecretName(bucket),
+          namespace,
+        }),
+      ).catch(() => undefined);
+      await this.ignoreNotFound(() =>
+        this.kubernetes.batchV1.deleteNamespacedJob({
+          name: bucketJobName(id, 'create'),
+          namespace: this.target.namespace,
+          propagationPolicy: 'Background',
+        }),
+      ).catch(() => undefined);
+      await this.db.delete(workload).where(eq(workload.id, id));
+
+      throw this.mapClusterError(error);
+    }
+
+    this.follow(id, Date.now());
+
+    return this.get(projectId, row.id);
+  }
+
+  async get(projectId: string, id: string): Promise<Workload> {
+    const row = await this.findRow(projectId, id);
+    const [active, secret] = await Promise.all([
+      this.activeVersion(row),
+      this.readProjectSecret(row),
+    ]);
+
+    return this.toWorkload(row, active, secret);
+  }
+
+  async credentials(
+    projectId: string,
+    id: string,
+  ): Promise<S3BucketCredentials> {
+    const row = await this.findRow(projectId, id);
+    let secret: V1Secret | null;
+
+    try {
+      secret = await this.readProjectSecret(row);
+    } catch (error) {
+      throw this.mapClusterError(error);
+    }
+
+    const access = secret ? this.toAccess(row, secret) : null;
+    const secretAccessKey = secret
+      ? decode(secret, 'AWS_SECRET_ACCESS_KEY')
+      : undefined;
+
+    if (!access || !secretAccessKey) {
+      throw new NotFoundException('Bucket keys not found in the cluster');
+    }
+
+    return { ...access, secret_access_key: secretAccessKey };
+  }
+
+  /** The bucket name of a bucket whose contents can be read and written. */
+  async readyBucket(projectId: string, id: string): Promise<string> {
+    const row = await this.findRow(projectId, id);
+
+    if (row.status !== 'running') {
+      throw new ConflictException(
+        row.status === 'deploying'
+          ? 'The bucket is still being created'
+          : 'The bucket is not available',
+      );
+    }
+
+    return row.external_name;
+  }
+
+  /**
+   * Replaces the bucket's keys. SeaweedFS drops the identity with every old
+   * key and registers it again with a new pair; only once it confirms does
+   * the project Secret get the new pair, so the Secret never holds keys
+   * SeaweedFS does not know. Services read the Secret when they start, so
+   * they keep the old keys, which stop working, until they restart.
+   */
+  async rotateCredentials(
+    projectId: string,
+    id: string,
+  ): Promise<S3BucketCredentials> {
+    const row = await this.findRow(projectId, id);
+
+    if (row.status !== 'running') {
+      throw new ConflictException(
+        'Keys can be regenerated once the bucket is ready',
+      );
+    }
+
+    if (this.rotating.has(row.id)) {
+      throw new ConflictException('The keys are already being regenerated');
+    }
+
+    this.rotating.add(row.id);
+
+    try {
+      const keys = generateBucketKeys();
+      const input: BucketJobInput = {
+        workloadId: row.id,
+        projectId,
+        bucket: row.external_name,
+        operation: 'rotate',
+        target: this.target,
+      };
+
+      try {
+        const job = await this.startJob(input);
+
+        await this.kubernetes.coreV1.createNamespacedSecret({
+          namespace: this.target.namespace,
+          body: buildJobSecret(input, keys, {
+            name: job.metadata!.name!,
+            uid: job.metadata!.uid!,
+          }),
+        });
+      } catch (error) {
+        throw this.mapClusterError(error);
+      }
+
+      const result = await this.waitForJob(row.id, 'rotate');
+
+      if (result.outcome === 'running') {
+        throw new ServiceUnavailableException(
+          'SeaweedFS is still applying the new keys. Try again in a minute.',
+        );
+      }
+
+      if (result.outcome === 'failed') {
+        throw new ConflictException(
+          `Could not regenerate the keys: ${result.message}`,
+        );
+      }
+
+      try {
+        await this.upsertProjectSecret(
+          buildProjectSecret({
+            workloadId: row.id,
+            projectId,
+            namespace: projectNamespace(projectId),
+            bucket: row.external_name,
+            endpoint: this.endpoint,
+            keys,
+          }),
+        );
+      } catch (error) {
+        this.logger.warn(
+          `New keys of bucket ${row.external_name} were not saved: ${describeError(error)}`,
+        );
+
+        throw new ServiceUnavailableException(
+          'SeaweedFS has new keys, but they could not be saved. Regenerate them again.',
+        );
+      }
+
+      await this.ignoreNotFound(() =>
+        this.kubernetes.batchV1.deleteNamespacedJob({
+          name: bucketJobName(row.id, 'rotate'),
+          namespace: this.target.namespace,
+          propagationPolicy: 'Background',
+        }),
+      ).catch(() => undefined);
+
+      return this.credentials(projectId, id);
+    } finally {
+      this.rotating.delete(row.id);
+    }
+  }
+
+  async update(
+    projectId: string,
+    id: string,
+    payload: UpdateWorkloadPayload,
+  ): Promise<Workload> {
+    const existing = await this.findRow(projectId, id);
+
+    if (
+      (payload?.name !== undefined && payload.name !== existing.name) ||
+      payload?.config !== undefined
+    ) {
+      throw new BadRequestException(LOCKED_BUCKET_MESSAGE);
+    }
+
+    if (payload?.position === undefined) {
+      return this.get(projectId, id);
+    }
+
+    const position = normalizeWorkloadPosition(payload.position);
+
+    if (
+      position.x === existing.position.x &&
+      position.y === existing.position.y
+    ) {
+      return this.get(projectId, id);
+    }
+
+    const [row] = await this.db
+      .update(workload)
+      .set({ position })
+      .where(eq(workload.id, existing.id))
+      .returning();
+
+    this.events.publish({
+      type: 'position',
+      workload_id: row.id,
+      project_id: row.project_id,
+      position: row.position,
+      updated_at: row.updated_at.toISOString(),
+    });
+
+    return this.get(projectId, id);
+  }
+
+  /**
+   * Deletes the bucket with its data, its storage rule and its identity,
+   * then the keys and the row. The row stays when SeaweedFS does not confirm,
+   * so a bucket is never forgotten while its data still exists.
+   */
+  async remove(projectId: string, id: string): Promise<void> {
+    const row = await this.findRow(projectId, id);
+    const input: BucketJobInput = {
+      workloadId: row.id,
+      projectId,
+      bucket: row.external_name,
+      operation: 'delete',
+      target: this.target,
+    };
+
+    this.stopFollowing(row.id);
+
+    try {
+      await this.startJob(input);
+    } catch (error) {
+      throw this.mapClusterError(error);
+    }
+
+    const result = await this.waitForJob(input.workloadId, 'delete');
+
+    if (result.outcome === 'running') {
+      throw new ServiceUnavailableException(
+        'SeaweedFS is still deleting the bucket. Try again in a minute.',
+      );
+    }
+
+    if (result.outcome === 'failed') {
+      throw new ConflictException(
+        `Could not delete the bucket: ${result.message}`,
+      );
+    }
+
+    try {
+      await this.ignoreNotFound(() =>
+        this.kubernetes.coreV1.deleteNamespacedSecret({
+          name: projectSecretName(row.external_name),
+          namespace: projectNamespace(projectId),
+        }),
+      );
+      for (const operation of ['create', 'rotate'] as const) {
+        await this.ignoreNotFound(() =>
+          this.kubernetes.batchV1.deleteNamespacedJob({
+            name: bucketJobName(row.id, operation),
+            namespace: this.target.namespace,
+            propagationPolicy: 'Background',
+          }),
+        );
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Bucket ${row.external_name} is deleted but cleanup failed: ${describeError(error)}`,
+      );
+    }
+
+    await this.db
+      .delete(workload)
+      .where(and(eq(workload.id, id), eq(workload.project_id, projectId)));
+  }
+
+  async listVersions(
+    projectId: string,
+    id: string,
+  ): Promise<WorkloadVersionContract[]> {
+    const row = await this.findRow(projectId, id);
+
+    return (await this.versions.list(row.id)).map(toWorkloadVersion);
+  }
+
+  async getVersion(
+    projectId: string,
+    id: string,
+    versionId: string,
+  ): Promise<WorkloadVersionContract> {
+    const row = await this.findRow(projectId, id);
+
+    return toWorkloadVersion(await this.versions.get(row.id, versionId));
+  }
+
+  deploy(): Promise<Workload> {
+    return this.unsupported();
+  }
+
+  start(): Promise<Workload> {
+    return this.unsupported();
+  }
+
+  stop(): Promise<Workload> {
+    return this.unsupported();
+  }
+
+  restart(): Promise<Workload> {
+    return this.unsupported();
+  }
+
+  rollback(): Promise<Workload> {
+    return this.unsupported();
+  }
+
+  discardDraft(): Promise<Workload> {
+    return this.unsupported();
+  }
+
+  private unsupported(): Promise<never> {
+    return Promise.reject(new BadRequestException(UNSUPPORTED_ACTION_MESSAGE));
+  }
+
+  /** Replaces a Job left from an earlier attempt, then starts this one. */
+  private async startJob(input: BucketJobInput): Promise<V1Job> {
+    const name = bucketJobName(input.workloadId, input.operation);
+    const namespace = input.target.namespace;
+
+    await this.ignoreNotFound(() =>
+      this.kubernetes.batchV1.deleteNamespacedJob({
+        name,
+        namespace,
+        propagationPolicy: 'Foreground',
+      }),
+    );
+
+    // Foreground deletion keeps the object until its pods are gone.
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      if ((await this.readJob(name)) === null) {
+        break;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+
+    return this.kubernetes.batchV1.createNamespacedJob({
+      namespace,
+      body: buildBucketJob(input),
+    });
+  }
+
+  /** Waits for a Job; a failure carries the message the Job left. */
+  private async waitForJob(
+    workloadId: string,
+    operation: BucketOperation,
+  ): Promise<
+    | { outcome: 'succeeded' | 'running' }
+    | { outcome: 'failed'; message: string }
+  > {
+    const name = bucketJobName(workloadId, operation);
+    const deadline = Date.now() + DELETE_WAIT_MS;
+
+    while (Date.now() < deadline) {
+      const job = await this.readJob(name).catch(() => null);
+      const outcome = job === null ? 'running' : jobOutcome(job);
+
+      if (outcome === 'succeeded') {
+        return { outcome };
+      }
+
+      if (outcome === 'failed') {
+        return {
+          outcome,
+          message: bucketErrorFromLog(await this.readLog(name)),
+        };
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+    }
+
+    return { outcome: 'running' };
+  }
+
+  /** Polls the create Job until it ends and records the outcome. */
+  private follow(id: string, startedAt: number): void {
+    this.stopFollowing(id);
+
+    const tick = async () => {
+      this.timers.delete(id);
+
+      try {
+        const done = await this.checkCreate(id, startedAt);
+
+        if (!done) {
+          this.schedule(id, tick);
+        }
+      } catch (error) {
+        this.logger.warn(
+          `Polling bucket ${id} failed: ${describeError(error)}`,
+        );
+        this.schedule(id, tick);
+      }
+    };
+
+    this.schedule(id, tick);
+  }
+
+  private schedule(id: string, tick: () => Promise<void>): void {
+    const timer = setTimeout(() => void tick(), POLL_INTERVAL_MS);
+
+    timer.unref();
+    this.timers.set(id, timer);
+  }
+
+  private stopFollowing(id: string): void {
+    const timer = this.timers.get(id);
+
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      this.timers.delete(id);
+    }
+  }
+
+  /** True once the row left `deploying`, or there is no row to update. */
+  private async checkCreate(id: string, startedAt: number): Promise<boolean> {
+    const [row] = await this.db
+      .select()
+      .from(workload)
+      .where(and(eq(workload.id, id), eq(workload.type, this.type)))
+      .limit(1);
+
+    if (!row || row.status !== 'deploying') {
+      return true;
+    }
+
+    const name = bucketJobName(id, 'create');
+    const job = await this.readJob(name);
+
+    if (job === null) {
+      await this.persistState(
+        row,
+        'failed',
+        'The provisioning Job is gone from the cluster',
+      );
+
+      return true;
+    }
+
+    const outcome = jobOutcome(job);
+
+    if (outcome === 'succeeded') {
+      await this.persistState(row, 'running', null);
+
+      return true;
+    }
+
+    if (outcome === 'failed') {
+      await this.persistState(
+        row,
+        'failed',
+        bucketErrorFromLog(await this.readLog(name)),
+      );
+
+      return true;
+    }
+
+    if (Date.now() - startedAt > GIVE_UP_AFTER_MS) {
+      await this.persistState(
+        row,
+        'failed',
+        'SeaweedFS did not create the bucket in time',
+      );
+
+      return true;
+    }
+
+    return false;
+  }
+
+  private async persistState(
+    row: WorkloadRow,
+    status: WorkloadStatus,
+    message: string | null,
+  ): Promise<void> {
+    const [updated] = await this.db
+      .update(workload)
+      .set({
+        status,
+        status_message: message,
+        status_observed_at: new Date(),
+      })
+      .where(and(eq(workload.id, row.id), eq(workload.status, 'deploying')))
+      .returning();
+
+    if (!updated) {
+      return;
+    }
+
+    this.events.publish({
+      type: 'status',
+      workload_id: updated.id,
+      project_id: updated.project_id,
+      status: updated.status,
+      status_message: updated.status_message,
+      status_observed_at: updated.status_observed_at?.toISOString() ?? null,
+      updated_at: updated.updated_at.toISOString(),
+    });
+  }
+
+  private async readJob(name: string): Promise<V1Job | null> {
+    try {
+      return await this.kubernetes.batchV1.readNamespacedJob({
+        name,
+        namespace: this.target.namespace,
+      });
+    } catch (error) {
+      if (getKubernetesStatusCode(error) === 404) {
+        return null;
+      }
+
+      throw error;
+    }
+  }
+
+  private async readLog(name: string): Promise<string | null> {
+    try {
+      const pods = await this.kubernetes.coreV1.listNamespacedPod({
+        namespace: this.target.namespace,
+        labelSelector: `job-name=${name}`,
+      });
+      const pod = pods.items[0]?.metadata?.name;
+
+      if (!pod) {
+        return null;
+      }
+
+      return await this.kubernetes.coreV1.readNamespacedPodLog({
+        name: pod,
+        namespace: this.target.namespace,
+        container: SHELL_CONTAINER,
+      });
+    } catch {
+      return null;
+    }
+  }
+
+  private async upsertProjectSecret(body: V1Secret): Promise<void> {
+    const name = body.metadata!.name!;
+    const namespace = body.metadata!.namespace!;
+
+    try {
+      await this.kubernetes.coreV1.createNamespacedSecret({ namespace, body });
+    } catch (error) {
+      if (getKubernetesStatusCode(error) !== 409) {
+        throw error;
+      }
+
+      await this.kubernetes.coreV1.replaceNamespacedSecret({
+        name,
+        namespace,
+        body,
+      });
+    }
+  }
+
+  private async readProjectSecret(row: WorkloadRow): Promise<V1Secret | null> {
+    try {
+      const secret = await this.kubernetes.coreV1.readNamespacedSecret({
+        name: projectSecretName(row.external_name),
+        namespace: projectNamespace(row.project_id),
+      });
+
+      // A Secret of that name that this bucket did not write is not its keys.
+      return secret.metadata?.labels?.[BUCKET_WORKLOAD_LABEL] === row.id
+        ? secret
+        : null;
+    } catch (error) {
+      if (getKubernetesStatusCode(error) === 404) {
+        return null;
+      }
+
+      this.logger.warn(
+        `Could not read keys of bucket ${row.external_name}: ${describeError(error)}`,
+      );
+
+      return null;
+    }
+  }
+
+  /** One request per project: every bucket Secret by label. */
+  private async listProjectSecrets(
+    projectId: string,
+  ): Promise<Map<string, V1Secret>> {
+    try {
+      const secrets = await this.kubernetes.coreV1.listNamespacedSecret({
+        namespace: projectNamespace(projectId),
+        labelSelector: `${MANAGED_BY_LABEL}=${MANAGED_BY_VALUE},${BUCKET_WORKLOAD_LABEL}`,
+      });
+
+      return new Map(
+        secrets.items.flatMap((secret) => {
+          const id = secret.metadata?.labels?.[BUCKET_WORKLOAD_LABEL];
+
+          return id ? [[id, secret] as const] : [];
+        }),
+      );
+    } catch (error) {
+      if (getKubernetesStatusCode(error) !== 404) {
+        this.logger.warn(
+          `Could not list bucket keys of project ${projectId}: ${describeError(error)}`,
+        );
+      }
+
+      return new Map();
+    }
+  }
+
+  private async ignoreNotFound(run: () => Promise<unknown>): Promise<void> {
+    try {
+      await run();
+    } catch (error) {
+      if (getKubernetesStatusCode(error) !== 404) {
+        throw error;
+      }
+    }
+  }
+
+  private mapClusterError(error: unknown): HttpException {
+    if (error instanceof HttpException) {
+      return error;
+    }
+
+    this.logger.warn(`Kubernetes request failed: ${describeError(error)}`);
+
+    return toNestException(error);
+  }
+
+  private async findRow(projectId: string, id: string): Promise<WorkloadRow> {
+    const [row] = await this.db
+      .select()
+      .from(workload)
+      .where(
+        and(
+          eq(workload.id, id),
+          eq(workload.project_id, projectId),
+          eq(workload.type, this.type),
+        ),
+      )
+      .limit(1);
+
+    if (!row) {
+      throw new NotFoundException('Workload not found');
+    }
+
+    return row;
+  }
+
+  private async activeVersion(
+    row: WorkloadRow,
+  ): Promise<WorkloadVersionRow | null> {
+    if (row.active_version_id === null) {
+      return null;
+    }
+
+    const found = await this.versions.findByIds([row.active_version_id]);
+
+    return found.get(row.active_version_id) ?? null;
+  }
+
+  private toAccess(row: WorkloadRow, secret: V1Secret): S3BucketAccess | null {
+    const accessKeyId = decode(secret, 'AWS_ACCESS_KEY_ID');
+
+    if (!accessKeyId) {
+      return null;
+    }
+
+    return {
+      bucket: row.external_name,
+      endpoint: decode(secret, 'AWS_ENDPOINT_URL') ?? this.endpoint,
+      region: decode(secret, 'AWS_REGION') ?? S3_REGION,
+      access_key_id: accessKeyId,
+      secret_name:
+        secret.metadata?.name ?? projectSecretName(row.external_name),
+    };
+  }
+
+  private toWorkload(
+    row: WorkloadRow,
+    active: WorkloadVersionRow | null,
+    secret: V1Secret | null,
+  ): Workload {
+    return {
+      id: row.id,
+      project_id: row.project_id,
+      name: row.name,
+      type: row.type,
+      active_version: active === null ? null : toWorkloadVersion(active),
+      draft_config: null,
+      position: row.position,
+      status: row.status,
+      status_message: row.status_message,
+      status_observed_at: row.status_observed_at?.toISOString() ?? null,
+      external_name: row.external_name,
+      namespace: projectNamespace(row.project_id),
+      last_deployed_at: row.last_deployed_at?.toISOString() ?? null,
+      s3: secret ? this.toAccess(row, secret) : null,
+      created_at: row.created_at.toISOString(),
+      updated_at: row.updated_at.toISOString(),
+    };
+  }
+}

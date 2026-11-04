@@ -1,4 +1,4 @@
-import type { Workload, WorkloadConfig } from '@acceleratio/shared';
+import type { DockerWorkloadConfig, Workload } from '@acceleratio/shared';
 
 /** Limits the API applies when `cpu_max` / `ram_max` are unset. */
 export const DEFAULT_CPU_MAX = 1;
@@ -17,11 +17,13 @@ export const formatMemoryLimit = (mib: number | null | undefined) =>
   mib === null ? 'No limit' : formatMemory(mib ?? DEFAULT_RAM_MAX);
 
 /**
- * The config the service is heading to: pending changes when there are any,
- * otherwise what the cluster runs. Every workload has at least one of them.
+ * The config a Docker service is heading to: pending changes when there are
+ * any, otherwise what the cluster runs. Every Docker workload has at least one
+ * of them. Only Docker views call this; the type selects the config shape.
  */
-export const effectiveConfig = (workload: Workload): WorkloadConfig =>
-  (workload.draft_config ?? workload.active_version?.config)!;
+export const effectiveConfig = (workload: Workload): DockerWorkloadConfig =>
+  (workload.draft_config ??
+    workload.active_version?.config) as DockerWorkloadConfig;
 
 /** Edits on a deployed service that the next deploy applies. */
 export const hasPendingChanges = (workload: Workload) =>

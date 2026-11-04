@@ -1,5 +1,6 @@
 import type {
   CreateWorkloadPayload,
+  S3BucketCredentials,
   UpdateWorkloadPayload,
   Workload,
   WorkloadVersion,
@@ -73,6 +74,13 @@ export const workloadsApi = {
   rollback: async (projectId: string, id: string, versionId: string) => {
     const { data } = await api.post<Workload>(
       `/projects/${projectId}/workloads/${id}/versions/${versionId}/rollback`,
+    );
+    return data;
+  },
+  /** Endpoint and keys of an S3 bucket, including the secret key. */
+  getCredentials: async (projectId: string, id: string) => {
+    const { data } = await api.get<S3BucketCredentials>(
+      `/projects/${projectId}/workloads/${id}/credentials`,
     );
     return data;
   },

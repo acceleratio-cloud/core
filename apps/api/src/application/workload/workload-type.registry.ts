@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import type { WorkloadType } from '@acceleratio/shared';
 import { DockerWorkloadService } from './docker/docker-workload.service';
+import { S3BucketWorkloadService } from './s3-bucket/s3-bucket.service';
 import type { WorkloadTypeService } from './workload-type-service';
 
 const UNSUPPORTED_TYPE_MESSAGE = 'Unsupported workload type';
@@ -14,8 +15,11 @@ const UNSUPPORTED_TYPE_MESSAGE = 'Unsupported workload type';
 export class WorkloadTypeRegistry {
   private readonly services = new Map<WorkloadType, WorkloadTypeService>();
 
-  constructor(dockerWorkloadService: DockerWorkloadService) {
-    for (const service of [dockerWorkloadService]) {
+  constructor(
+    dockerWorkloadService: DockerWorkloadService,
+    s3BucketWorkloadService: S3BucketWorkloadService,
+  ) {
+    for (const service of [dockerWorkloadService, s3BucketWorkloadService]) {
       this.services.set(service.type, service);
     }
   }

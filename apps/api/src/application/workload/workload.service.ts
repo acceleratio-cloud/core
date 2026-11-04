@@ -1,11 +1,17 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import type {
   CreateWorkloadPayload,
+  S3BucketCredentials,
   UpdateWorkloadPayload,
   Workload,
   WorkloadVersion,
 } from '@acceleratio/shared';
 import { ProjectService } from '@/application/project/project.service';
+import { S3BucketWorkloadService } from './s3-bucket/s3-bucket.service';
 import type { WorkloadTypeService } from './workload-type-service';
 import { WorkloadTypeRegistry } from './workload-type.registry';
 import { WorkloadTypeResolver } from './workload-type.resolver';
@@ -30,7 +36,36 @@ export class WorkloadService {
     private readonly registry: WorkloadTypeRegistry,
     private readonly resolver: WorkloadTypeResolver,
     private readonly projectService: ProjectService,
+    private readonly s3Buckets: S3BucketWorkloadService,
   ) {}
+
+  /** Endpoint and keys of an S3 bucket, including the secret key. */
+  async credentials(
+    projectId: string,
+    id: string,
+  ): Promise<S3BucketCredentials> {
+    const type = await this.resolver.resolve(projectId, id);
+
+    if (type !== this.s3Buckets.type) {
+      throw new BadRequestException('Only S3 buckets have credentials');
+    }
+
+    return this.s3Buckets.credentials(projectId, id);
+  }
+
+  /** New keys for an S3 bucket; the old ones stop working. */
+  async rotateCredentials(
+    projectId: string,
+    id: string,
+  ): Promise<S3BucketCredentials> {
+    const type = await this.resolver.resolve(projectId, id);
+
+    if (type !== this.s3Buckets.type) {
+      throw new BadRequestException('Only S3 buckets have credentials');
+    }
+
+    return this.s3Buckets.rotateCredentials(projectId, id);
+  }
 
   async list(projectId: string): Promise<Workload[]> {
     const lists = await Promise.all(

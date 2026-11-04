@@ -50,6 +50,8 @@ type WorkloadStatusProps = {
   status: WorkloadStatusValue;
   statusMessage?: string | null;
   compact?: boolean;
+  /** Replaces the status word, e.g. "Ready" for a running bucket. */
+  label?: string;
   className?: string;
 };
 
@@ -62,6 +64,7 @@ export const WorkloadStatus = ({
   status,
   statusMessage,
   compact = false,
+  label,
   className,
 }: WorkloadStatusProps) => {
   const style = statusStyles[status];
@@ -80,7 +83,7 @@ export const WorkloadStatus = ({
             style.text,
           )}
         >
-          {style.label}
+          {label ?? style.label}
         </span>
       </span>
 
