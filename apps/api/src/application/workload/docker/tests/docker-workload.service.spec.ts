@@ -633,6 +633,20 @@ describe('DockerWorkloadService versions', () => {
     expect(appsV1.replaceNamespacedDeployment).not.toHaveBeenCalled();
   });
 
+  it('stores a resource-only change as a draft', async () => {
+    const { service, limit, set, returning } = createService();
+    const draft = { docker_image: 'nginx:1.25', cpu_max: 0.5, ram_max: 256 };
+
+    limit.mockResolvedValue([baseRow]);
+    returning.mockResolvedValue([{ ...baseRow, draft_config: draft }]);
+
+    await service.update(projectId, workloadId, {
+      config: { ...draft, entrypoint: [], command: [] },
+    });
+
+    expect(set).toHaveBeenCalledWith({ draft_config: draft });
+  });
+
   it('drops the draft when the config is edited back to the active one', async () => {
     const { service, limit, set, returning } = createService();
     const withDraft: WorkloadRow = {

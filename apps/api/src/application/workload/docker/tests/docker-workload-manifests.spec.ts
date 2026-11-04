@@ -107,6 +107,60 @@ describe('buildDeployment', () => {
     expect(container?.ports).toBeUndefined();
   });
 
+  it('maps the configured limits and keeps the default requests', () => {
+    const container = buildDeployment({
+      ...input,
+      config: { docker_image: 'nginx:1.25', cpu_max: 0.5, ram_max: 512 },
+    }).spec?.template?.spec?.containers?.[0];
+
+    expect(container?.resources).toEqual({
+      requests: { cpu: CPU_REQUEST, memory: MEMORY_REQUEST },
+      limits: { cpu: '500m', memory: '512Mi' },
+    });
+  });
+
+  it('renders whole cores and GiB in their short form', () => {
+    const container = buildDeployment({
+      ...input,
+      config: { docker_image: 'nginx:1.25', cpu_max: 2, ram_max: 2048 },
+    }).spec?.template?.spec?.containers?.[0];
+
+    expect(container?.resources?.limits).toEqual({ cpu: '2', memory: '2Gi' });
+  });
+
+  it('lowers the requests to limits below them', () => {
+    const container = buildDeployment({
+      ...input,
+      config: { docker_image: 'nginx:1.25', cpu_max: 0.05, ram_max: 64 },
+    }).spec?.template?.spec?.containers?.[0];
+
+    expect(container?.resources).toEqual({
+      requests: { cpu: '50m', memory: '64Mi' },
+      limits: { cpu: '50m', memory: '64Mi' },
+    });
+  });
+
+  it('maps entrypoint to command and command to args', () => {
+    const container = buildDeployment({
+      ...input,
+      config: {
+        docker_image: 'nginx:1.25',
+        entrypoint: ['sh', '-c'],
+        command: ['echo hi && sleep 3600'],
+      },
+    }).spec?.template?.spec?.containers?.[0];
+
+    expect(container?.command).toEqual(['sh', '-c']);
+    expect(container?.args).toEqual(['echo hi && sleep 3600']);
+  });
+
+  it('keeps the image entrypoint and command when none are set', () => {
+    const container = containerOf();
+
+    expect(container).not.toHaveProperty('command');
+    expect(container).not.toHaveProperty('args');
+  });
+
   it('never declares a port for a latest image', () => {
     const deployment = buildDeployment({
       ...input,

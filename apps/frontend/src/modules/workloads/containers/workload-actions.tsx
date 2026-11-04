@@ -18,7 +18,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 
-import type { Workload } from '@acceleratio/shared';
+import type { Workload, WorkloadConfig } from '@acceleratio/shared';
 import { getApiErrorMessage } from '@/api';
 import { workloadsApi } from '@/api/workloads';
 import { useProject } from '@/modules/projects/providers/project-provider';
@@ -35,7 +35,7 @@ import {
 } from '@/shared/components/ui/dialog';
 
 type LifecycleKey = 'deploy' | 'start' | 'stop' | 'restart';
-type ActionKey = LifecycleKey | 'delete' | 'rollback' | 'discard';
+type ActionKey = LifecycleKey | 'delete' | 'rollback' | 'discard' | 'save';
 
 type WorkloadActionsContextValue = {
   workload: Workload;
@@ -48,6 +48,8 @@ type WorkloadActionsContextValue = {
   runLifecycle: (key: LifecycleKey) => Promise<void>;
   rollbackTo: (versionId: string) => Promise<void>;
   discardDraft: () => Promise<void>;
+  /** Stores config edits as the draft. Rejects with the API message. */
+  saveConfig: (config: WorkloadConfig) => Promise<void>;
   clearDeleteError: () => void;
   deleteWorkload: () => Promise<void>;
 };
@@ -132,6 +134,20 @@ export const WorkloadActionsProvider = ({
       }
     };
 
+    const saveConfig = async (config: WorkloadConfig) => {
+      setPendingAction('save');
+
+      try {
+        replaceWorkload(
+          await workloadsApi.update(project.id, workload.id, { config }),
+        );
+      } catch (actionError) {
+        throw new Error(getApiErrorMessage(actionError));
+      } finally {
+        setPendingAction(null);
+      }
+    };
+
     const deleteWorkload = async () => {
       setPendingAction('delete');
       setDeleteError(null);
@@ -156,6 +172,7 @@ export const WorkloadActionsProvider = ({
       runLifecycle,
       rollbackTo,
       discardDraft,
+      saveConfig,
       clearDeleteError: () => setDeleteError(null),
       deleteWorkload,
     };

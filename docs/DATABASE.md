@@ -128,8 +128,11 @@ Invariants:
 - `(project_id, external_name)` is unique. `external_name` becomes the Kubernetes Deployment name,
   is generated once on create, and never changes.
 - `type` selects the shape of every config of the workload (`draft_config` and its versions). Today
-  the only value is `docker`, whose config carries the image reference. Adding a type means adding an
-  enum value and a config schema together.
+  the only value is `docker`, whose config carries the image reference (`docker_image`) and optional
+  `cpu_max` (vCPU, default 1), `ram_max` (MiB, default 1024), `entrypoint` and `command` (string
+  arrays that replace the image's ENTRYPOINT and CMD). Unset optional keys are omitted, never stored
+  as null, so older configs need no migration. Adding a type means adding an enum value and a config
+  schema together.
 - The config lives in versions, not on the row. `active_version_id` points at the
   `workload_version` the cluster runs and is null until the first deploy. `draft_config` holds edits
   the next deploy applies and is null when there are none. At least one of the two is set: a new

@@ -1,6 +1,7 @@
 import type { V1Container, V1Deployment } from '@kubernetes/client-node';
 import type { DockerWorkloadConfig } from '@acceleratio/shared';
 import { projectNamespace } from '@/common/naming';
+import { DEFAULT_CPU_MAX, DEFAULT_RAM_MAX } from './docker-workload.config';
 
 export const MANAGED_BY_LABEL = 'app.kubernetes.io/managed-by';
 export const MANAGED_BY_VALUE = 'acceleratio';
@@ -15,6 +16,9 @@ export const DEFAULT_REPLICAS = 1;
 export const PROGRESS_DEADLINE_SECONDS = 300;
 export const REVISION_HISTORY_LIMIT = 3;
 export const TERMINATION_GRACE_PERIOD_SECONDS = 30;
+/** Requests in millicores and MiB; lowered to the limit when it is smaller. */
+export const CPU_REQUEST_MILLICORES = 100;
+export const MEMORY_REQUEST_MIB = 128;
 export const CPU_REQUEST = '100m';
 export const MEMORY_REQUEST = '128Mi';
 export const CPU_LIMIT = '1';
@@ -67,6 +71,33 @@ export const imagePullPolicy = (image: string): string => {
     : IF_NOT_PRESENT_PULL_POLICY;
 };
 
+/**
+ * Whole cores and whole GiB keep their short form (`1`, `1Gi`), so the
+ * defaults render exactly as they did before limits became configurable and
+ * an unchanged pod template does not roll.
+ */
+export const cpuQuantity = (millicores: number): string =>
+  millicores % 1000 === 0 ? String(millicores / 1000) : `${millicores}m`;
+
+export const memoryQuantity = (mib: number): string =>
+  mib % 1024 === 0 ? `${mib / 1024}Gi` : `${mib}Mi`;
+
+const containerResources = (config: DockerWorkloadConfig) => {
+  const cpuLimit = Math.round((config.cpu_max ?? DEFAULT_CPU_MAX) * 1000);
+  const memoryLimit = config.ram_max ?? DEFAULT_RAM_MAX;
+
+  return {
+    requests: {
+      cpu: cpuQuantity(Math.min(CPU_REQUEST_MILLICORES, cpuLimit)),
+      memory: memoryQuantity(Math.min(MEMORY_REQUEST_MIB, memoryLimit)),
+    },
+    limits: {
+      cpu: cpuQuantity(cpuLimit),
+      memory: memoryQuantity(memoryLimit),
+    },
+  };
+};
+
 const workloadLabels = (
   input: WorkloadManifestInput,
 ): Record<string, string> => ({
@@ -90,11 +121,17 @@ export const buildDeployment = (
     name: CONTAINER_NAME,
     image: input.config.docker_image,
     imagePullPolicy: imagePullPolicy(input.config.docker_image),
-    resources: {
-      requests: { cpu: CPU_REQUEST, memory: MEMORY_REQUEST },
-      limits: { cpu: CPU_LIMIT, memory: MEMORY_LIMIT },
-    },
+    resources: containerResources(input.config),
   };
+
+  // Docker's ENTRYPOINT is the Kubernetes `command`, and CMD is `args`.
+  if (input.config.entrypoint?.length) {
+    container.command = [...input.config.entrypoint];
+  }
+
+  if (input.config.command?.length) {
+    container.args = [...input.config.command];
+  }
 
   const annotations: Record<string, string> = {
     [WORKLOAD_NAME_ANNOTATION]: input.name,

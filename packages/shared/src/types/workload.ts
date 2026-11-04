@@ -14,6 +14,14 @@ export interface WorkloadPosition {
 
 export interface DockerWorkloadConfig {
   docker_image: string;
+  /** CPU limit in vCPU (0.5 = 500m). Absent means 1 vCPU. */
+  cpu_max?: number;
+  /** Memory limit in MiB. Absent means 1024 MiB. */
+  ram_max?: number;
+  /** Replaces the image ENTRYPOINT. Absent keeps the image's own. */
+  entrypoint?: string[];
+  /** Replaces the image CMD. Absent keeps the image's own. */
+  command?: string[];
 }
 
 export type WorkloadConfig = DockerWorkloadConfig;
