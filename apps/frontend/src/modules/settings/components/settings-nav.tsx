@@ -1,14 +1,17 @@
-'use client';
+import Link from 'next/link';
 
 import { cn } from '@/lib/utils';
-import { SETTINGS_SECTIONS, type SettingsSectionId } from '../sections';
+import {
+  SETTINGS_SECTIONS,
+  settingsSectionHref,
+  type SettingsSectionId,
+} from '../sections';
 
 type SettingsNavProps = {
   activeId: SettingsSectionId;
-  onSelect: (id: SettingsSectionId) => void;
 };
 
-export const SettingsNav = ({ activeId, onSelect }: SettingsNavProps) => {
+export const SettingsNav = ({ activeId }: SettingsNavProps) => {
   return (
     <nav
       aria-label="Settings"
@@ -19,10 +22,11 @@ export const SettingsNav = ({ activeId, onSelect }: SettingsNavProps) => {
         const active = section.id === activeId;
 
         return (
-          <button
+          <Link
             key={section.id}
-            type="button"
-            onClick={() => onSelect(section.id)}
+            href={settingsSectionHref(section.id)}
+            replace
+            scroll={false}
             aria-current={active ? 'page' : undefined}
             aria-controls="settings-panel"
             className={cn(
@@ -41,7 +45,7 @@ export const SettingsNav = ({ activeId, onSelect }: SettingsNavProps) => {
               )}
             />
             {section.label}
-          </button>
+          </Link>
         );
       })}
     </nav>

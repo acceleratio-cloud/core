@@ -1,18 +1,20 @@
 import { SettingsView } from '@/modules/settings/containers/settings-view';
-import { isSettingsSectionId } from '@/modules/settings/sections';
+import {
+  isSettingsSectionId,
+  SETTINGS_TAB_PARAM,
+} from '@/modules/settings/sections';
 
 export default async function SettingsPage({
   searchParams,
 }: PageProps<'/settings'>) {
-  const { section } = await searchParams;
+  const params = await searchParams;
+  const tab = params[SETTINGS_TAB_PARAM];
 
   return (
     <div className="mx-auto w-full max-w-8xl px-4 py-6 sm:px-6">
       <SettingsView
-        initialSection={
-          typeof section === 'string' && isSettingsSectionId(section)
-            ? section
-            : undefined
+        activeId={
+          typeof tab === 'string' && isSettingsSectionId(tab) ? tab : undefined
         }
       />
     </div>

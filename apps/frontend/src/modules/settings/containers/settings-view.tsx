@@ -1,29 +1,20 @@
-'use client';
-
-import { useState } from 'react';
-
 import { SettingsNav } from '../components/settings-nav';
-import type { SettingsSectionId } from '../sections';
-import { AiProviderSettings } from './ai-provider-settings';
-import { CloudProvidersSettings } from './cloud-providers-settings';
+import { DEFAULT_SETTINGS_SECTION, type SettingsSectionId } from '../sections';
 import { ProfileSettings } from './profile-settings';
 import { StoragePanel } from './storage-panel';
 import { SystemSettings } from './system-settings';
 
 const PANELS = {
-  ai: AiProviderSettings,
-  cloud: CloudProvidersSettings,
+  system: SystemSettings,
   storage: StoragePanel,
   profile: ProfileSettings,
-  system: SystemSettings,
 };
 
 export const SettingsView = ({
-  initialSection = 'ai',
+  activeId = DEFAULT_SETTINGS_SECTION,
 }: {
-  initialSection?: SettingsSectionId;
+  activeId?: SettingsSectionId;
 }) => {
-  const [activeId, setActiveId] = useState<SettingsSectionId>(initialSection);
   const ActivePanel = PANELS[activeId];
 
   return (
@@ -32,12 +23,11 @@ export const SettingsView = ({
         Settings
       </h1>
       <p className="mt-2.5 text-sm text-muted-foreground">
-        Manage provider credentials, storage, your profile, and the control
-        plane.
+        Manage storage, your profile, and the control plane.
       </p>
 
       <div className="mt-6 grid items-start gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
-        <SettingsNav activeId={activeId} onSelect={setActiveId} />
+        <SettingsNav activeId={activeId} />
         <div id="settings-panel" className="min-w-0">
           <ActivePanel />
         </div>

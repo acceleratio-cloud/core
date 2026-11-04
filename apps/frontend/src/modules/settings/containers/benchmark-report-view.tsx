@@ -21,6 +21,7 @@ import {
 import { Button, buttonVariants } from '@/shared/components/ui/button';
 import { Skeleton } from '@/shared/components/ui/skeleton';
 import { BenchmarkTestCard } from '../components/benchmark-test-card';
+import { settingsSectionHref } from '../sections';
 import {
   formatLatency,
   stepLabel,
@@ -35,7 +36,7 @@ import {
 } from '../utils/storage-class-form';
 
 const POLL_MS = 4000;
-export const STORAGE_SETTINGS_HREF = '/settings?section=storage';
+export const STORAGE_SETTINGS_HREF = settingsSectionHref('storage');
 
 const isActive = (report: StorageBenchmarkReport) =>
   report.status === 'pending' || report.status === 'running';

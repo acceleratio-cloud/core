@@ -437,7 +437,7 @@ duplicate status events; a leader lock is future work.
   invocation between `---TEST-START`/`---TEST-END` markers, with 1 s averaged bandwidth, IOPS and
   latency logs, so every poll of a running Job records finished tests and the running one. The
   console shows the report at `/settings/storage/benchmarks/[id]` with hand-rolled SVG charts (one
-  series, one axis, crosshair, keyboard and a per-second table); `/settings?section=storage` opens
+  series, one axis, crosshair, keyboard and a per-second table); `/settings?tab=storage` opens
   the Storage tab. The API polls the Job every 5 s, resumes active runs on bootstrap,
   parses fio's JSON from the pod log and then deletes the Job and claim, switching the volume to
   `Delete` first so `Retain` profiles leave no data. Write tests are bounded by bytes because
