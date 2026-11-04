@@ -65,22 +65,27 @@ export const TimeseriesPanel = ({
   const rows = useMemo(() => toChartRows(series), [series]);
   const tickTime = useMemo(() => axisTimeFormatter(range), [range]);
   const hasData = rows.length > 0;
+  // Every sample is zero (no reads, no traffic): a flat line on an invented
+  // scale says less than saying so.
+  const isIdle =
+    hasData && series.every((item) => item.points.every(([, v]) => v === 0));
 
   return (
     <Panel
       title={title}
       hint={hint}
-      tone="other"
       className={className}
       wellClassName="h-56"
       footer={<SeriesLegend series={series} format={format} />}
     >
-      {hasData ? (
+      {isIdle ? (
+        <EmptyWell label="No activity in this range" />
+      ) : hasData ? (
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart
             data={rows}
             syncId={METRICS_SYNC_ID}
-            margin={{ top: 16, right: 16, bottom: 4, left: 4 }}
+            margin={{ top: 16, right: 28, bottom: 4, left: 4 }}
           >
             <defs>
               {series.map((item) => (
@@ -122,9 +127,11 @@ export const TimeseriesPanel = ({
               tick={AXIS_TICK}
               tickLine={false}
               axisLine={false}
-              width={64}
+              width={84}
               tickCount={5}
-              domain={[0, 'auto']}
+              // An all-zero series still gets a readable 0–1 scale.
+              domain={[0, (max: number) => (max > 0 ? max * 1.15 : 1)]}
+              allowDecimals
             />
             <Tooltip
               cursor={{ stroke: 'var(--fg-tertiary)', strokeDasharray: '3 3' }}

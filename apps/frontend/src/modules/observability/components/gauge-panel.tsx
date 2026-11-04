@@ -1,7 +1,12 @@
 'use client';
 
-import { CircleCheck, OctagonAlert, TriangleAlert } from 'lucide-react';
-import { Pie, PieChart, ResponsiveContainer } from 'recharts';
+import {
+  CircleCheck,
+  CircleDashed,
+  OctagonAlert,
+  TriangleAlert,
+} from 'lucide-react';
+import { Pie, PieChart } from 'recharts';
 
 import { cn } from '@/lib/utils';
 import { formatPercent } from '../utils/format';
@@ -11,8 +16,12 @@ import { Panel } from './panel';
 const WARNING_AT = 0.7;
 const CRITICAL_AT = 0.9;
 
-const START_ANGLE = 225;
-const END_ANGLE = -45;
+/** A 240° dial, open at the bottom. */
+const START_ANGLE = 210;
+const END_ANGLE = -30;
+
+/** The dial is drawn at a fixed size so it never fights the labels. */
+const DIAL_SIZE = 152;
 
 type Level = 'healthy' | 'high' | 'critical';
 
@@ -50,97 +59,113 @@ const BANDS = [
   { value: 1 - CRITICAL_AT, fill: 'var(--status-danger)' },
 ];
 
+const TRACK = [{ value: 1, fill: 'var(--surface-muted)' }];
+
 type GaugePanelProps = {
   title: string;
   /** Used share of the reference, 0–1; null when either side is unknown. */
   ratio: number | null;
-  /** What the ratio is measured against and the two figures. */
+  /** The two figures, such as `120m of 4 cores`. */
   caption: string;
+  /** What the share is measured against (`of limit`, `of cluster`). */
+  reference?: string;
 };
 
 /**
- * A 270° gauge for saturation. The arc takes the status color of its band and
- * the center repeats the level as a word and an icon, so the reading never
- * depends on color alone. A thin outer ring shows where the bands start.
+ * A saturation dial. The value arc takes the status color of its band, and
+ * the level is repeated as a word and an icon, so the reading never depends
+ * on color alone. A thin outer ring marks where the bands start.
  */
-export const GaugePanel = ({ title, ratio, caption }: GaugePanelProps) => {
+export const GaugePanel = ({
+  title,
+  ratio,
+  caption,
+  reference,
+}: GaugePanelProps) => {
   const clamped = ratio === null ? 0 : Math.min(Math.max(ratio, 0), 1);
   const level = ratio === null ? null : LEVELS[levelOf(ratio)];
-  const Icon = level?.icon;
+  const Icon = level?.icon ?? CircleDashed;
+  const radius = DIAL_SIZE / 2;
 
   return (
-    <Panel title={title} wellClassName="h-52">
-      <div className="absolute inset-0">
-        <ResponsiveContainer width="100%" height="100%">
-          <PieChart margin={{ top: 8, right: 8, bottom: 8, left: 8 }}>
+    <Panel title={title} hint={reference} wellClassName="h-60">
+      <div className="flex h-full flex-col items-center justify-center gap-1 px-4 py-3">
+        <div className="relative size-38 shrink-0">
+          <PieChart
+            width={DIAL_SIZE}
+            height={DIAL_SIZE}
+            margin={{ top: 0, right: 0, bottom: 0, left: 0 }}
+          >
             <Pie
               data={BANDS}
               dataKey="value"
+              cx={radius}
+              cy={radius}
               startAngle={START_ANGLE}
               endAngle={END_ANGLE}
-              innerRadius="86%"
-              outerRadius="90%"
+              innerRadius={radius - 4}
+              outerRadius={radius - 1}
               stroke="none"
-              fillOpacity={0.55}
+              fillOpacity={0.5}
               isAnimationActive={false}
             />
             <Pie
-              data={[{ value: 1 }]}
+              data={TRACK}
               dataKey="value"
+              cx={radius}
+              cy={radius}
               startAngle={START_ANGLE}
               endAngle={END_ANGLE}
-              innerRadius="66%"
-              outerRadius="80%"
-              fill="var(--surface-muted)"
+              innerRadius={radius - 20}
+              outerRadius={radius - 8}
+              cornerRadius={6}
               stroke="none"
               isAnimationActive={false}
             />
-            {level ? (
+            {level && clamped > 0 ? (
               <Pie
                 data={[
                   { value: clamped, fill: level.color },
                   { value: 1 - clamped, fill: 'transparent' },
                 ]}
                 dataKey="value"
+                cx={radius}
+                cy={radius}
                 startAngle={START_ANGLE}
                 endAngle={END_ANGLE}
-                innerRadius="66%"
-                outerRadius="80%"
-                cornerRadius={4}
+                innerRadius={radius - 20}
+                outerRadius={radius - 8}
+                cornerRadius={6}
                 stroke="none"
                 animationDuration={600}
                 animationEasing="ease-out"
               />
             ) : null}
           </PieChart>
-        </ResponsiveContainer>
-      </div>
 
-      <div className="pointer-events-none relative flex h-full flex-col items-center justify-center gap-1.5 pt-2">
-        <p className="font-mono text-2xl leading-none font-medium tracking-tight text-fg-primary tabular-nums">
-          {ratio === null ? '—' : formatPercent(ratio)}
+          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1.5 pt-1">
+            <p className="font-mono text-[26px] leading-none font-medium tracking-tight text-fg-primary tabular-nums">
+              {ratio === null ? '—' : formatPercent(ratio)}
+            </p>
+            <p
+              className={cn(
+                'flex items-center gap-1 text-[11px] leading-none font-medium',
+                level ? level.text : 'text-fg-tertiary',
+              )}
+            >
+              <Icon aria-hidden="true" strokeWidth={2} className="size-3" />
+              {level ? level.label : 'No reference'}
+            </p>
+          </div>
+        </div>
+
+        <p
+          className="max-w-full truncate font-mono text-[11px] text-fg-secondary tabular-nums"
+          title={caption}
+        >
+          {caption}
         </p>
-        {level && Icon ? (
-          <p
-            className={cn(
-              'flex items-center gap-1 text-[11px] font-medium',
-              level.text,
-            )}
-          >
-            <Icon aria-hidden="true" strokeWidth={1.75} className="size-3" />
-            {level.label}
-          </p>
-        ) : (
-          <p className="text-[11px] text-fg-tertiary">No reference</p>
-        )}
       </div>
-
-      <p
-        className="absolute inset-x-0 bottom-2.5 truncate px-3 text-center font-mono text-[11px] text-fg-tertiary tabular-nums"
-        title={caption}
-      >
-        {caption}
-      </p>
     </Panel>
   );
 };

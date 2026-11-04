@@ -95,27 +95,33 @@ export const ObservabilityView = ({ active }: { active: boolean }) => {
   );
 };
 
-const ratioOf = (value: number | null, reference: number | null | undefined) =>
-  value === null || !reference ? null : value / reference;
+type Saturation = { ratio: number | null; caption: string; reference?: string };
 
-/** `120m of 2 cores limit`, or against the cluster when there is no limit. */
-const gaugeCaption = (
+/**
+ * A gauge reading: usage against the services' limits, or against the
+ * cluster's allocatable capacity when the services run without limits.
+ */
+const saturation = (
   value: number | null,
   limit: number | null,
   cluster: number | undefined,
   format: ValueFormatter,
-) => {
+): Saturation => {
   if (value === null) {
-    return 'No samples yet';
+    return { ratio: null, caption: 'No samples yet' };
   }
 
-  if (limit) {
-    return `${format(value)} of ${format(limit)} limit`;
+  const reference = limit ?? cluster;
+
+  if (!reference) {
+    return { ratio: null, caption: format(value) };
   }
 
-  return cluster
-    ? `${format(value)} of ${format(cluster)} cluster`
-    : format(value);
+  return {
+    ratio: value / reference,
+    caption: `${format(value)} of ${format(reference)}`,
+    reference: limit ? 'of limit' : 'of cluster',
+  };
 };
 
 const Dashboard = ({ metrics }: { metrics: ProjectMetrics }) => {
@@ -262,8 +268,7 @@ const Dashboard = ({ metrics }: { metrics: ProjectMetrics }) => {
       <PanelRow title="Saturation" panelCount={3} className="md:grid-cols-3">
         <GaugePanel
           title="CPU"
-          ratio={ratioOf(summary.cpu_cores, cpuLimit ?? cluster?.cpu_cores)}
-          caption={gaugeCaption(
+          {...saturation(
             summary.cpu_cores,
             cpuLimit,
             cluster?.cpu_cores,
@@ -272,11 +277,7 @@ const Dashboard = ({ metrics }: { metrics: ProjectMetrics }) => {
         />
         <GaugePanel
           title="Memory"
-          ratio={ratioOf(
-            summary.memory_bytes,
-            memoryLimit ?? cluster?.memory_bytes,
-          )}
-          caption={gaugeCaption(
+          {...saturation(
             summary.memory_bytes,
             memoryLimit,
             cluster?.memory_bytes,
@@ -285,12 +286,19 @@ const Dashboard = ({ metrics }: { metrics: ProjectMetrics }) => {
         />
         <GaugePanel
           title="Disk"
-          ratio={ratioOf(summary.disk_used_bytes, summary.disk_capacity_bytes)}
-          caption={
-            summary.disk_capacity_bytes
-              ? `${formatBytes(summary.disk_used_bytes ?? 0)} of ${formatBytes(summary.disk_capacity_bytes)}`
-              : 'No volumes in this project'
-          }
+          {...(summary.disk_capacity_bytes
+            ? {
+                ratio:
+                  summary.disk_used_bytes === null
+                    ? null
+                    : summary.disk_used_bytes / summary.disk_capacity_bytes,
+                caption:
+                  summary.disk_used_bytes === null
+                    ? `${formatBytes(summary.disk_capacity_bytes)} provisioned, usage not reported`
+                    : `${formatBytes(summary.disk_used_bytes)} of ${formatBytes(summary.disk_capacity_bytes)}`,
+                reference: 'of volumes',
+              }
+            : { ratio: null, caption: 'No volumes in this project' })}
         />
       </PanelRow>
 

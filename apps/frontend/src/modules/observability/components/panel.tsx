@@ -7,7 +7,7 @@ type PanelProps = {
   title: string;
   /** Unit or aggregation hint beside the title, in mono (`cores`, `mean`). */
   hint?: string;
-  /** Identity mark before the title: the panel's series tone. */
+  /** Identity mark before the title, for a panel that plots one entity. */
   tone?: ChartTone;
   action?: ReactNode;
   /** Content under the well, such as a legend. */
@@ -24,7 +24,7 @@ type PanelProps = {
 export const Panel = ({
   title,
   hint,
-  tone = 'chart-1',
+  tone,
   action,
   footer,
   className,
@@ -38,24 +38,28 @@ export const Panel = ({
     )}
   >
     <header className="flex min-h-5 items-center gap-2 px-1.5">
-      <span
-        aria-hidden="true"
-        className={cn('size-2 shrink-0 rounded-full', TONE_BG[tone])}
-      />
-      <h3 className="truncate text-[13px] leading-none font-medium tracking-tight text-fg-primary">
+      {tone ? (
+        <span
+          aria-hidden="true"
+          className={cn('size-2 shrink-0 rounded-full', TONE_BG[tone])}
+        />
+      ) : null}
+      <h3 className="shrink-0 text-[13px] leading-4 font-medium tracking-tight text-fg-primary">
         {title}
       </h3>
       {hint ? (
-        <span className="truncate font-mono text-[11px] leading-none text-fg-tertiary">
+        <span className="min-w-0 truncate pr-0.5 font-mono text-[11px] leading-4 text-fg-tertiary">
           {hint}
         </span>
       ) : null}
       {action ? <div className="ml-auto shrink-0">{action}</div> : null}
     </header>
 
+    {/* `flex-auto`, not `flex-1`: a 0% basis would override the well's
+        height class and collapse the charts, which only fill their parent. */}
     <div
       className={cn(
-        'relative min-h-0 flex-1 overflow-hidden rounded-lg border border-edge-subtle bg-surface-sunken',
+        'relative flex-auto overflow-hidden rounded-lg border border-edge-subtle bg-surface-sunken',
         wellClassName,
       )}
     >

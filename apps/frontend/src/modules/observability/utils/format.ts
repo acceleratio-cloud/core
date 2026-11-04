@@ -39,19 +39,25 @@ export const formatBytes: ValueFormatter = (bytes) => {
 export const formatByteRate: ValueFormatter = (bytesPerSecond) =>
   `${formatBytes(bytesPerSecond)}/s`;
 
-/** CPU in cores; under one core it reads as millicores, like Kubernetes. */
+/** CPU in cores; under one core it reads as millicores (mCPU). */
 export const formatCores: ValueFormatter = (cores) => {
   if (Math.abs(cores) < 1) {
-    return `${Math.round(cores * 1000)}m`;
+    return `${Math.round(cores * 1000)} mCPU`;
   }
 
-  return `${significant(cores)} cores`;
+  const value = significant(cores);
+
+  return `${value} ${value === '1' ? 'core' : 'cores'}`;
 };
 
 export const formatPercent = (ratio: number) => {
   const percent = ratio * 100;
 
-  return `${percent < 10 && percent > 0 ? percent.toFixed(1) : Math.round(percent)}%`;
+  if (percent > 0 && percent < 0.1) {
+    return '<0.1%';
+  }
+
+  return `${percent < 10 ? Number(percent.toFixed(1)) : Math.round(percent)}%`;
 };
 
 /** Splits a formatted value into number and unit for the big stat figures. */

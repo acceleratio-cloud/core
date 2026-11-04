@@ -29,10 +29,10 @@ export const StatPanel = ({
   const rows = points?.map(([t, v]) => ({ t, v })) ?? [];
 
   return (
-    <Panel title={title} wellClassName="h-28">
-      <div className="relative z-10 flex flex-col gap-1 px-3.5 pt-3">
+    <Panel title={title} wellClassName="h-32">
+      <div className="relative z-10 flex flex-col gap-1.5 px-3.5 pt-3.5">
         <p className="flex items-baseline gap-1.5 font-mono tracking-tight text-fg-primary tabular-nums">
-          <span className="text-2xl leading-none font-medium">{number}</span>
+          <span className="text-[28px] leading-none font-medium">{number}</span>
           {unit ? (
             <span className="text-sm leading-none text-fg-secondary">
               {unit}
@@ -47,7 +47,7 @@ export const StatPanel = ({
       </div>
 
       {rows.length > 1 ? (
-        <div aria-hidden="true" className="absolute inset-x-0 bottom-0 h-12">
+        <div aria-hidden="true" className="absolute inset-x-0 bottom-0 h-14">
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart
               data={rows}
