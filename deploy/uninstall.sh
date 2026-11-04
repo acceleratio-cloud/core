@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Acceleratio VPS uninstaller.
+# Acceleratio uninstaller.
 #
 # Removes the Helm releases, Cilium networking, k3s and SeaweedFS data that
 # deploy/install.sh created. This is destructive.
@@ -13,6 +13,9 @@ SEAWEEDFS_NAMESPACE="${SEAWEEDFS_NAMESPACE:-seaweedfs}"
 SEAWEEDFS_RELEASE="${SEAWEEDFS_RELEASE:-seaweedfs}"
 SEAWEEDFS_CSI_RELEASE="${SEAWEEDFS_CSI_RELEASE:-seaweedfs-csi}"
 SEAWEEDFS_DATA_DIR="${SEAWEEDFS_DATA_DIR:-/var/lib/seaweedfs}"
+ACCELERATIO_NAMESPACE="${ACCELERATIO_NAMESPACE:-acceleratio}"
+ACCELERATIO_DATA_DIR="${ACCELERATIO_DATA_DIR:-/var/lib/acceleratio}"
+POSTGRES_DATA_DIR="${POSTGRES_DATA_DIR:-${ACCELERATIO_DATA_DIR}/postgres}"
 K3S_KUBECONFIG="${K3S_KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
 CILIUM_CNI_CONF_PATH="${CILIUM_CNI_CONF_PATH:-/etc/cni/net.d}"
 CILIUM_CNI_BIN_PATH="${CILIUM_CNI_BIN_PATH:-/opt/cni/bin}"
@@ -54,13 +57,14 @@ die() {
 
 usage() {
   cat <<'EOF'
-Acceleratio VPS uninstaller
+Acceleratio uninstaller
 
 Removes:
+  - the Acceleratio namespace (PostgreSQL, API, console) and its database files
   - SeaweedFS CSI and SeaweedFS Helm releases
   - Cilium Helm release and its CNI files/interfaces
   - k3s and its embedded etcd
-  - SeaweedFS hostPath data and /etc/acceleratio
+  - SeaweedFS hostPath data, PostgreSQL data and /etc/acceleratio
 
 CILIUM_CNI_CONF_PATH and CILIUM_CNI_BIN_PATH are respected if the installer
 used custom CNI paths. Kubeconfigs in /root/.kube and user home directories
@@ -123,7 +127,7 @@ confirm() {
   if [ ! -t 0 ]; then
     die "--yes is required when stdin is not a terminal."
   fi
-  printf 'This deletes k3s, etcd, Cilium and SeaweedFS data. Type "uninstall" to continue: '
+  printf 'This deletes k3s, etcd, Cilium, SeaweedFS and database data. Type "uninstall" to continue: '
   read -r answer
   if [ "$answer" != "uninstall" ]; then
     die "Uninstall aborted."
@@ -138,6 +142,11 @@ uninstall_helm_releases() {
     return 0
   fi
   export KUBECONFIG="$K3S_KUBECONFIG"
+
+  if command -v k3s >/dev/null 2>&1; then
+    run k3s kubectl delete namespace "$ACCELERATIO_NAMESPACE" --ignore-not-found --wait=true --timeout=180s || true
+    run k3s kubectl delete clusterrolebinding acceleratio-api --ignore-not-found || true
+  fi
 
   run "$helm_cmd" uninstall "$SEAWEEDFS_CSI_RELEASE" -n "$SEAWEEDFS_NAMESPACE" --ignore-not-found
   run "$helm_cmd" uninstall "$SEAWEEDFS_RELEASE" -n "$SEAWEEDFS_NAMESPACE" --ignore-not-found
@@ -211,11 +220,14 @@ remove_k3s() {
 }
 
 validate_data_dir() {
-  case "$SEAWEEDFS_DATA_DIR" in
-    ""|"/"|"/var"|"/var/lib"|"/etc")
-      die "Refusing to remove unsafe data directory: '${SEAWEEDFS_DATA_DIR}'"
-      ;;
-  esac
+  local dir
+  for dir in "$SEAWEEDFS_DATA_DIR" "$POSTGRES_DATA_DIR"; do
+    case "$dir" in
+      ""|"/"|"/var"|"/var/lib"|"/etc")
+        die "Refusing to remove unsafe data directory: '${dir}'"
+        ;;
+    esac
+  done
 }
 
 validate_cni_paths() {
@@ -231,6 +243,7 @@ validate_cni_paths() {
 
 remove_data() {
   run rm -rf "$SEAWEEDFS_DATA_DIR"
+  run rm -rf "$POSTGRES_DATA_DIR"
   run rm -rf "$CONFIG_DIR"
   run rm -rf /etc/rancher/k3s
   run rm -rf /var/lib/rancher/k3s
@@ -243,13 +256,13 @@ remove_data() {
 print_summary() {
   if (( DRY_RUN )); then
     printf '\n%s\n' "${C_GREEN}Acceleratio uninstall dry run complete${C_RESET}"
-    printf 'Would remove: k3s, etcd, Cilium, SeaweedFS and %s\n' "$SEAWEEDFS_DATA_DIR"
+    printf 'Would remove: k3s, etcd, Cilium, Acceleratio, SeaweedFS and %s\n' "$SEAWEEDFS_DATA_DIR"
     printf 'Would keep: /root/.kube/config and user kubeconfigs\n'
     printf 'Dry run complete: no changes were made.\n'
   else
     printf '\n%s\n' "${C_GREEN}Acceleratio uninstall complete${C_RESET}"
     printf 'Kept: /root/.kube/config and user kubeconfigs\n'
-    printf 'Removed: k3s, etcd, Cilium, SeaweedFS and %s\n' "$SEAWEEDFS_DATA_DIR"
+    printf 'Removed: k3s, etcd, Cilium, Acceleratio, SeaweedFS and %s\n' "$SEAWEEDFS_DATA_DIR"
     printf 'Reinstall: sudo ./deploy/install.sh\n'
   fi
 }
@@ -260,7 +273,7 @@ main() {
   validate_data_dir
   validate_cni_paths
   confirm
-  log_warn "Removing Acceleratio VPS installation"
+  log_warn "Removing Acceleratio installation"
   uninstall_helm_releases
   detach_cilium_bpf
   remove_cilium

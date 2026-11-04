@@ -1,7 +1,8 @@
-# VPS installer
+# Installer
 
-`deploy/install.sh` provisions a single-node Kubernetes cluster on a fresh
-Ubuntu or Debian VPS and prepares it for Acceleratio:
+`deploy/install.sh` turns a fresh Ubuntu or Debian server into an Acceleratio
+cloud with a single command. It works on bare metal, a private server or any
+other hardware. It provisions a single-node Kubernetes cluster:
 
 - k3s `v1.36.5+k3s1` with embedded etcd
 - Cilium `1.20.4` as the CNI, replacing flannel and kube-proxy
@@ -9,19 +10,26 @@ Ubuntu or Debian VPS and prepares it for Acceleratio:
 - SeaweedFS `4.51.0` (master, volume, filer and S3)
 - SeaweedFS CSI `0.2.43` with the default StorageClass `seaweedfs-storage`
 
-The Acceleratio application is not installed yet. The script is structured so
-an application role can be added later without changing the cluster bootstrap.
+and then deploys Acceleratio into the `acceleratio` namespace:
+
+- PostgreSQL (`postgres:17-alpine`), stored on the server's own disk
+- the API (`orazbayev/acceleratio-api:0.1.0`), which migrates the database on
+  every start through an init container
+- the console (`orazbayev/acceleratio-frontend:0.1.0`)
+
+When it finishes, the installer prints the dashboard URL.
 
 ## Tested
 
-Verified on Ubuntu 24.04.5 (4 vCPU, 8 GiB RAM), Ubuntu 22.04.5 (6 vCPU,
+Cluster bootstrap verified on Ubuntu 24.04.5 (4 vCPU, 8 GiB RAM), Ubuntu 22.04.5 (6 vCPU,
 11 GiB RAM, kernel 5.15) and Debian 12 (6 vCPU, 11 GiB RAM), with and without
 Docker. The test matrix covered a fresh install, the stdin/one-line path
 (`bash -s --`), an idempotent re-run, a reboot, an external kubeconfig, a
 PVC/DNS smoke test, S3 authentication, an etcd snapshot, live uninstall and
 reinstall, `--reset --yes`, `--help`, `--config`, a custom
 namespace/StorageClass/`CONFIG_DIR`/`LOG_DIR` with S3 disabled, and the
-sqlite, swap and port-conflict preflight refusals.
+sqlite, swap and port-conflict preflight refusals. The Acceleratio
+deployment step has been checked with `--dry-run` and manifest validation only.
 
 ## Requirements
 
@@ -33,20 +41,39 @@ sqlite, swap and port-conflict preflight refusals.
 - `/dev/fuse` available on the host
 - outbound HTTPS to `get.k3s.io`, `get.helm.sh`, `quay.io`, GitHub Pages and
   Docker Hub (the smoke test pulls `busybox:1.36`)
+- ports `30300/tcp` (console) and `30080/tcp` (API) reachable from the browsers
+  that will use the dashboard
 - ports `6443/tcp`, `80/tcp`, `443/tcp` free; `8472/udp` between nodes if the
   cluster is expanded later
 - swap disabled (or `ALLOW_SWAP=1` if you accept the kubelet risk)
 
-OpenVZ/LXC VPS instances often do not expose `/dev/fuse`; the installer stops
+OpenVZ/LXC hosts often do not expose `/dev/fuse`; the installer stops
 before making changes if FUSE is unavailable.
 
 ## Quick start
 
-On the VPS, with root:
+On the server, with root:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/acceleratio-dev/core/main/deploy/install.sh | sudo bash
 ```
+
+When it finishes, it prints the dashboard address:
+
+```
+────────────────────────────────────────────────────────────────
+  ● Acceleratio is ready
+  Your private cloud is up and running.
+────────────────────────────────────────────────────────────────
+
+  Open the dashboard
+    Console       http://203.0.113.10:30300
+    First account http://203.0.113.10:30300/auth/installation
+    API           http://203.0.113.10:30080
+```
+
+Open the **First account** link and create the first account to start
+working with the system.
 
 Flags go after `bash -s --`, so the same one-liner works without a checkout:
 
@@ -95,6 +122,13 @@ log is also linked as `/var/log/acceleratio/install.log`.
    the default annotation from any other StorageClass.
 8. **Verification** — checks nodes, Cilium, SeaweedFS and runs a PVC + DNS
    smoke test that writes and reads a file through the default StorageClass.
+9. **Acceleratio** — generates the database password and session secret (kept
+   in `/etc/acceleratio/acceleratio.env`), applies
+   `/etc/acceleratio/manifests/acceleratio.yaml` and waits for PostgreSQL, the
+   API and the console to become ready. The console and API are published on
+   node ports `30300` and `30080`. The API runs with a ServiceAccount bound to
+   `cluster-admin`, because it creates namespaces, workloads, volumes and
+   network policies for projects.
 
 The installer is idempotent: a second run updates configuration and Helm
 releases instead of recreating the cluster.
@@ -126,7 +160,18 @@ Every variable can be set in the environment or in a file passed to
 | `SEAWEEDFS_DATA_DIR` | `/var/lib/seaweedfs` | hostPath for SeaweedFS state |
 | `SEAWEEDFS_S3_ENABLED` | `true` | in-cluster S3 on the filer |
 | `STORAGE_CLASS_NAME` | `seaweedfs-storage` | default StorageClass name |
-| `CONFIG_DIR` | `/etc/acceleratio` | generated values, kubeconfig and S3 credentials |
+| `ACCELERATIO_NAMESPACE` | `acceleratio` | namespace for PostgreSQL, the API and the console |
+| `ACCELERATIO_VERSION` | `0.1.0` | image tag for the API and the console |
+| `ACCELERATIO_API_IMAGE` | `orazbayev/acceleratio-api:<version>` | API image |
+| `ACCELERATIO_CONSOLE_IMAGE` | `orazbayev/acceleratio-frontend:<version>` | console image |
+| `POSTGRES_IMAGE` | `postgres:17-alpine` | PostgreSQL image |
+| `POSTGRES_DATA_DIR` | `/var/lib/acceleratio/postgres` | hostPath for the database files |
+| `ACCELERATIO_CONSOLE_NODE_PORT` | `30300` | node port of the console |
+| `ACCELERATIO_API_NODE_PORT` | `30080` | node port of the API |
+| `ACCELERATIO_PUBLIC_HOST` | public IPv4 | host name or IP used in the dashboard URLs |
+| `ACCELERATIO_CONSOLE_URL` | `http://<host>:30300` | full console URL, e.g. behind a domain or reverse proxy |
+| `ACCELERATIO_API_URL` | `http://<host>:30080` | full API URL; the browser must reach it |
+| `CONFIG_DIR` | `/etc/acceleratio` | generated values, kubeconfig, secrets and S3 credentials |
 | `LOG_DIR` | `/var/log/acceleratio` | installer logs |
 | `ALLOW_SWAP` | `0` | set to `1` to continue with active swap |
 
@@ -141,6 +186,7 @@ sudo k3s kubectl get nodes -o wide
 sudo k3s kubectl get pods -A
 sudo k3s kubectl get storageclass
 sudo k3s kubectl -n seaweedfs get pods -o wide
+sudo k3s kubectl -n acceleratio get pods -o wide
 sudo k3s etcd-snapshot list
 ```
 
@@ -150,6 +196,7 @@ Expected:
 - Cilium and `cilium-operator` are ready in `kube-system`
 - SeaweedFS master, volume and filer pods are `Running`
 - `seaweedfs-storage` is the only StorageClass marked `(default)`
+- `postgres-0`, `api-*` and `console-*` are `Running` in `acceleratio`
 
 `k3s etcd-snapshot` can print `Unknown flag --...` warnings because it parses
 the k3s config file with a reduced flag set. Snapshots and the scheduled
@@ -185,13 +232,13 @@ The installer writes:
 For external access:
 
 ```bash
-scp root@<VPS_IP>:/etc/acceleratio/kubeconfig.yaml .
+scp root@<SERVER_IP>:/etc/acceleratio/kubeconfig.yaml .
 export KUBECONFIG=$PWD/kubeconfig.yaml
 kubectl get nodes
 ```
 
 The k3s API certificate includes the node IP, the detected public IP and the
-node name as SANs. If the VPS is behind NAT, `node-ip` stays on the private
+node name as SANs. If the server is behind NAT, `node-ip` stays on the private
 interface and the public address is added as an additional SAN for external
 clients.
 
@@ -212,6 +259,31 @@ published outside the cluster. Port-forward it for local use:
 sudo k3s kubectl -n seaweedfs port-forward svc/seaweedfs-s3 8333:8333
 ```
 
+## Dashboard address
+
+By default the URLs use the detected public IPv4. The browser must reach both
+the console and the API, so open both node ports in the firewall. To use a
+domain or a TLS reverse proxy, publish the console and the API and tell the
+installer their final URLs:
+
+```bash
+ACCELERATIO_CONSOLE_URL=https://console.example.com \
+ACCELERATIO_API_URL=https://api.example.com \
+  sudo -E ./deploy/install.sh
+```
+
+Re-running with different URLs updates the deployments. Keep the console and
+the API on the same registrable domain so the session cookie is sent to the
+API.
+
+## Database
+
+PostgreSQL runs as the StatefulSet `postgres` and keeps its files on the
+server's own disk (`/var/lib/acceleratio/postgres`), not on SeaweedFS, so the
+platform does not depend on itself to start. The database password and the
+session secret are generated once and reused by later runs. Back up
+`/var/lib/acceleratio/postgres` and `/etc/acceleratio/acceleratio.env` together.
+
 ## Re-run and reset
 
 Re-running the installer is safe for configuration and Helm changes:
@@ -227,7 +299,8 @@ sudo ./deploy/install.sh --reset --yes
 ```
 
 `--reset` is destructive. It removes the k3s datastore, Cilium networking and
-`/var/lib/seaweedfs`. It is not an in-place migration from an existing sqlite
+`/var/lib/seaweedfs`, the database in `/var/lib/acceleratio/postgres` and
+`/etc/acceleratio`. It is not an in-place migration from an existing sqlite
 k3s cluster; the installer normally refuses that case.
 
 ## Uninstall
@@ -244,12 +317,13 @@ curl -fsSL https://raw.githubusercontent.com/acceleratio-dev/core/main/deploy/un
 
 The uninstaller removes the Helm releases, detaches Cilium BPF filters from the
 host interfaces, removes Cilium CNI files and interfaces, and then removes k3s,
-etcd and SeaweedFS data. Detaching the filters before the CNI is removed keeps
+etcd, the database and SeaweedFS data. Detaching the filters before the CNI is removed keeps
 SSH and host networking usable without a reboot. It keeps kubeconfig files in
 `/root/.kube` and user home directories.
 
 If you changed `SEAWEEDFS_NAMESPACE`, `SEAWEEDFS_RELEASE`,
-`SEAWEEDFS_CSI_RELEASE`, `SEAWEEDFS_DATA_DIR`, `CONFIG_DIR` or the
+`SEAWEEDFS_CSI_RELEASE`, `SEAWEEDFS_DATA_DIR`, `ACCELERATIO_NAMESPACE`,
+`POSTGRES_DATA_DIR`, `CONFIG_DIR` or the
 `CILIUM_CNI_*` paths, pass the same values to `uninstall.sh`; otherwise it
 will look for the defaults.
 
@@ -276,10 +350,21 @@ sudo k3s crictl info | grep -A4 '"cni"'
 existing sqlite k3s datastore, active swap, missing `/dev/fuse`, less than
 10 GiB free disk, or a port conflict on `6443`.
 
-**apt/dpkg lock on a fresh VPS.** cloud-init or unattended-upgrades may still be
+**apt/dpkg lock on a fresh server.** cloud-init or unattended-upgrades may still be
 installing packages. The installer waits up to 10 minutes and passes
 `DPkg::Lock::Timeout=600` to apt. If it times out, inspect the holder with
 `pgrep -a 'apt|dpkg'` and re-run.
+
+**The dashboard does not open.** Check the pods, then the firewall:
+
+```bash
+sudo k3s kubectl -n acceleratio get pods
+sudo k3s kubectl -n acceleratio logs deploy/api --all-containers
+curl -i http://127.0.0.1:30300/healthz
+```
+
+If both answer locally, open TCP `30300` and `30080` in the host or network
+firewall. `ImagePullBackOff` means the server cannot reach Docker Hub.
 
 **Helm release is stuck.** Inspect it with:
 
@@ -322,8 +407,11 @@ sudo k3s kubectl -n seaweedfs get ds
   volume servers.
 - SeaweedFS S3 is in-cluster only and has no TLS termination from this
   installer.
-- The Acceleratio application, ingress for it and its database are not part
-  of this version.
+- The console and API are published on plain HTTP node ports. For TLS, put a
+  reverse proxy in front and pass its URLs as `ACCELERATIO_CONSOLE_URL` and
+  `ACCELERATIO_API_URL`.
+- PostgreSQL is a single instance on a hostPath, without replication or
+  automatic backups.
 - RHEL/Rocky/Alma are not supported by this installer yet.
 - The installer disables the k3s `local-storage` addon. Do not run it on an
   existing cluster that still uses `local-path` volumes; start from a fresh

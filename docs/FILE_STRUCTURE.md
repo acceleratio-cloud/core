@@ -5,7 +5,7 @@ src/
     (dashboard)/ - authenticated console
     auth/ - sign-in and first-run installation
   api/ - HTTP layer, the only place that talks to the API
-    index.ts - axios instance (NEXT_PUBLIC_API_URL, credentials) and getApiErrorMessage
+    index.ts - axios instance (runtime API URL, credentials), getApiBaseUrl and getApiErrorMessage
     [module-name]/
       index.ts - client calls, one exported object per module (projectsApi)
       server.ts - server-only calls for route files (getServerProject), forwards cookies

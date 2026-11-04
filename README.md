@@ -80,13 +80,13 @@ Cilium. That matches the production CNI closely enough for workloads and for the
 is required because older releases cannot start the current k3s images. The
 first `make cluster-up` pulls the k3s, Cilium and SeaweedFS images.
 
-SeaweedFS and its CSI driver are installed as on a VPS, so the default
+SeaweedFS and its CSI driver are installed as on a server, so the default
 StorageClass is `seaweedfs-storage` and the console's storage settings can
 create and use custom classes. Data lives inside the k3d node container and is
 deleted with the cluster. The CSI driver needs `/dev/fuse` in the node; set
 `SEAWEEDFS=0` to skip SeaweedFS (k3s `local-path` then stays the default).
 
-The SeaweedFS S3 gateway runs with authentication on, as on a VPS, so S3 bucket
+The SeaweedFS S3 gateway runs with authentication on, as on a server, so S3 bucket
 services can be created locally. A cluster created before S3 was enabled has no
 gateway: recreate it with `make cluster-down && make cluster-up`. The API finds
 SeaweedFS through `SEAWEEDFS_NAMESPACE`, `SEAWEEDFS_MASTER`, `SEAWEEDFS_FILER`,
@@ -94,7 +94,7 @@ SeaweedFS through `SEAWEEDFS_NAMESPACE`, `SEAWEEDFS_MASTER`, `SEAWEEDFS_FILER`,
 installers.
 
 The local cluster reads the k3s, Cilium and SeaweedFS chart versions from
-`deploy/install.sh`, so local development and the VPS installer move together.
+`deploy/install.sh`, so local development and the server installer move together.
 Override them with `K3S_VERSION`, `K3S_IMAGE`, `CILIUM_VERSION`,
 `SEAWEEDFS_CHART_VERSION` or `SEAWEEDFS_CSI_CHART_VERSION` if needed.
 
@@ -190,19 +190,21 @@ unprivileged `node` user.
 
 ```bash
 docker build -f apps/api/Dockerfile -t acceleratio/api:dev .
-docker build -f apps/frontend/Dockerfile \
-  --build-arg NEXT_PUBLIC_API_URL=http://localhost:8080 \
-  -t acceleratio/console:dev .
+docker build -f apps/frontend/Dockerfile -t acceleratio/console:dev .
 ```
 
 The API expects the same environment as local development: `DATABASE_URL`,
-`BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, and `CORS_ORIGINS`. Apply the Drizzle
-migrations before starting it (`make migrate` or
-`cd apps/api && bun run db:migrate`); the container does not migrate the
-database on startup. `KUBECONFIG` may be a file path or inline YAML; inside
+`BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, and `CORS_ORIGINS`. The image ships
+the Drizzle migrations; apply them before starting a new version (from a
+one-off container, a Kubernetes init container, or `make migrate` locally). The
+API container does not migrate the database on startup. `KUBECONFIG` may be a file path or inline YAML; inside
 Kubernetes the in-cluster service account is used when it is unset.
 
 ```bash
+docker run --rm \
+  -e DATABASE_URL=postgresql://acceleratio:acceleratio@host.docker.internal:5433/acceleratio \
+  acceleratio/api:dev node dist/vendor/db/migrate.js
+
 docker run --rm -p 8080:8080 \
   -e DATABASE_URL=postgresql://acceleratio:acceleratio@host.docker.internal:5433/acceleratio \
   -e BETTER_AUTH_SECRET="$(openssl rand -base64 32)" \
@@ -210,30 +212,39 @@ docker run --rm -p 8080:8080 \
   -e CORS_ORIGINS=http://localhost:3000 \
   acceleratio/api:dev
 
-docker run --rm -p 3000:3000 acceleratio/console:dev
+docker run --rm -p 3000:3000 -e API_URL=http://localhost:8080 acceleratio/console:dev
 ```
 
 `host.docker.internal` is built into Docker Desktop; on Linux add
 `--add-host=host.docker.internal:host-gateway` or point `DATABASE_URL` at a
-reachable database. `NEXT_PUBLIC_API_URL` is inlined by `next build`, so rebuild
-the console image when the public API URL changes. The console listens on port
-`3000` and the API on `8080`.
+reachable database. The console reads `API_URL` (the API address the browser
+uses) when the container starts, so one image serves every deployment; set
+`API_INTERNAL_URL` as well when server-side calls should use a different
+address, such as a cluster-local Service. The console listens on port `3000` and
+the API on `8080`; both answer `GET /healthz`, which the image HEALTHCHECKs use.
 
-## Install on a VPS
+## Install on a server
 
-The installer provisions a single-node Kubernetes cluster with k3s, embedded
-etcd, Cilium, SeaweedFS and a default SeaweedFS StorageClass. The application
-itself is not installed by this version.
+One command turns a fresh Ubuntu or Debian server (bare metal, a private
+server or any other hardware) into a working Acceleratio cloud. The installer
+sets up a single-node k3s cluster with embedded etcd, Cilium and SeaweedFS with
+a default SeaweedFS StorageClass, then deploys PostgreSQL, the API and the
+console into the `acceleratio` namespace.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/acceleratio-dev/core/main/deploy/install.sh | sudo bash
 ```
 
-To remove the cluster, Cilium and SeaweedFS data later:
+When it finishes, it prints the dashboard URL (by default
+`http://<server-ip>:30300`). Open `/auth/installation` there and create the
+first account to start working with the system. Open TCP ports `30300` and
+`30080` in your firewall if the page does not load.
+
+To remove everything, including the database, later:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/acceleratio-dev/core/main/deploy/uninstall.sh | sudo bash -s -- --yes
 ```
 
-Requirements, configuration, verification and uninstall details live in
-[deploy/README.md](./deploy/README.md).
+Requirements, configuration, domains and TLS, verification and uninstall
+details live in [deploy/README.md](./deploy/README.md).

@@ -4,7 +4,7 @@ import type {
   S3BucketListing,
 } from '@acceleratio/shared';
 
-import { api } from '@/api';
+import { api, getApiBaseUrl } from '@/api';
 
 const objectsPath = (projectId: string, id: string) =>
   `/projects/${projectId}/workloads/${id}/objects`;
@@ -59,7 +59,7 @@ export const s3BucketObjectsApi = {
   },
   /** A link the browser follows to download, so the file is never buffered. */
   downloadUrl: (projectId: string, id: string, path: string) => {
-    const baseUrl = (api.defaults.baseURL ?? '').replace(/\/+$/, '');
+    const baseUrl = getApiBaseUrl();
     const query = new URLSearchParams({ path });
 
     return `${baseUrl}${objectsPath(projectId, id)}/content?${query}`;

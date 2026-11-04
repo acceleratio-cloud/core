@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AuthController } from '@/application/auth/auth.controller';
+import { HealthController } from '@/application/health/health.controller';
 import { NodeController } from '@/application/node/node.controller';
 import { NodeService } from '@/application/node/node.service';
 import { ProjectController } from '@/application/project/project.controller';
@@ -37,6 +38,7 @@ import { SeaweedfsFilerClient } from '@/vendor/seaweedfs/seaweedfs-filer.client'
 @Module({
   controllers: [
     AuthController,
+    HealthController,
     NodeController,
     ProjectController,
     StorageClassController,

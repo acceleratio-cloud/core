@@ -12,6 +12,7 @@
     "start:dev": "nest start --watch --exec \"node scripts/dev.js\"",
     "start:debug": "nest start --debug --watch --exec \"node scripts/dev.js\"",
     "start:prod": "node dist/main",
+    "migrate:prod": "node dist/vendor/db/migrate.js",
     "lint": "eslint \"{src,tests}/**/*.ts\" --fix",
     "test": "jest",
     "test:watch": "jest --watch",

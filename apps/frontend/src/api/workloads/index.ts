@@ -6,7 +6,7 @@ import type {
   WorkloadVersion,
 } from '@acceleratio/shared';
 
-import { api } from '@/api';
+import { api, getApiBaseUrl } from '@/api';
 
 type WorkloadAction = 'deploy' | 'start' | 'stop' | 'restart';
 
@@ -29,7 +29,7 @@ export const workloadsApi = {
     return data;
   },
   eventsUrl: (projectId: string) => {
-    const baseUrl = (api.defaults.baseURL ?? '').replace(/\/+$/, '');
+    const baseUrl = getApiBaseUrl();
     return `${baseUrl}/projects/${projectId}/workloads/events`;
   },
   get: async (projectId: string, id: string) => {

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Inter, Geist_Mono } from "next/font/google";
+import Script from "next/script";
 import "sileo/styles.css";
 import { AuthProvider } from "@/modules/auth/providers/auth-provider";
 import { Toaster } from "@/shared/components/toaster";
@@ -27,6 +28,8 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className={`${inter.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
+        {/* Runtime API URL for the browser; see src/api/index.ts. */}
+        <Script src="/runtime-config.js" strategy="beforeInteractive" />
         <AuthProvider>{children}</AuthProvider>
         <Toaster />
       </body>

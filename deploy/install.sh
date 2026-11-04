@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 #
-# Acceleratio VPS installer.
+# Acceleratio installer.
 #
 # Installs a single-node k3s cluster with embedded etcd, Cilium as the CNI
 # (replacing both flannel and kube-proxy), SeaweedFS and the SeaweedFS CSI
 # driver. The CSI driver creates the default StorageClass `seaweedfs-storage`.
 #
-# The Acceleratio application is intentionally not installed yet.
+# It then deploys Acceleratio itself into the `acceleratio` namespace:
+# PostgreSQL, the API and the console, and prints the dashboard URL.
+#
+# Works on any Ubuntu/Debian server: bare metal, a private server or any other
+# hardware.
 #
 # Usage: sudo ./deploy/install.sh [--dry-run] [--config FILE] [--reset] [--yes]
 #
@@ -46,6 +50,22 @@ SEAWEEDFS_CSI_RELEASE="${SEAWEEDFS_CSI_RELEASE:-seaweedfs-csi}"
 SEAWEEDFS_DATA_DIR="${SEAWEEDFS_DATA_DIR:-/var/lib/seaweedfs}"
 SEAWEEDFS_S3_ENABLED="${SEAWEEDFS_S3_ENABLED:-true}"
 STORAGE_CLASS_NAME="${STORAGE_CLASS_NAME:-seaweedfs-storage}"
+
+ACCELERATIO_NAMESPACE="${ACCELERATIO_NAMESPACE:-acceleratio}"
+ACCELERATIO_VERSION="${ACCELERATIO_VERSION:-0.1.0}"
+ACCELERATIO_API_IMAGE="${ACCELERATIO_API_IMAGE:-orazbayev/acceleratio-api:${ACCELERATIO_VERSION}}"
+ACCELERATIO_CONSOLE_IMAGE="${ACCELERATIO_CONSOLE_IMAGE:-orazbayev/acceleratio-frontend:${ACCELERATIO_VERSION}}"
+POSTGRES_IMAGE="${POSTGRES_IMAGE:-postgres:17-alpine}"
+ACCELERATIO_DATA_DIR="${ACCELERATIO_DATA_DIR:-/var/lib/acceleratio}"
+POSTGRES_DATA_DIR="${POSTGRES_DATA_DIR:-${ACCELERATIO_DATA_DIR}/postgres}"
+# The console and API are published on these node ports (30000-32767).
+ACCELERATIO_CONSOLE_NODE_PORT="${ACCELERATIO_CONSOLE_NODE_PORT:-30300}"
+ACCELERATIO_API_NODE_PORT="${ACCELERATIO_API_NODE_PORT:-30080}"
+# Host name or IP users reach the server on (default: the public IPv4), or the
+# full URLs when the console and API sit behind a domain or a reverse proxy.
+ACCELERATIO_PUBLIC_HOST="${ACCELERATIO_PUBLIC_HOST:-}"
+ACCELERATIO_CONSOLE_URL="${ACCELERATIO_CONSOLE_URL:-}"
+ACCELERATIO_API_URL="${ACCELERATIO_API_URL:-}"
 
 CONFIG_DIR="${CONFIG_DIR:-/etc/acceleratio}"
 LOG_DIR="${LOG_DIR:-/var/log/acceleratio}"
@@ -174,16 +194,16 @@ is_ipv4() {
 
 usage() {
   cat <<'EOF'
-Acceleratio VPS installer
+Acceleratio installer
 
-Installs:
+Installs on any Ubuntu/Debian server (bare metal, private server, any hardware):
   - k3s with embedded etcd (single node, server + worker)
   - Cilium as CNI with kube-proxy replacement
   - SeaweedFS (master, volume, filer, S3)
   - SeaweedFS CSI driver and the configured default StorageClass
     (default seaweedfs-storage)
-
-The Acceleratio application is not installed yet.
+  - Acceleratio in namespace "acceleratio": PostgreSQL, API and console,
+    then prints the dashboard URL
 
 Usage:
   sudo ./deploy/install.sh [options]
@@ -218,6 +238,17 @@ Common variables (environment or --config):
   SEAWEEDFS_DATA_DIR          default /var/lib/seaweedfs
   SEAWEEDFS_S3_ENABLED        default true
   STORAGE_CLASS_NAME          default seaweedfs-storage
+  ACCELERATIO_NAMESPACE       default acceleratio
+  ACCELERATIO_VERSION         default 0.1.0 (image tag for API and console)
+  ACCELERATIO_API_IMAGE       default orazbayev/acceleratio-api:<version>
+  ACCELERATIO_CONSOLE_IMAGE   default orazbayev/acceleratio-frontend:<version>
+  POSTGRES_IMAGE              default postgres:17-alpine
+  POSTGRES_DATA_DIR           default /var/lib/acceleratio/postgres
+  ACCELERATIO_CONSOLE_NODE_PORT default 30300
+  ACCELERATIO_API_NODE_PORT   default 30080
+  ACCELERATIO_PUBLIC_HOST     default public IPv4; host used in the URLs
+  ACCELERATIO_CONSOLE_URL     default http://<host>:<console port>
+  ACCELERATIO_API_URL         default http://<host>:<api port>
   CONFIG_DIR                  default /etc/acceleratio
   LOG_DIR                     default /var/log/acceleratio
   ALLOW_SWAP                  default 0 (kubelet requires swap off)
@@ -389,7 +420,7 @@ check_fuse() {
     fi
   fi
   if [ ! -e /dev/fuse ]; then
-    die "/dev/fuse is missing. The SeaweedFS CSI driver requires FUSE. Some VPS/OpenVZ hosts do not expose it."
+    die "/dev/fuse is missing. The SeaweedFS CSI driver requires FUSE. Some virtualised or containerised hosts (OpenVZ, LXC) do not expose it."
   fi
   log_info "FUSE: available"
 }
@@ -403,7 +434,7 @@ check_existing_k3s() {
     if (( RESET )); then
       log_warn "Existing k3s uses sqlite. --reset will remove it and create an etcd cluster."
     else
-      die "Existing k3s uses sqlite. k3s cannot switch to etcd in place. Use a fresh VPS or run with --reset (destructive)."
+      die "Existing k3s uses sqlite. k3s cannot switch to etcd in place. Use a fresh server or run with --reset (destructive)."
     fi
   elif [ -d /var/lib/rancher/k3s/server/db/etcd ]; then
     log_info "Existing k3s etcd datastore detected; the installer will update it in place."
@@ -509,7 +540,7 @@ check_warnings() {
     log_warn "Docker is active. It can coexist with k3s/Cilium, but its iptables rules are not managed by this installer."
   fi
   if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep "Status: active" >/dev/null 2>&1; then
-    log_warn "UFW is active. Open 6443/tcp, 80/tcp, 443/tcp and 8472/udp between cluster nodes if needed."
+    log_warn "UFW is active. Open ${ACCELERATIO_CONSOLE_NODE_PORT}/tcp and ${ACCELERATIO_API_NODE_PORT}/tcp for the dashboard, and 6443/tcp, 80/tcp, 443/tcp and 8472/udp between cluster nodes if needed."
   fi
   if systemctl is-active --quiet firewalld 2>/dev/null; then
     log_warn "firewalld is active. Cilium requires careful firewall configuration; review its rules."
@@ -566,14 +597,14 @@ detach_cilium_bpf() {
 
 reset_installation() {
   if (( DRY_RUN )); then
-    log_info "DRY-RUN: would remove the existing k3s/Cilium/SeaweedFS installation"
+    log_info "DRY-RUN: would remove the existing k3s/Cilium/SeaweedFS/Acceleratio installation"
     return 0
   fi
   if (( ! ASSUME_YES )); then
     if [ ! -t 0 ]; then
       die "--reset requires --yes when stdin is not a terminal."
     fi
-    printf 'This deletes k3s, etcd, Cilium and SeaweedFS data. Type "reset" to continue: '
+    printf 'This deletes k3s, etcd, Cilium, SeaweedFS and database data. Type "reset" to continue: '
     read -r answer
     if [ "$answer" != "reset" ]; then
       die "Reset aborted."
@@ -583,6 +614,11 @@ reset_installation() {
   case "$SEAWEEDFS_DATA_DIR" in
     ""|"/"|"/var"|"/var/lib"|"/etc")
       die "Refusing to remove unsafe data directory: '${SEAWEEDFS_DATA_DIR}'"
+      ;;
+  esac
+  case "$POSTGRES_DATA_DIR" in
+    ""|"/"|"/var"|"/var/lib"|"/etc")
+      die "Refusing to remove unsafe data directory: '${POSTGRES_DATA_DIR}'"
       ;;
   esac
 
@@ -631,6 +667,7 @@ reset_installation() {
     fi
   done
   rm -rf "$SEAWEEDFS_DATA_DIR"
+  rm -rf "$POSTGRES_DATA_DIR"
   rm -rf "$CONFIG_DIR"
   rm -rf /etc/rancher/k3s
   rm -rf /var/lib/rancher/k3s
@@ -1296,12 +1333,406 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
+# Acceleratio application: PostgreSQL, API and console in the cluster.
+# ---------------------------------------------------------------------------
+
+generate_secret() {
+  od -An -N32 -tx1 /dev/urandom | tr -d ' \n'
+}
+
+read_env_value() {
+  # read_env_value FILE KEY: prints the value of KEY=value, or nothing.
+  [ -r "$1" ] || return 0
+  sed -n "s/^${2}=//p" "$1" | head -n 1
+}
+
+resolve_acceleratio_urls() {
+  local host="${ACCELERATIO_PUBLIC_HOST:-$K3S_PUBLIC_IP}"
+
+  ACCELERATIO_CONSOLE_URL="${ACCELERATIO_CONSOLE_URL:-http://${host}:${ACCELERATIO_CONSOLE_NODE_PORT}}"
+  ACCELERATIO_API_URL="${ACCELERATIO_API_URL:-http://${host}:${ACCELERATIO_API_NODE_PORT}}"
+  ACCELERATIO_CONSOLE_URL="${ACCELERATIO_CONSOLE_URL%/}"
+  ACCELERATIO_API_URL="${ACCELERATIO_API_URL%/}"
+
+  # The API accepts credentialed requests from every address the console is
+  # reachable on; the node address also works from the local network.
+  ACCELERATIO_CORS_ORIGINS="$ACCELERATIO_CONSOLE_URL"
+  if [ "$K3S_NODE_IP" != "$host" ]; then
+    ACCELERATIO_CORS_ORIGINS="${ACCELERATIO_CORS_ORIGINS},http://${K3S_NODE_IP}:${ACCELERATIO_CONSOLE_NODE_PORT}"
+  fi
+}
+
+prepare_acceleratio_secrets() {
+  local env_file="${CONFIG_DIR}/acceleratio.env"
+
+  POSTGRES_PASSWORD="$(read_env_value "$env_file" POSTGRES_PASSWORD)"
+  BETTER_AUTH_SECRET="$(read_env_value "$env_file" BETTER_AUTH_SECRET)"
+  [ -n "$POSTGRES_PASSWORD" ] || POSTGRES_PASSWORD="$(generate_secret)"
+  [ -n "$BETTER_AUTH_SECRET" ] || BETTER_AUTH_SECRET="$(generate_secret)"
+
+  # Kept so a re-run reuses the same database password and session secret.
+  write_file "$env_file" 0600 <<EOF
+# ${MANAGED_BY} - contains secrets, do not commit.
+POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}
+EOF
+}
+
+write_acceleratio_manifest() {
+  local ns="$ACCELERATIO_NAMESPACE"
+  local db_url="postgresql://acceleratio:${POSTGRES_PASSWORD}@postgres.${ns}.svc.cluster.local:5432/acceleratio"
+  local api_internal="http://api.${ns}.svc.cluster.local:8080"
+
+  ACCELERATIO_MANIFEST="${CONFIG_DIR}/manifests/acceleratio.yaml"
+  write_file "$ACCELERATIO_MANIFEST" 0600 <<EOF
+# ${MANAGED_BY} - manual edits will be overwritten. Contains secrets.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ${ns}
+  labels:
+    app.kubernetes.io/part-of: acceleratio
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres
+  namespace: ${ns}
+type: Opaque
+stringData:
+  POSTGRES_USER: acceleratio
+  POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+  POSTGRES_DB: acceleratio
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: api
+  namespace: ${ns}
+type: Opaque
+stringData:
+  DATABASE_URL: "${db_url}"
+  BETTER_AUTH_SECRET: "${BETTER_AUTH_SECRET}"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: ${ns}
+  labels:
+    app.kubernetes.io/name: postgres
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: ${ns}
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/part-of: acceleratio
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres
+        app.kubernetes.io/part-of: acceleratio
+    spec:
+      containers:
+        - name: postgres
+          image: ${POSTGRES_IMAGE}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: postgres
+              containerPort: 5432
+          envFrom:
+            - secretRef:
+                name: postgres
+          env:
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "acceleratio", "-d", "acceleratio"]
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "acceleratio", "-d", "acceleratio"]
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        # The database lives on the node's own disk: it must not depend on
+        # SeaweedFS, which in turn is managed through this API.
+        - name: data
+          hostPath:
+            path: ${POSTGRES_DATA_DIR}
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: api
+  namespace: ${ns}
+---
+# The API creates namespaces, workloads, volumes and network policies for
+# projects, so it needs cluster-wide permissions.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: acceleratio-api
+  labels:
+    app.kubernetes.io/part-of: acceleratio
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: api
+    namespace: ${ns}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: ${ns}
+  labels:
+    app.kubernetes.io/name: api
+    app.kubernetes.io/part-of: acceleratio
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: api
+        app.kubernetes.io/part-of: acceleratio
+    spec:
+      serviceAccountName: api
+      initContainers:
+        # Applies pending database migrations before the API starts. It keeps
+        # retrying (via pod restarts) until PostgreSQL accepts connections.
+        - name: migrate
+          image: ${ACCELERATIO_API_IMAGE}
+          imagePullPolicy: IfNotPresent
+          command: ["node", "dist/vendor/db/migrate.js"]
+          envFrom:
+            - secretRef:
+                name: api
+      containers:
+        - name: api
+          image: ${ACCELERATIO_API_IMAGE}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - secretRef:
+                name: api
+          env:
+            - name: PORT
+              value: "8080"
+            - name: BETTER_AUTH_URL
+              value: "${ACCELERATIO_API_URL}"
+            - name: CORS_ORIGINS
+              value: "${ACCELERATIO_CORS_ORIGINS}"
+            - name: SEAWEEDFS_NAMESPACE
+              value: "${SEAWEEDFS_NAMESPACE}"
+            - name: PLATFORM_STORAGE_CLASS_NAME
+              value: "${STORAGE_CLASS_NAME}"
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  namespace: ${ns}
+  labels:
+    app.kubernetes.io/name: api
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: api
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      nodePort: ${ACCELERATIO_API_NODE_PORT}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: console
+  namespace: ${ns}
+  labels:
+    app.kubernetes.io/name: console
+    app.kubernetes.io/part-of: acceleratio
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: console
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: console
+        app.kubernetes.io/part-of: acceleratio
+    spec:
+      containers:
+        - name: console
+          image: ${ACCELERATIO_CONSOLE_IMAGE}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            # The address the browser uses to reach the API.
+            - name: API_URL
+              value: "${ACCELERATIO_API_URL}"
+            # Server-side calls stay inside the cluster.
+            - name: API_INTERNAL_URL
+              value: "${api_internal}"
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: console
+  namespace: ${ns}
+  labels:
+    app.kubernetes.io/name: console
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: console
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+      nodePort: ${ACCELERATIO_CONSOLE_NODE_PORT}
+EOF
+}
+
+wait_for_http() {
+  # wait_for_http URL LABEL
+  local deadline=$((SECONDS + 120))
+  while (( SECONDS < deadline )); do
+    if curl -fsS --max-time 5 -o /dev/null "$1" 2>/dev/null; then
+      return 0
+    fi
+    sleep 2
+  done
+  die "$2 did not answer at $1."
+}
+
+install_acceleratio() {
+  local ns="$ACCELERATIO_NAMESPACE"
+
+  if (( DRY_RUN )); then
+    log_info "DRY-RUN: would install PostgreSQL, the API and the console in namespace ${ns}"
+    log_info "DRY-RUN: API image ${ACCELERATIO_API_IMAGE}, console image ${ACCELERATIO_CONSOLE_IMAGE}"
+    return 0
+  fi
+
+  log_info "Installing Acceleratio (PostgreSQL, API, console) in namespace ${ns}"
+  prepare_acceleratio_secrets
+  write_acceleratio_manifest
+  k3s kubectl apply -f "$ACCELERATIO_MANIFEST"
+
+  log_info "Waiting for PostgreSQL"
+  if ! k3s kubectl -n "$ns" rollout status statefulset/postgres --timeout=300s; then
+    k3s kubectl -n "$ns" describe pod -l app.kubernetes.io/name=postgres || true
+    die "PostgreSQL did not become ready."
+  fi
+
+  # The first start pulls two images and runs the database migrations.
+  log_info "Waiting for the API (pulls the image and migrates the database)"
+  if ! k3s kubectl -n "$ns" rollout status deployment/api --timeout=600s; then
+    k3s kubectl -n "$ns" describe pod -l app.kubernetes.io/name=api || true
+    k3s kubectl -n "$ns" logs deployment/api --all-containers --tail=50 || true
+    die "The API did not become ready."
+  fi
+
+  log_info "Waiting for the console"
+  if ! k3s kubectl -n "$ns" rollout status deployment/console --timeout=600s; then
+    k3s kubectl -n "$ns" describe pod -l app.kubernetes.io/name=console || true
+    die "The console did not become ready."
+  fi
+
+  wait_for_http "http://127.0.0.1:${ACCELERATIO_API_NODE_PORT}/healthz" "The API"
+  wait_for_http "http://127.0.0.1:${ACCELERATIO_CONSOLE_NODE_PORT}/healthz" "The console"
+  log_ok "Acceleratio is running in namespace ${ns}"
+}
+
+# ---------------------------------------------------------------------------
 # Summary.
 # ---------------------------------------------------------------------------
 
 print_summary() {
   local k3s_version="unknown"
   local default_sc=""
+  local rule bullet
+  local bold="" dim="" cyan=""
+
   if (( DRY_RUN )); then
     k3s_version="${K3S_VERSION:-latest from ${K3S_CHANNEL}}"
     default_sc="$STORAGE_CLASS_NAME"
@@ -1314,36 +1745,69 @@ print_summary() {
     fi
   fi
 
+  if [ -n "$C_RESET" ]; then
+    bold=$'\033[1m'
+    dim=$'\033[2m'
+    cyan=$'\033[36m'
+  fi
+  case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
+    *UTF-8*|*utf-8*|*UTF8*|*utf8*)
+      rule="$(printf '%.0s─' {1..64})"
+      bullet="●"
+      ;;
+    *)
+      rule="$(printf '%.0s-' {1..64})"
+      bullet="*"
+      ;;
+  esac
+
+  printf '\n%s\n' "${C_GREEN}${rule}${C_RESET}"
   if (( DRY_RUN )); then
-    printf '\n%s\n' "${C_GREEN}Acceleratio VPS dry run complete${C_RESET}"
+    printf '  %s%s Acceleratio dry run complete%s\n' "$bold" "$bullet" "$C_RESET"
+    printf '  %sNo changes were made.%s\n' "$dim" "$C_RESET"
   else
-    printf '\n%s\n' "${C_GREEN}Acceleratio VPS installation complete${C_RESET}"
+    printf '  %s%s Acceleratio is ready%s\n' "${bold}${C_GREEN}" "$bullet" "$C_RESET"
+    printf '  %sYour private cloud is up and running.%s\n' "$dim" "$C_RESET"
   fi
-  printf '%s\n' "------------------------------------------------------------"
-  printf '  k3s:              %s (embedded etcd)\n' "$k3s_version"
-  printf '  Cilium:           %s (CNI, kube-proxy replacement)\n' "$CILIUM_VERSION"
-  printf '  SeaweedFS:        %s (namespace %s)\n' "$SEAWEEDFS_CHART_VERSION" "$SEAWEEDFS_NAMESPACE"
-  printf '  SeaweedFS CSI:    %s\n' "$SEAWEEDFS_CSI_CHART_VERSION"
-  printf '  Default SC:       %s\n' "${default_sc:-$STORAGE_CLASS_NAME}"
-  printf '  Data directory:   %s\n' "$SEAWEEDFS_DATA_DIR"
-  printf '  Kubeconfig:       /root/.kube/config\n'
-  printf '  External config:  %s/kubeconfig.yaml\n' "$CONFIG_DIR"
-  if [ "$SEAWEEDFS_S3_ENABLED" = "true" ]; then
-    printf '  S3 credentials:   %s/seaweedfs-s3.env\n' "$CONFIG_DIR"
-  fi
-  printf '  Log:              %s\n' "$LOG_FILE"
-  printf '  Application:      not installed (out of scope for this version)\n'
-  printf '%s\n' "------------------------------------------------------------"
-  printf '  export KUBECONFIG=/etc/rancher/k3s/k3s.yaml\n'
-  printf '  k3s kubectl get nodes\n'
-  printf '  scp root@%s:%s/kubeconfig.yaml .\n' "$K3S_PUBLIC_IP" "$CONFIG_DIR"
+  printf '%s\n\n' "${C_GREEN}${rule}${C_RESET}"
+
+  printf '  %sOpen the dashboard%s\n' "$bold" "$C_RESET"
+  printf '    Console       %s%s%s\n' "${bold}${cyan}" "$ACCELERATIO_CONSOLE_URL" "$C_RESET"
+  printf '    First account %s%s/auth/installation%s\n' "$cyan" "$ACCELERATIO_CONSOLE_URL" "$C_RESET"
+  printf '    API           %s%s%s\n' "$cyan" "$ACCELERATIO_API_URL" "$C_RESET"
   printf '\n'
-  if (( DRY_RUN )); then
-    printf '%s\n' "Dry run complete: no changes were made."
-  else
-    printf 'Uninstall: sudo ./deploy/uninstall.sh\n'
-    printf 'Re-run:    sudo ./deploy/install.sh\n'
+  printf '  %sCreate the first account to get started.%s\n' "$dim" "$C_RESET"
+  printf '  %sOpen TCP ports %s and %s in your firewall if the page does not load.%s\n' \
+    "$dim" "$ACCELERATIO_CONSOLE_NODE_PORT" "$ACCELERATIO_API_NODE_PORT" "$C_RESET"
+  printf '\n'
+
+  printf '  %sWhat was installed%s\n' "$bold" "$C_RESET"
+  printf '    Namespace     %s (PostgreSQL, API, console)\n' "$ACCELERATIO_NAMESPACE"
+  printf '    k3s           %s (embedded etcd)\n' "$k3s_version"
+  printf '    Cilium        %s (CNI, kube-proxy replacement)\n' "$CILIUM_VERSION"
+  printf '    SeaweedFS     %s (namespace %s)\n' "$SEAWEEDFS_CHART_VERSION" "$SEAWEEDFS_NAMESPACE"
+  printf '    Storage       %s (default StorageClass)\n' "${default_sc:-$STORAGE_CLASS_NAME}"
+  printf '\n'
+
+  printf '  %sFiles on this server%s\n' "$bold" "$C_RESET"
+  printf '    Kubeconfig    /root/.kube/config\n'
+  printf '    Remote access %s/kubeconfig.yaml\n' "$CONFIG_DIR"
+  printf '    Secrets       %s/acceleratio.env\n' "$CONFIG_DIR"
+  if [ "$SEAWEEDFS_S3_ENABLED" = "true" ]; then
+    printf '    S3 keys       %s/seaweedfs-s3.env\n' "$CONFIG_DIR"
   fi
+  printf '    Database      %s\n' "$POSTGRES_DATA_DIR"
+  printf '    Install log   %s\n' "$LOG_FILE"
+  printf '\n'
+
+  printf '  %sUseful commands%s\n' "$bold" "$C_RESET"
+  printf '    k3s kubectl -n %s get pods\n' "$ACCELERATIO_NAMESPACE"
+  printf '    k3s kubectl -n %s logs deploy/api\n' "$ACCELERATIO_NAMESPACE"
+  printf '    scp root@%s:%s/kubeconfig.yaml .\n' "$K3S_PUBLIC_IP" "$CONFIG_DIR"
+  printf '\n'
+  printf '  %sUpdate or repair:%s sudo ./deploy/install.sh    %sRemove:%s sudo ./deploy/uninstall.sh\n' \
+    "$dim" "$C_RESET" "$dim" "$C_RESET"
+  printf '%s\n' "${C_GREEN}${rule}${C_RESET}"
 }
 
 # ---------------------------------------------------------------------------
@@ -1373,6 +1837,8 @@ main() {
   install_seaweedfs
   install_csi
   verify_installation
+  resolve_acceleratio_urls
+  install_acceleratio
   print_summary
 }
 
