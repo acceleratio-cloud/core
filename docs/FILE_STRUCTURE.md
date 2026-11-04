@@ -146,7 +146,7 @@ apps/api/src/
   common/ - helpers shared by submodules (input validation, DNS naming, exception filters)
   application/ - product features
     application.module.ts - the only Nest module in this layer; registers every submodule
-    [submodule]/ - project/, workload/, node/, auth/
+    [submodule]/ - project/, workload/, node/, storage-class/, auth/
       [submodule].controller.ts - HTTP surface only
       [submodule].service.ts - logic, validation, database access
       [type]/ - workload only: one folder per workload type, see "Workload types"
@@ -392,6 +392,13 @@ calls.
   `customresourcedefinitions` (`apiextensions.k8s.io`) and `get`, `create` and `update` on
   `ciliumnetworkpolicies` (`cilium.io/v2`).
 - The cluster inventory needs `list` on `nodes` (core).
+- Storage classes need `get`, `list`, `create`, `patch` and `delete` on `storageclasses` and `get` on
+  `csidrivers` (`storage.k8s.io`), `list` on `persistentvolumes` and `persistentvolumeclaims` (core,
+  cluster-wide) for the delete guard and volume counts, and `get` on `statefulsets` (`apps`) in the
+  SeaweedFS namespace for the volume server count.
+- Benchmarks add `get` and `create` on `namespaces`, `create`, `get` and `delete` on
+  `persistentvolumeclaims`, `create`, `get` and `delete` on `jobs` (`batch`), `list` on `pods`, `get` on
+  `pods/log` in the benchmark namespace, and `patch` on `persistentvolumes`.
 - The dev setup uses an admin kubeconfig. An in-cluster installation needs a `ClusterRole` with those
   rules and a `ClusterRoleBinding` to the API service account.
 
@@ -399,6 +406,45 @@ calls.
 
 The writer assumes one API process. Multiple replicas each observe and write, so they can publish
 duplicate status events; a leader lock is future work.
+
+## Storage classes
+
+`storage-class/` manages SeaweedFS-backed StorageClasses (`GET/POST /storage-classes`,
+`GET/PATCH/DELETE /storage-classes/:id`, `GET /storage-classes/environment`).
+
+- `storage-class.config.ts` normalizes payloads. Only an allowlist of driver parameters exists, and a
+  PATCH that names a locked setting (`parameters`, `reclaim_policy`, `volume_binding_mode`) is a 400,
+  because Kubernetes cannot change them in place.
+- `storage-class.manifests.ts` builds the StorageClass: provisioner `seaweedfs-csi-driver`, labels
+  `app.kubernetes.io/managed-by=acceleratio` and `acceleratio.io/storage-class-id`, and never the
+  default-class annotation. The service only patches or deletes objects that carry both labels.
+- `storage-class.status.ts` compares the row with the live object: `ready`, `missing`, `drifted`, or
+  `unknown` when the cluster is unreachable. Reads degrade to `unknown` instead of failing.
+- The platform class (`kind = 'platform'`) is read-only: update and delete return 403.
+- Delete counts PersistentVolumes and unbound claims of the class and returns 409 while any exist,
+  then deletes the row and the object in one transaction, so a database reference or a failed
+  cluster delete keeps both.
+- The console calls these "storage profiles" and leads with presets; driver terms sit under
+  Advanced.
+- `benchmark/` runs fio on a temporary 2 GiB claim of a profile in `BENCHMARK_NAMESPACE` (default
+  `acceleratio-benchmarks`) with `BENCHMARK_IMAGE` (default: Alpine pinned by digest, which installs
+  fio from the Alpine mirror, so the cluster needs outbound access). `POST/GET
+  /storage-classes/:id/benchmarks` start a run and list a profile's recent runs; `GET
+  /storage-benchmarks?storage_class_id=&before=&limit=` pages the history of all runs, newest first
+  (25 by default, at most 100, `next_before` as the cursor), including runs of deleted profiles;
+  `GET /storage-benchmarks/:id` is the full report (per-test detail and series, profile snapshot,
+  cluster context and the previous successful run of the profile). Each test runs as its own fio
+  invocation between `---TEST-START`/`---TEST-END` markers, with 1 s averaged bandwidth, IOPS and
+  latency logs, so every poll of a running Job records finished tests and the running one. The
+  console shows the report at `/settings/storage/benchmarks/[id]` with hand-rolled SVG charts (one
+  series, one axis, crosshair, keyboard and a per-second table); `/settings?section=storage` opens
+  the Storage tab. The API polls the Job every 5 s, resumes active runs on bootstrap,
+  parses fio's JSON from the pod log and then deletes the Job and claim, switching the volume to
+  `Delete` first so `Retain` profiles leave no data. Write tests are bounded by bytes because
+  SeaweedFS is append-only and overwrites would exhaust the claim's quota.
+- `SEAWEEDFS_NAMESPACE` (default `seaweedfs`) and `SEAWEEDFS_VOLUME_STATEFULSET` (default
+  `seaweedfs-volume`) locate the volume servers; `PLATFORM_STORAGE_CLASS_NAME` names the platform
+  class.
 
 ## Controllers
 

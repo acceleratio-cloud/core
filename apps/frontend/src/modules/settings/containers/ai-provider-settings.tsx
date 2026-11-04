@@ -1,20 +1,38 @@
-"use client"
+'use client';
 
-import { useState, type FormEvent } from "react"
+import { useState, type FormEvent } from 'react';
 
-import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/shared/components/ui/field"
-import { Input } from "@/shared/components/ui/input"
-import { Select } from "@/shared/components/ui/select"
-import { SettingsActions } from "../components/settings-actions"
-import { SettingsSection } from "../components/settings-section"
+import {
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+} from '@/shared/components/ui/field';
+import { Input } from '@/shared/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/shared/components/ui/select';
+import { SettingsActions } from '../components/settings-actions';
+import { SettingsSection } from '../components/settings-section';
+
+const AI_PROVIDERS = [
+  { value: 'openai', label: 'OpenAI' },
+  { value: 'anthropic', label: 'Anthropic' },
+  { value: 'azure', label: 'Azure OpenAI' },
+  { value: 'custom', label: 'Custom (OpenAI-compatible)' },
+];
 
 export const AiProviderSettings = () => {
-  const [saved, setSaved] = useState(false)
+  const [saved, setSaved] = useState(false);
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    setSaved(true)
-  }
+    event.preventDefault();
+    setSaved(true);
+  };
 
   return (
     <SettingsSection
@@ -27,11 +45,21 @@ export const AiProviderSettings = () => {
           <div className="grid gap-5 sm:grid-cols-2">
             <Field>
               <FieldLabel htmlFor="ai-provider">Provider</FieldLabel>
-              <Select id="ai-provider" name="provider" defaultValue="openai">
-                <option value="openai">OpenAI</option>
-                <option value="anthropic">Anthropic</option>
-                <option value="azure">Azure OpenAI</option>
-                <option value="custom">Custom (OpenAI-compatible)</option>
+              <Select
+                name="provider"
+                defaultValue="openai"
+                items={AI_PROVIDERS}
+              >
+                <SelectTrigger id="ai-provider">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {AI_PROVIDERS.map((provider) => (
+                    <SelectItem key={provider.value} value={provider.value}>
+                      {provider.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
               </Select>
             </Field>
 
@@ -77,5 +105,5 @@ export const AiProviderSettings = () => {
         <SettingsActions saved={saved} />
       </form>
     </SettingsSection>
-  )
-}
+  );
+};

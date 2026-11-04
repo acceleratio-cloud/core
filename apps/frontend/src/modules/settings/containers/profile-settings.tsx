@@ -1,19 +1,19 @@
-"use client"
+'use client';
 
-import { useState, type FormEvent } from "react"
+import { useState, type FormEvent } from 'react';
 
-import { Field, FieldGroup, FieldLabel } from "@/shared/components/ui/field"
-import { Input } from "@/shared/components/ui/input"
-import { SettingsActions } from "../components/settings-actions"
-import { SettingsSection } from "../components/settings-section"
+import { Field, FieldGroup, FieldLabel } from '@/shared/components/ui/field';
+import { Input } from '@/shared/components/ui/input';
+import { SettingsActions } from '../components/settings-actions';
+import { SettingsSection } from '../components/settings-section';
 
 export const ProfileSettings = () => {
-  const [saved, setSaved] = useState(false)
+  const [saved, setSaved] = useState(false);
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    setSaved(true)
-  }
+    event.preventDefault();
+    setSaved(true);
+  };
 
   return (
     <SettingsSection
@@ -50,5 +50,5 @@ export const ProfileSettings = () => {
         <SettingsActions saved={saved} />
       </form>
     </SettingsSection>
-  )
-}
+  );
+};

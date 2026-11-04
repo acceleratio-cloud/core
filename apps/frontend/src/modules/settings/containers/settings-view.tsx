@@ -1,24 +1,30 @@
-"use client"
+'use client';
 
-import { useState } from "react"
+import { useState } from 'react';
 
-import { SettingsNav } from "../components/settings-nav"
-import type { SettingsSectionId } from "../sections"
-import { AiProviderSettings } from "./ai-provider-settings"
-import { CloudProvidersSettings } from "./cloud-providers-settings"
-import { ProfileSettings } from "./profile-settings"
-import { SystemSettings } from "./system-settings"
+import { SettingsNav } from '../components/settings-nav';
+import type { SettingsSectionId } from '../sections';
+import { AiProviderSettings } from './ai-provider-settings';
+import { CloudProvidersSettings } from './cloud-providers-settings';
+import { ProfileSettings } from './profile-settings';
+import { StoragePanel } from './storage-panel';
+import { SystemSettings } from './system-settings';
 
 const PANELS = {
   ai: AiProviderSettings,
   cloud: CloudProvidersSettings,
+  storage: StoragePanel,
   profile: ProfileSettings,
   system: SystemSettings,
-}
+};
 
-export const SettingsView = () => {
-  const [activeId, setActiveId] = useState<SettingsSectionId>("ai")
-  const ActivePanel = PANELS[activeId]
+export const SettingsView = ({
+  initialSection = 'ai',
+}: {
+  initialSection?: SettingsSectionId;
+}) => {
+  const [activeId, setActiveId] = useState<SettingsSectionId>(initialSection);
+  const ActivePanel = PANELS[activeId];
 
   return (
     <div>
@@ -26,7 +32,8 @@ export const SettingsView = () => {
         Settings
       </h1>
       <p className="mt-2.5 text-sm text-muted-foreground">
-        Manage provider credentials, your profile, and the control plane.
+        Manage provider credentials, storage, your profile, and the control
+        plane.
       </p>
 
       <div className="mt-6 grid items-start gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
@@ -36,5 +43,5 @@ export const SettingsView = () => {
         </div>
       </div>
     </div>
-  )
-}
+  );
+};
