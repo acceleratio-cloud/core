@@ -21,7 +21,8 @@ by `make cluster-up`, otherwise the current kubeconfig context
 non-local contexts unless `ALLOW_REMOTE_KUBECONTEXT=1` is set. Use
 `make cluster-up` / `make cluster-down` for a disposable local k3d + Cilium
 cluster, and never point local development at a shared or production cluster.
-The local cluster reads the k3s and Cilium versions from `deploy/install.sh`.
+The local cluster reads the k3s, Cilium and SeaweedFS chart versions from
+`deploy/install.sh` and installs SeaweedFS + CSI (`SEAWEEDFS=0` skips it).
 See the Kubernetes section in [README.md](./README.md).
 
 ## Documentation

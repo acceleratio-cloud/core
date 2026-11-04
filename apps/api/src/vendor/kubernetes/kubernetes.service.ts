@@ -6,6 +6,7 @@ import {
   CustomObjectsApi,
   KubeConfig,
   NetworkingV1Api,
+  StorageV1Api,
 } from '@kubernetes/client-node';
 import {
   INVALID_KUBECONFIG_MESSAGE,
@@ -22,6 +23,7 @@ export class KubernetesService {
   private batchV1Api?: BatchV1Api;
   private networkingV1Api?: NetworkingV1Api;
   private customObjectsApi?: CustomObjectsApi;
+  private storageV1Api?: StorageV1Api;
 
   get config(): KubeConfig {
     if (!this.kubeConfig) {
@@ -80,5 +82,9 @@ export class KubernetesService {
   get customObjects(): CustomObjectsApi {
     return (this.customObjectsApi ??=
       this.config.makeApiClient(CustomObjectsApi));
+  }
+
+  get storageV1(): StorageV1Api {
+    return (this.storageV1Api ??= this.config.makeApiClient(StorageV1Api));
   }
 }

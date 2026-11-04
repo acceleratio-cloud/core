@@ -5,6 +5,8 @@ import { NodeService } from '@/application/node/node.service';
 import { ProjectController } from '@/application/project/project.controller';
 import { ProjectIsolationService } from '@/application/project/project-isolation.service';
 import { ProjectService } from '@/application/project/project.service';
+import { StorageClassController } from '@/application/storage-class/storage-class.controller';
+import { StorageClassService } from '@/application/storage-class/storage-class.service';
 import { DockerWorkloadStatusDeriver } from '@/application/workload/docker/docker-workload.deriver';
 import { DockerWorkloadService } from '@/application/workload/docker/docker-workload.service';
 import { WorkloadEventsService } from '@/application/workload/observer/workload-events.service';
@@ -31,12 +33,14 @@ import { WorkloadVersionService } from '@/application/workload/workload-version.
     AuthController,
     NodeController,
     ProjectController,
+    StorageClassController,
     WorkloadController,
   ],
   providers: [
     NodeService,
     ProjectService,
     ProjectIsolationService,
+    StorageClassService,
     DockerWorkloadStatusDeriver,
     DockerWorkloadService,
     WorkloadStatusDeriverRegistry,

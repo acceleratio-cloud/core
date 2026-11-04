@@ -4,6 +4,7 @@ import {
   DNS1123_LABEL_MAX_LENGTH,
   projectNamespace,
   slugify,
+  storageClassExternalName,
   workloadExternalName,
 } from '../naming';
 
@@ -158,5 +159,31 @@ describe('projectNamespace', () => {
     expect(() => projectNamespace('not a uuid')).toThrow(
       'Project id is not a valid DNS-1123 label',
     );
+  });
+});
+
+describe('storageClassExternalName', () => {
+  const id = '7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f';
+
+  it('prefixes the slug and the id', () => {
+    expect(storageClassExternalName('Fast SSD', id)).toBe(
+      'sc-fast-ssd-7c1d2e3f',
+    );
+  });
+
+  it('uses a longer id prefix on conflict and stays a DNS label', () => {
+    const name = storageClassExternalName(
+      'a'.repeat(80),
+      id,
+      CONFLICT_ID_PREFIX_LENGTH,
+    );
+
+    expect(name).toBe(`sc-${'a'.repeat(40)}-7c1d2e3f4a5b`);
+    expect(name).toMatch(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/);
+    expect(name.length).toBeLessThanOrEqual(63);
+  });
+
+  it('falls back to a generic slug', () => {
+    expect(storageClassExternalName('!!!', id)).toBe('sc-workload-7c1d2e3f');
   });
 });

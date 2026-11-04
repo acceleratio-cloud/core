@@ -68,9 +68,9 @@ this order:
 For local development, use the disposable cluster:
 
 ```bash
-make cluster-up     # create k3d + k3s + Cilium; idempotent
+make cluster-up     # create k3d + k3s + Cilium + SeaweedFS; idempotent
 make dev            # picks up the k3d kubeconfig automatically
-make cluster-status # show nodes and Cilium pods
+make cluster-status # show nodes, Cilium and SeaweedFS pods, StorageClasses
 make cluster-down   # delete the cluster and its kubeconfig
 ```
 
@@ -78,11 +78,18 @@ The cluster disables flannel and the k3s network policy controller, then install
 Cilium. That matches the production CNI closely enough for workloads and for the
 `CiliumNetworkPolicy` resources created by project isolation. k3d 5.9 or newer
 is required because older releases cannot start the current k3s images. The
-first `make cluster-up` pulls the k3s and Cilium images.
+first `make cluster-up` pulls the k3s, Cilium and SeaweedFS images.
 
-The local cluster reads the k3s and Cilium versions from `deploy/install.sh`, so
-local development and the VPS installer move together. Override them with
-`K3S_VERSION`, `K3S_IMAGE`, or `CILIUM_VERSION` if needed.
+SeaweedFS and its CSI driver are installed as on a VPS, so the default
+StorageClass is `seaweedfs-storage` and the console's storage settings can
+create and use custom classes. Data lives inside the k3d node container and is
+deleted with the cluster. The CSI driver needs `/dev/fuse` in the node; set
+`SEAWEEDFS=0` to skip SeaweedFS (k3s `local-path` then stays the default).
+
+The local cluster reads the k3s, Cilium and SeaweedFS chart versions from
+`deploy/install.sh`, so local development and the VPS installer move together.
+Override them with `K3S_VERSION`, `K3S_IMAGE`, `CILIUM_VERSION`,
+`SEAWEEDFS_CHART_VERSION` or `SEAWEEDFS_CSI_CHART_VERSION` if needed.
 
 Local development must not point at a shared or production cluster. `make dev`
 validates the effective target, including an explicit `KUBECONFIG`, and refuses

@@ -146,7 +146,7 @@ apps/api/src/
   common/ - helpers shared by submodules (input validation, DNS naming, exception filters)
   application/ - product features
     application.module.ts - the only Nest module in this layer; registers every submodule
-    [submodule]/ - project/, workload/, node/, auth/
+    [submodule]/ - project/, workload/, node/, storage-class/, auth/
       [submodule].controller.ts - HTTP surface only
       [submodule].service.ts - logic, validation, database access
       [type]/ - workload only: one folder per workload type, see "Workload types"
@@ -392,6 +392,10 @@ calls.
   `customresourcedefinitions` (`apiextensions.k8s.io`) and `get`, `create` and `update` on
   `ciliumnetworkpolicies` (`cilium.io/v2`).
 - The cluster inventory needs `list` on `nodes` (core).
+- Storage classes need `get`, `list`, `create`, `patch` and `delete` on `storageclasses` and `get` on
+  `csidrivers` (`storage.k8s.io`), `list` on `persistentvolumes` and `persistentvolumeclaims` (core,
+  cluster-wide) for the delete guard and volume counts, and `get` on `statefulsets` (`apps`) in the
+  SeaweedFS namespace for the volume server count.
 - The dev setup uses an admin kubeconfig. An in-cluster installation needs a `ClusterRole` with those
   rules and a `ClusterRoleBinding` to the API service account.
 
@@ -399,6 +403,27 @@ calls.
 
 The writer assumes one API process. Multiple replicas each observe and write, so they can publish
 duplicate status events; a leader lock is future work.
+
+## Storage classes
+
+`storage-class/` manages SeaweedFS-backed StorageClasses (`GET/POST /storage-classes`,
+`GET/PATCH/DELETE /storage-classes/:id`, `GET /storage-classes/environment`).
+
+- `storage-class.config.ts` normalizes payloads. Only an allowlist of driver parameters exists, and a
+  PATCH that names a locked setting (`parameters`, `reclaim_policy`, `volume_binding_mode`) is a 400,
+  because Kubernetes cannot change them in place.
+- `storage-class.manifests.ts` builds the StorageClass: provisioner `seaweedfs-csi-driver`, labels
+  `app.kubernetes.io/managed-by=acceleratio` and `acceleratio.io/storage-class-id`, and never the
+  default-class annotation. The service only patches or deletes objects that carry both labels.
+- `storage-class.status.ts` compares the row with the live object: `ready`, `missing`, `drifted`, or
+  `unknown` when the cluster is unreachable. Reads degrade to `unknown` instead of failing.
+- The platform class (`kind = 'platform'`) is read-only: update and delete return 403.
+- Delete counts PersistentVolumes and unbound claims of the class and returns 409 while any exist,
+  then deletes the row and the object in one transaction, so a database reference or a failed
+  cluster delete keeps both.
+- `SEAWEEDFS_NAMESPACE` (default `seaweedfs`) and `SEAWEEDFS_VOLUME_STATEFULSET` (default
+  `seaweedfs-volume`) locate the volume servers; `PLATFORM_STORAGE_CLASS_NAME` names the platform
+  class.
 
 ## Controllers
 

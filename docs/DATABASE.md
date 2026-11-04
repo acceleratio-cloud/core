@@ -103,6 +103,18 @@ erDiagram
         jsonb config
         uuid source_version_id FK
         timestamp created_at
+    }    storage_class {
+        uuid id PK
+        storage_class_kind kind
+        varchar name
+        text description
+        varchar external_name UK
+        jsonb parameters
+        storage_class_reclaim_policy reclaim_policy
+        storage_class_volume_binding_mode volume_binding_mode
+        boolean allow_volume_expansion
+        timestamp created_at
+        timestamp updated_at
     }
 ```
 
@@ -172,6 +184,34 @@ Invariants:
   `last_deployed_at`; workloads never deployed got that config as their draft (migration `0007`).
   Migration `0008` then dropped `workload.config`.
 
+### `storage_class`
+
+One row per SeaweedFS-backed Kubernetes StorageClass the console knows about. The row is the stable
+identity other resources reference; the StorageClass object in the cluster is what Kubernetes uses.
+
+Columns: `id`, `kind`, `name`, `description`, `external_name`, `parameters`, `reclaim_policy`,
+`volume_binding_mode`, `allow_volume_expansion`, `created_at`, `updated_at`.
+
+Invariants:
+
+- `kind` is `platform` for the installer's class and `custom` for classes created in the console. At
+  most one platform row exists (`storage_class_platform_unique`, a partial unique index). The API
+  inserts it idempotently on the first read, named after `PLATFORM_STORAGE_CLASS_NAME` (default
+  `seaweedfs-storage`). Its settings columns stay null: the installer owns the object, so its
+  settings are read from the cluster, and the API refuses to update or delete it.
+- `external_name` is the StorageClass name, unique, generated once as `sc-<slug>-<id prefix>` and
+  never changed.
+- `parameters` (the SeaweedFS CSI tuning: `replication`, `disk_type`, `collection`, `ttl`,
+  `cache_capacity_mb`, `concurrent_writers`, `chunk_size_limit_mb`, `writeback_cache`),
+  `reclaim_policy` and `volume_binding_mode` are written on create and never updated. Kubernetes
+  forbids changing them on an existing StorageClass, so the console duplicates a class instead.
+  `name`, `description` and `allow_volume_expansion` can change; the last one is patched on the live
+  object.
+- Resources that pick a class (volumes, buckets) reference it with
+  `storage_class_id uuid references storage_class(id) on delete restrict`. The restriction is the
+  database half of the delete guard; the API also refuses to delete a class that PersistentVolumes or
+  claims in the cluster still use.
+
 ### better-auth tables
 
 `user`, `session`, `account`, and `verification` are written by better-auth, not by application code.
@@ -186,6 +226,9 @@ library; do not repurpose them.
 | --- | --- | --- |
 | `workload_type` | `docker` | `workload.type` |
 | `workload_status` | `draft`, `deploying`, `running`, `stopped`, `failed` | `workload.status` |
+| `storage_class_kind` | `platform`, `custom` | `storage_class.kind` |
+| `storage_class_reclaim_policy` | `Delete`, `Retain` | `storage_class.reclaim_policy` |
+| `storage_class_volume_binding_mode` | `Immediate`, `WaitForFirstConsumer` | `storage_class.volume_binding_mode` |
 
 Enum values are part of the database contract. Add a value with a migration; never reorder or remove
 one that has shipped.

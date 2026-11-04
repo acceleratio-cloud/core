@@ -64,6 +64,13 @@
       "when": 1793732569378,
       "tag": "0008_drop_workload_config",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1793787367327,
+      "tag": "0009_storage_classes",
+      "breakpoints": true
     }
   ]
 }
