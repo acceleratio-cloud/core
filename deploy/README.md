@@ -44,7 +44,8 @@ deployment step has been checked with `--dry-run` and manifest validation only.
 - ports `30300/tcp` (console) and `30080/tcp` (API) reachable from the browsers
   that will use the dashboard
 - ports `6443/tcp`, `80/tcp`, `443/tcp` free; `8472/udp` between nodes if the
-  cluster is expanded later
+  cluster is expanded later. Open `80/tcp` and `443/tcp` to the internet to use
+  a [custom domain](#custom-domain)
 - swap disabled (or `ALLOW_SWAP=1` if you accept the kubelet risk)
 
 OpenVZ/LXC hosts often do not expose `/dev/fuse`; the installer stops
@@ -128,7 +129,10 @@ log is also linked as `/var/log/acceleratio/install.log`.
    API and the console to become ready. The console and API are published on
    node ports `30300` and `30080`. The API runs with a ServiceAccount bound to
    `cluster-admin`, because it creates namespaces, workloads, volumes and
-   network policies for projects.
+   network policies for projects. Before that, it configures the Traefik
+   bundled with k3s with a Let's Encrypt certificate resolver through
+   `/etc/acceleratio/manifests/traefik-config.yaml` (see
+   [Custom domain](#custom-domain)).
 
 The installer is idempotent: a second run updates configuration and Helm
 releases instead of recreating the cluster.
@@ -171,6 +175,7 @@ Every variable can be set in the environment or in a file passed to
 | `ACCELERATIO_PUBLIC_HOST` | public IPv4 | host name or IP used in the dashboard URLs |
 | `ACCELERATIO_CONSOLE_URL` | `http://<host>:30300` | full console URL, e.g. behind a domain or reverse proxy |
 | `ACCELERATIO_API_URL` | `http://<host>:30080` | full API URL; the browser must reach it |
+| `ACCELERATIO_ACME_EMAIL` | empty | optional Let's Encrypt contact address for a custom domain |
 | `CONFIG_DIR` | `/etc/acceleratio` | generated values, kubeconfig, secrets and S3 credentials |
 | `LOG_DIR` | `/var/log/acceleratio` | installer logs |
 | `ALLOW_SWAP` | `0` | set to `1` to continue with active swap |
@@ -275,6 +280,33 @@ ACCELERATIO_API_URL=https://api.example.com \
 Re-running with different URLs updates the deployments. Keep the console and
 the API on the same registrable domain so the session cookie is sent to the
 API.
+
+## Custom domain
+
+The console can move the dashboard to your own domain with an automatic
+Let's Encrypt certificate:
+
+1. Create a DNS `A` record for the domain (for example `cloud.example.com`)
+   pointing to the server's public IPv4. The console shows the address it
+   expects.
+2. Open `80/tcp` and `443/tcp` to the internet. Let's Encrypt validates the
+   domain over HTTP on port 80 (HTTP-01), and the dashboard is served on 443.
+3. In the console, open **Settings → System**, enter the new URL, wait for the
+   DNS check to pass and apply the change.
+
+The console is then served at `https://<domain>` and the API at
+`https://<domain>/api`, both through the Traefik bundled with k3s. The old
+`http://<server-ip>:30300` and `:30080` URLs keep working as a fallback.
+
+To get certificate expiry notices, set `ACCELERATIO_ACME_EMAIL` before
+running the installer. Traefik keeps its ACME account and certificates in
+`/var/lib/acceleratio/traefik` on the server.
+
+Installs made before this feature must re-run the installer once
+(`sudo ./deploy/install.sh`) so it adds the Traefik certificate resolver and
+passes the server IP to the API; the console refuses to apply a domain until
+then. The installer replaces the `kube-system/traefik` HelmChartConfig; if you
+had your own, it saves a copy next to the manifest first.
 
 ## Database
 
@@ -407,8 +439,9 @@ sudo k3s kubectl -n seaweedfs get ds
   volume servers.
 - SeaweedFS S3 is in-cluster only and has no TLS termination from this
   installer.
-- The console and API are published on plain HTTP node ports. For TLS, put a
-  reverse proxy in front and pass its URLs as `ACCELERATIO_CONSOLE_URL` and
+- The console and API are published on plain HTTP node ports. For TLS, set a
+  [custom domain](#custom-domain) in the console, or put a reverse proxy in
+  front and pass its URLs as `ACCELERATIO_CONSOLE_URL` and
   `ACCELERATIO_API_URL`.
 - PostgreSQL is a single instance on a hostPath, without replication or
   automatic backups.

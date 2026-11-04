@@ -6,7 +6,7 @@ import {
   formatAbsoluteTime,
   formatRelativeTime,
 } from '@/modules/workloads/utils/format-time';
-import { CopyButton } from './copy-button';
+import { CopyButton } from '@/shared/components/copy-button';
 
 /** Vertical rhythm between the sections of one tab. */
 export const DetailStack = ({

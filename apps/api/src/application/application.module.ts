@@ -10,6 +10,10 @@ import { StorageBenchmarkController } from '@/application/storage-class/benchmar
 import { StorageBenchmarkService } from '@/application/storage-class/benchmark/storage-benchmark.service';
 import { StorageClassController } from '@/application/storage-class/storage-class.controller';
 import { StorageClassService } from '@/application/storage-class/storage-class.service';
+import { ControlPlaneDnsService } from '@/application/system/control-plane-dns.service';
+import { ControlPlaneRoutingService } from '@/application/system/control-plane-routing.service';
+import { SystemController } from '@/application/system/system.controller';
+import { SystemService } from '@/application/system/system.service';
 import { DockerWorkloadStatusDeriver } from '@/application/workload/docker/docker-workload.deriver';
 import { DockerWorkloadService } from '@/application/workload/docker/docker-workload.service';
 import { S3BucketObjectsController } from '@/application/workload/s3-bucket/s3-bucket-objects.controller';
@@ -43,6 +47,7 @@ import { SeaweedfsFilerClient } from '@/vendor/seaweedfs/seaweedfs-filer.client'
     ProjectController,
     StorageClassController,
     StorageBenchmarkController,
+    SystemController,
     WorkloadController,
     S3BucketObjectsController,
   ],
@@ -52,6 +57,9 @@ import { SeaweedfsFilerClient } from '@/vendor/seaweedfs/seaweedfs-filer.client'
     ProjectIsolationService,
     StorageClassService,
     StorageBenchmarkService,
+    ControlPlaneDnsService,
+    ControlPlaneRoutingService,
+    SystemService,
     DockerWorkloadStatusDeriver,
     DockerWorkloadService,
     S3BucketWorkloadService,

@@ -254,6 +254,18 @@ index `storage_benchmark_active_unique` allows only one `pending` or
 `running` row, so one benchmark runs across the cluster at a time. The newest 200 finished runs are
 kept; older ones are pruned when a run finishes.
 
+### `system_setting`
+
+Installation-wide settings in a single row: the primary key `id` defaults to `1`, and the check
+`system_setting_singleton` keeps it there. The row is created on first write. `control_plane_url`
+is the applied root URL (`https://host`) that the console is served at through Traefik; it is null
+until someone changes it, and the installer's IP:NodePort address keeps working either way. A change
+in progress lives in `pending_control_plane_url` with `pending_status` going `awaiting_dns` →
+`provisioning` → promoted into `control_plane_url` (pending columns cleared), or `failed` with
+`pending_error`. `pending_applied_at` is when `provisioning` started and bounds the wait for the
+HTTPS certificate to ten minutes. The URL lives in the database rather than the installer's
+environment so a re-run of the installer does not undo it.
+
 ### better-auth tables
 
 `user`, `session`, `account`, and `verification` are written by better-auth, not by application code.
@@ -272,6 +284,7 @@ library; do not repurpose them.
 | `storage_class_reclaim_policy` | `Delete`, `Retain` | `storage_class.reclaim_policy` |
 | `storage_benchmark_status` | `pending`, `running`, `succeeded`, `failed` | `storage_benchmark.status` |
 | `storage_class_volume_binding_mode` | `Immediate`, `WaitForFirstConsumer` | `storage_class.volume_binding_mode` |
+| `control_plane_change_status` | `awaiting_dns`, `provisioning`, `failed` | `system_setting.pending_status` |
 
 Enum values are part of the database contract. Add a value with a migration; never reorder or remove
 one that has shipped.

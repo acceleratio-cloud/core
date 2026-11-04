@@ -66,6 +66,11 @@ ACCELERATIO_API_NODE_PORT="${ACCELERATIO_API_NODE_PORT:-30080}"
 ACCELERATIO_PUBLIC_HOST="${ACCELERATIO_PUBLIC_HOST:-}"
 ACCELERATIO_CONSOLE_URL="${ACCELERATIO_CONSOLE_URL:-}"
 ACCELERATIO_API_URL="${ACCELERATIO_API_URL:-}"
+# Optional contact address for Let's Encrypt certificates issued for a custom
+# domain set in Console -> Settings -> System. Empty registers without one.
+ACCELERATIO_ACME_EMAIL="${ACCELERATIO_ACME_EMAIL:-}"
+# Traefik keeps its ACME account and certificates here (hostPath on the node).
+TRAEFIK_DATA_DIR="${TRAEFIK_DATA_DIR:-${ACCELERATIO_DATA_DIR}/traefik}"
 
 CONFIG_DIR="${CONFIG_DIR:-/etc/acceleratio}"
 LOG_DIR="${LOG_DIR:-/var/log/acceleratio}"
@@ -249,6 +254,7 @@ Common variables (environment or --config):
   ACCELERATIO_PUBLIC_HOST     default public IPv4; host used in the URLs
   ACCELERATIO_CONSOLE_URL     default http://<host>:<console port>
   ACCELERATIO_API_URL         default http://<host>:<api port>
+  ACCELERATIO_ACME_EMAIL      default empty; Let's Encrypt contact for custom domains
   CONFIG_DIR                  default /etc/acceleratio
   LOG_DIR                     default /var/log/acceleratio
   ALLOW_SWAP                  default 0 (kubelet requires swap off)
@@ -1565,6 +1571,9 @@ spec:
               value: "${SEAWEEDFS_NAMESPACE}"
             - name: PLATFORM_STORAGE_CLASS_NAME
               value: "${STORAGE_CLASS_NAME}"
+            # Shown in the DNS instructions when an admin sets a custom domain.
+            - name: ACCELERATIO_PUBLIC_IP
+              value: "${K3S_PUBLIC_IP}"
           readinessProbe:
             httpGet:
               path: /healthz
@@ -1670,6 +1679,95 @@ spec:
       targetPort: http
       nodePort: ${ACCELERATIO_CONSOLE_NODE_PORT}
 EOF
+}
+
+# ---------------------------------------------------------------------------
+# Traefik (bundled with k3s): Let's Encrypt for custom domains.
+# ---------------------------------------------------------------------------
+
+# Traefik runs as this user and group in the k3s chart (podSecurityContext).
+readonly TRAEFIK_UID=65532
+
+validate_acme_email() {
+  [ -n "$ACCELERATIO_ACME_EMAIL" ] || return 0
+  if [[ ! $ACCELERATIO_ACME_EMAIL =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]]; then
+    die "ACCELERATIO_ACME_EMAIL is not a valid email address: ${ACCELERATIO_ACME_EMAIL}"
+  fi
+}
+
+write_traefik_config() {
+  local acme_email=""
+
+  if [ -n "$ACCELERATIO_ACME_EMAIL" ]; then
+    acme_email="
+          email: \"${ACCELERATIO_ACME_EMAIL}\""
+  fi
+
+  TRAEFIK_CONFIG_MANIFEST="${CONFIG_DIR}/manifests/traefik-config.yaml"
+  # k3s merges valuesContent into its bundled Traefik chart and redeploys it.
+  # The API checks that this object exists before it applies a custom domain.
+  write_file "$TRAEFIK_CONFIG_MANIFEST" 0644 <<EOF
+# ${MANAGED_BY} - manual edits will be overwritten.
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/part-of: acceleratio
+spec:
+  valuesContent: |-
+    # IngressRoutes for a custom domain request certificates from this
+    # resolver with tls.certResolver: letsencrypt.
+    certificatesResolvers:
+      letsencrypt:
+        acme:${acme_email}
+          storage: /data/acme.json
+          httpChallenge:
+            entryPoint: web
+    # The chart always mounts its own emptyDir volume; move it aside so /data
+    # is the hostPath below and certificates survive pod restarts.
+    persistence:
+      path: /chart-data
+    deployment:
+      additionalVolumes:
+        - name: acme
+          hostPath:
+            path: ${TRAEFIK_DATA_DIR}
+            type: Directory
+    additionalVolumeMounts:
+      - name: acme
+        mountPath: /data
+EOF
+}
+
+configure_traefik() {
+  local owner
+
+  validate_acme_email
+  if (( DRY_RUN )); then
+    log_info "DRY-RUN: would create ${TRAEFIK_DATA_DIR} and configure the Traefik letsencrypt certificate resolver"
+    return 0
+  fi
+
+  log_info "Configuring Traefik for custom domains (Let's Encrypt)"
+  install -d -m 0700 -o "$TRAEFIK_UID" -g "$TRAEFIK_UID" "$TRAEFIK_DATA_DIR"
+  # install -d leaves an existing directory's owner and mode alone.
+  chown "${TRAEFIK_UID}:${TRAEFIK_UID}" "$TRAEFIK_DATA_DIR"
+  chmod 0700 "$TRAEFIK_DATA_DIR"
+
+  owner="$(k3s kubectl -n kube-system get helmchartconfig traefik \
+    -o jsonpath='{.metadata.labels.app\.kubernetes\.io/part-of}' 2>/dev/null || true)"
+  if k3s kubectl -n kube-system get helmchartconfig traefik >/dev/null 2>&1 && [ "$owner" != "acceleratio" ]; then
+    log_warn "Replacing the existing kube-system/traefik HelmChartConfig (a backup is in ${CONFIG_DIR}/manifests)."
+    install -d -m 0755 "${CONFIG_DIR}/manifests"
+    k3s kubectl -n kube-system get helmchartconfig traefik -o yaml \
+      >"${CONFIG_DIR}/manifests/traefik-config.yaml.bak.$(date +%s)"
+  fi
+
+  write_traefik_config
+  k3s kubectl apply -f "$TRAEFIK_CONFIG_MANIFEST"
+  log_ok "Traefik certificate resolver letsencrypt configured (k3s redeploys Traefik in the background)"
 }
 
 wait_for_http() {
@@ -1838,6 +1936,7 @@ main() {
   install_csi
   verify_installation
   resolve_acceleratio_urls
+  configure_traefik
   install_acceleratio
   print_summary
 }

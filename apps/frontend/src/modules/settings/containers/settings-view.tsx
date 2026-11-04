@@ -2,10 +2,10 @@ import { SettingsNav } from '../components/settings-nav';
 import { DEFAULT_SETTINGS_SECTION, type SettingsSectionId } from '../sections';
 import { ProfileSettings } from './profile-settings';
 import { StoragePanel } from './storage-panel';
-import { SystemSettings } from './system-settings';
+import { SystemPanel } from './system-panel';
 
 const PANELS = {
-  system: SystemSettings,
+  system: SystemPanel,
   storage: StoragePanel,
   profile: ProfileSettings,
 };

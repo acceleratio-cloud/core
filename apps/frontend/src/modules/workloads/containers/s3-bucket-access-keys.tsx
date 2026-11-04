@@ -8,7 +8,7 @@ import { getApiErrorMessage } from '@/api';
 import { workloadsApi } from '@/api/workloads';
 import { s3BucketObjectsApi } from '@/api/workloads/s3-bucket-objects';
 import { useProject } from '@/modules/projects/providers/project-provider';
-import { CopyButton } from '@/modules/workloads/components/workload-details/copy-button';
+import { CopyButton } from '@/shared/components/copy-button';
 import {
   CopyableProperty,
   DetailSection,

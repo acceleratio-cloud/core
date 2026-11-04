@@ -31,7 +31,7 @@ export const SystemSettings = () => {
     <SettingsSection
       id="system"
       title="System"
-      description="Identify the control plane and choose how updates are delivered."
+      description="Name the cluster and choose how updates are delivered."
     >
       <form onSubmit={handleSubmit} onChange={() => setSaved(false)}>
         <FieldGroup>
@@ -70,18 +70,6 @@ export const SystemSettings = () => {
               </Select>
             </Field>
           </div>
-
-          <Field>
-            <FieldLabel htmlFor="system-control-plane-url">
-              Control plane URL
-            </FieldLabel>
-            <Input
-              id="system-control-plane-url"
-              name="control_plane_url"
-              defaultValue="https://console.acceleratio.local"
-              autoComplete="url"
-            />
-          </Field>
         </FieldGroup>
 
         <SettingsActions saved={saved} />

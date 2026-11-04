@@ -99,6 +99,13 @@
       "when": 1793798524508,
       "tag": "0013_s3_buckets",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1793807726781,
+      "tag": "0014_system_settings",
+      "breakpoints": true
     }
   ]
 }

@@ -9,7 +9,7 @@ import { storageClassesApi } from '@/api/storage-classes';
 import { workloadsApi } from '@/api/workloads';
 import { describeStorageProfile } from '@/modules/workloads/utils/s3-bucket';
 import { Button } from '@/shared/components/ui/button';
-import { CopyButton } from './copy-button';
+import { CopyButton } from '@/shared/components/copy-button';
 import {
   CopyableProperty,
   DetailSection,
