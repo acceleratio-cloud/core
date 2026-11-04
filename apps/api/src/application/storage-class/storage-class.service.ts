@@ -12,10 +12,11 @@ import type {
   CreateStorageClassPayload,
   StorageBenchmark,
   StorageClass,
+  StorageClassParameters,
   StorageEnvironment,
   UpdateStorageClassPayload,
 } from '@acceleratio/shared';
-import { asc, desc, eq, sql } from 'drizzle-orm';
+import { and, asc, count as countRows, desc, eq, sql } from 'drizzle-orm';
 import {
   CONFLICT_ID_PREFIX_LENGTH,
   storageClassExternalName,
@@ -27,6 +28,7 @@ import {
   toNestException,
 } from '@/vendor/kubernetes/kubernetes-error';
 import { KubernetesService } from '@/vendor/kubernetes/kubernetes.service';
+import { workload } from '@/application/workload/schemas/workload.schema';
 import { toStorageBenchmark } from './benchmark/storage-benchmark.results';
 import { storageBenchmark } from './schemas/storage-benchmark.schema';
 import {
@@ -172,6 +174,41 @@ export class StorageClassService {
     return this.present(row, cluster, benchmarks.get(row.id) ?? null);
   }
 
+  /**
+   * The profile an S3 bucket is created on: the given one, or the platform
+   * profile when none is chosen. Parameters of the platform profile come from
+   * the cluster; when it cannot be read, SeaweedFS defaults apply.
+   */
+  async resolveForBucket(id: string | null): Promise<{
+    id: string;
+    name: string;
+    parameters: StorageClassParameters;
+  }> {
+    await this.ensurePlatformRow();
+
+    const [row] = await this.db
+      .select({ id: storageClass.id })
+      .from(storageClass)
+      .where(
+        id === null
+          ? eq(storageClass.kind, 'platform')
+          : eq(storageClass.id, id),
+      )
+      .limit(1);
+
+    if (!row) {
+      throw new NotFoundException(NOT_FOUND_MESSAGE);
+    }
+
+    const profile = await this.get(row.id);
+
+    return {
+      id: profile.id,
+      name: profile.name,
+      parameters: profile.parameters ?? fromDriverParameters({}).parameters,
+    };
+  }
+
   async create(payload: CreateStorageClassPayload): Promise<StorageClass> {
     const input = normalizeCreatePayload(payload);
     // Generated here so external_name is known before the single insert.
@@ -258,6 +295,14 @@ export class StorageClassService {
 
     if (row.kind === 'platform') {
       throw new ForbiddenException(PLATFORM_FORBIDDEN_MESSAGE);
+    }
+
+    const buckets = await this.countBuckets(row.id);
+
+    if (buckets > 0) {
+      throw new ConflictException(
+        `Storage class is used by ${plural(buckets, 'S3 bucket')}. Delete them first.`,
+      );
     }
 
     const volumes = await this.countVolumes(row.external_name);
@@ -473,6 +518,17 @@ export class StorageClassService {
    * PersistentVolumes of the class plus claims that have no such volume yet
    * (pending, or bound to a volume of another class).
    */
+  private async countBuckets(id: string): Promise<number> {
+    const [result] = await this.db
+      .select({ value: countRows() })
+      .from(workload)
+      .where(
+        and(eq(workload.storage_class_id, id), eq(workload.type, 's3_bucket')),
+      );
+
+    return result?.value ?? 0;
+  }
+
   private async countVolumes(name: string): Promise<number> {
     try {
       const [volumes, claims] = await Promise.all([

@@ -45,6 +45,7 @@ const createRow = (overrides: Partial<WorkloadRow> = {}): WorkloadRow => ({
   draft_config: { docker_image: 'nginx:1.25' },
   position: { x: 0, y: 0 },
   external_name: externalName,
+  storage_class_id: null,
   status: 'deploying',
   status_message: null,
   status_observed_at: null,
@@ -866,10 +867,13 @@ describe('WorkloadStatusWriter.write', () => {
     expect(events.publish).not.toHaveBeenCalled();
   });
 
-  it('skips a workload type without a deriver', async () => {
+  it('quietly skips a workload type that owns its status', async () => {
     const { writer, database, snapshot, events } = createWriter({
       deriver: null,
     });
+    const debug = jest
+      .spyOn(Logger.prototype, 'debug')
+      .mockImplementation(() => undefined);
     const warn = jest
       .spyOn(Logger.prototype, 'warn')
       .mockImplementation(() => undefined);
@@ -885,7 +889,8 @@ describe('WorkloadStatusWriter.write', () => {
 
     expect(database.update).not.toHaveBeenCalled();
     expect(events.publish).not.toHaveBeenCalled();
-    expect(warn).toHaveBeenCalledTimes(1);
+    expect(debug).toHaveBeenCalledTimes(1);
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it('skips the write when a user action lands during the namespace probe', async () => {

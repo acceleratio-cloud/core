@@ -14,17 +14,18 @@ import {
  * fields, so a type view composes them next to its own sections.
  */
 
-export const WorkloadFailureNotice = ({ workload }: { workload: Workload }) => {
+export const WorkloadFailureNotice = ({
+  workload,
+  title = 'Deployment failed',
+}: {
+  workload: Workload;
+  title?: string;
+}) => {
   if (workload.status !== 'failed' || !workload.status_message) {
     return null;
   }
 
-  return (
-    <DetailNotice
-      title="Deployment failed"
-      message={workload.status_message}
-    />
-  );
+  return <DetailNotice title={title} message={workload.status_message} />;
 };
 
 export const WorkloadDeploymentSection = ({
@@ -39,7 +40,10 @@ export const WorkloadDeploymentSection = ({
         value={workload.last_deployed_at}
         emptyLabel="Never"
       />
-      <TimeProperty label="Status checked" value={workload.status_observed_at} />
+      <TimeProperty
+        label="Status checked"
+        value={workload.status_observed_at}
+      />
       <TimeProperty label="Last updated" value={workload.updated_at} />
       <TimeProperty label="Created" value={workload.created_at} />
     </PropertyList>

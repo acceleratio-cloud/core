@@ -69,7 +69,9 @@ export const getDockerDetailView = (
       icon: History,
       content: (
         <WorkloadVersions
-          renderConfig={(config) => {
+          renderConfig={(versionConfig) => {
+            // Versions of a Docker service hold Docker configs.
+            const config = versionConfig as DockerWorkloadConfig;
             const summary = configSummary(config);
 
             return (

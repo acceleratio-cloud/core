@@ -15,6 +15,7 @@ import {
 import type { MessageEvent } from '@nestjs/common';
 import type {
   CreateWorkloadPayload,
+  S3BucketCredentials,
   UpdateWorkloadPayload,
   Workload,
   WorkloadVersion,
@@ -62,6 +63,24 @@ export class WorkloadController {
     @Body() body: CreateWorkloadPayload,
   ): Promise<Workload> {
     return this.workloadService.create(projectId, body);
+  }
+
+  @Get(':id/credentials')
+  @Header('Cache-Control', 'no-store')
+  credentials(
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<S3BucketCredentials> {
+    return this.workloadService.credentials(projectId, id);
+  }
+
+  @Post(':id/credentials/rotate')
+  @Header('Cache-Control', 'no-store')
+  rotateCredentials(
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<S3BucketCredentials> {
+    return this.workloadService.rotateCredentials(projectId, id);
   }
 
   @Post(':id/deploy')

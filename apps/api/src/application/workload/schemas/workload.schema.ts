@@ -9,13 +9,18 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
   varchar,
 } from 'drizzle-orm/pg-core';
 import { project } from '../../project/schemas/project.schema';
+import { storageClass } from '../../storage-class/schemas/storage-class.schema';
 import { workloadVersion } from './workload-version.schema';
 
-export const workloadTypeEnum = pgEnum('workload_type', ['docker']);
+export const workloadTypeEnum = pgEnum('workload_type', [
+  'docker',
+  's3_bucket',
+]);
 
 export const workloadStatusEnum = pgEnum('workload_status', [
   'draft',
@@ -49,6 +54,12 @@ export const workload = pgTable(
       .default({ x: 0, y: 0 }),
     // Deployment name in the cluster. Generated once on create.
     external_name: varchar('external_name', { length: 63 }).notNull(),
+    // Storage profile of an `s3_bucket` workload; null for other types. A
+    // profile cannot be deleted while a bucket uses it.
+    storage_class_id: uuid('storage_class_id').references(
+      () => storageClass.id,
+      { onDelete: 'restrict' },
+    ),
     status: workloadStatusEnum('status').notNull().default('draft'),
     status_message: text('status_message'),
     // When the observer last derived the stored status from the cluster.
@@ -72,6 +83,15 @@ export const workload = pgTable(
       table.project_id,
       table.external_name,
     ),
+    // SeaweedFS has one bucket namespace for the whole cluster, so a bucket
+    // name is unique across projects, not only within one. Only buckets set
+    // `storage_class_id`, and the predicate says so instead of naming the
+    // `s3_bucket` enum value: PostgreSQL cannot use an enum value in the
+    // transaction that adds it, and casting the enum to text is not
+    // immutable, which an index predicate requires.
+    uniqueIndex('workload_s3_bucket_name_unique')
+      .on(table.external_name)
+      .where(sql`${table.storage_class_id} is not null`),
   ],
 );
 

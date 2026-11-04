@@ -174,8 +174,9 @@ kube() {
 
 # Mirrors install_seaweedfs/install_csi in deploy/install.sh with local
 # settings: data lives on hostPath inside the k3d node container (it goes away
-# with the cluster), S3 is off, and the charts come from --repo so the user's
-# Helm repository list is left alone.
+# with the cluster), and the charts come from --repo so the user's Helm
+# repository list is left alone. S3 runs with auth on, as on a server, so
+# S3 bucket services can be created locally.
 install_seaweedfs() {
   local node="k3d-${CLUSTER_NAME}-server-0"
   local sc
@@ -218,7 +219,11 @@ filer:
     type: hostPath
     hostPathPrefix: /var/lib/seaweedfs
   s3:
-    enabled: false
+    enabled: true
+    enableAuth: true
+    # The chart leaves httpsPort as a truthy "0" and then renders an invalid
+    # service port. An explicit integer 0 makes the chart omit the TLS port.
+    httpsPort: 0
 EOF_VALUES
 
   log "Installing SeaweedFS CSI ${SEAWEEDFS_CSI_CHART_VERSION}"

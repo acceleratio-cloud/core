@@ -32,6 +32,7 @@ import {
   getKubernetesStatusCode,
   toNestException,
 } from '@/vendor/kubernetes/kubernetes-error';
+import { jobOutcome } from '@/vendor/kubernetes/job-outcome';
 import { KubernetesService } from '@/vendor/kubernetes/kubernetes.service';
 import {
   storageBenchmark,
@@ -119,26 +120,6 @@ const ignoreNotFound = async (run: () => Promise<unknown>): Promise<void> => {
       throw error;
     }
   }
-};
-
-type JobOutcome = 'running' | 'succeeded' | 'failed';
-
-export const jobOutcome = (job: V1Job): JobOutcome => {
-  const conditions = job.status?.conditions ?? [];
-  const has = (type: string) =>
-    conditions.some(
-      (condition) => condition.type === type && condition.status === 'True',
-    );
-
-  if ((job.status?.succeeded ?? 0) > 0 || has('Complete')) {
-    return 'succeeded';
-  }
-
-  if ((job.status?.failed ?? 0) > 0 || has('Failed')) {
-    return 'failed';
-  }
-
-  return 'running';
 };
 
 /**

@@ -145,6 +145,19 @@ describe('ProjectIsolationService.ensure', () => {
             },
           ],
         },
+        // Only the SeaweedFS S3 port, for project workloads using buckets.
+        {
+          toEndpoints: [
+            {
+              matchLabels: {
+                'k8s:io.kubernetes.pod.namespace': 'seaweedfs',
+                'app.kubernetes.io/name': 'seaweedfs',
+                'app.kubernetes.io/component': 'filer',
+              },
+            },
+          ],
+          toPorts: [{ ports: [{ port: '8333', protocol: 'TCP' }] }],
+        },
         { toEntities: ['world'] },
       ],
     });

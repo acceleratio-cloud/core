@@ -58,6 +58,7 @@ const baseRow: WorkloadRow = {
   draft_config: null,
   position: { x: 0, y: 0 },
   external_name: externalName,
+  storage_class_id: null,
   status: 'running',
   status_message: null,
   status_observed_at: null,

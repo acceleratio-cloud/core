@@ -45,6 +45,10 @@ import {
 import type { WorkloadVersionRow } from '@/application/workload/schemas/workload-version.schema';
 import type { WorkloadTypeService } from '@/application/workload/workload-type-service';
 import {
+  nextWorkloadPosition,
+  normalizeWorkloadPosition,
+} from '@/application/workload/workload-position';
+import {
   sameConfig,
   toWorkloadVersion,
   WorkloadVersionService,
@@ -59,9 +63,6 @@ import {
   type WorkloadManifestInput,
 } from './docker-workload.manifests';
 
-const POSITION_COLUMNS = 4;
-const POSITION_STEP_X = 320;
-const POSITION_STEP_Y = 300;
 const UNIQUE_VIOLATION = '23505';
 const EXTERNAL_NAME_CONSTRAINT = 'workload_project_id_external_name_unique';
 const NOT_DEPLOYED_MESSAGE = 'Workload is not deployed yet';
@@ -125,15 +126,6 @@ const isExternalNameConflict = (error: unknown): boolean => {
 
 const describeError = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
-
-/** Default canvas layout: a four-column grid with room between the cards. */
-const gridPosition = (index: number): WorkloadPosition => ({
-  x: (index % POSITION_COLUMNS) * POSITION_STEP_X,
-  y: Math.floor(index / POSITION_COLUMNS) * POSITION_STEP_Y,
-});
-
-const positionKey = (position: WorkloadPosition): string =>
-  `${position.x}:${position.y}`;
 
 /**
  * Complete Docker workload type: rows, external names, manifests, Deployment
@@ -202,7 +194,7 @@ export class DockerWorkloadService implements WorkloadTypeService {
 
     const name = normalizeName(payload?.name);
     const config = newDockerConfig(payload?.config);
-    const position = await this.nextPosition(projectId);
+    const position = await nextWorkloadPosition(this.db, projectId);
     // The id is generated here rather than by the database so external_name can
     // be computed before the single insert statement.
     const id = randomUUID();
@@ -286,7 +278,7 @@ export class DockerWorkloadService implements WorkloadTypeService {
     }
 
     if (payload?.position !== undefined) {
-      const position = this.normalizePosition(payload.position);
+      const position = normalizeWorkloadPosition(payload.position);
 
       // A drop that lands on the stored coordinates is a no-op: do not bump
       // `updated_at` or wake every other canvas with an identical event.
@@ -742,43 +734,6 @@ export class DockerWorkloadService implements WorkloadTypeService {
     }
 
     return row;
-  }
-
-  /**
-   * First free slot on the project canvas. The query is deliberately
-   * project-wide instead of type-scoped: every workload type shares one
-   * canvas, so their default positions must not overlap.
-   */
-  private async nextPosition(projectId: string): Promise<WorkloadPosition> {
-    const rows = await this.db
-      .select({ position: workload.position })
-      .from(workload)
-      .where(eq(workload.project_id, projectId));
-    const occupied = new Set(rows.map((row) => positionKey(row.position)));
-    let index = 0;
-
-    while (occupied.has(positionKey(gridPosition(index)))) {
-      index += 1;
-    }
-
-    return gridPosition(index);
-  }
-
-  private normalizePosition(position: unknown): WorkloadPosition {
-    const candidate = position as Partial<WorkloadPosition> | null | undefined;
-    const x = candidate?.x;
-    const y = candidate?.y;
-
-    if (
-      typeof x !== 'number' ||
-      !Number.isFinite(x) ||
-      typeof y !== 'number' ||
-      !Number.isFinite(y)
-    ) {
-      throw new BadRequestException('position must contain numeric x and y');
-    }
-
-    return { x, y };
   }
 
   private async activeVersion(
