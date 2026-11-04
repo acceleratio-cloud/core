@@ -27,7 +27,7 @@ import { Input } from '@/shared/components/ui/input';
 import { Skeleton } from '@/shared/components/ui/skeleton';
 import { ControlPlaneDnsRecord } from '../components/control-plane-dns-record';
 import { SettingsSection } from '../components/settings-section';
-import { toComparableUrl } from '../utils/control-plane-url';
+import { toComparableUrl, toDomain } from '../utils/control-plane-url';
 import { ControlPlaneApplyDialog } from './control-plane-apply-dialog';
 
 /** How often the change is re-read while the certificate is issued. */
@@ -82,12 +82,7 @@ export const ControlPlaneUrlSettings = () => {
         }
 
         setSettings(loaded);
-        setDraft(
-          loaded.pending?.url ??
-            loaded.current_url ??
-            loaded.fallback_url ??
-            '',
-        );
+        setDraft(toDomain(loaded.pending?.url ?? loaded.current_url));
 
         if (loaded.pending && loaded.pending.status !== 'provisioning') {
           void checkDns();
@@ -152,7 +147,7 @@ export const ControlPlaneUrlSettings = () => {
       setSettings(next);
       setDns(next.pending?.dns ?? null);
       if (next.pending) {
-        setDraft(next.pending.url);
+        setDraft(toDomain(next.pending.url));
       }
     } catch (continueError) {
       setError(getApiErrorMessage(continueError));
@@ -169,7 +164,7 @@ export const ControlPlaneUrlSettings = () => {
       const next = await systemApi.cancelPending();
       setSettings(next);
       setDns(null);
-      setDraft(next.current_url ?? next.fallback_url ?? '');
+      setDraft(toDomain(next.current_url));
     } catch (cancelError) {
       setError(getApiErrorMessage(cancelError));
     } finally {
@@ -216,9 +211,10 @@ export const ControlPlaneUrlSettings = () => {
               name="control_plane_url"
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
-              placeholder="https://cloud.example.com"
-              autoComplete="url"
+              placeholder="cloud.example.com"
+              autoComplete="off"
               inputMode="url"
+              autoCapitalize="none"
               spellCheck={false}
               disabled={isProvisioning}
               aria-invalid={error ? true : undefined}

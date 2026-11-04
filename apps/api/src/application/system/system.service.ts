@@ -10,7 +10,7 @@ import type {
   ControlPlaneSettings,
   SetControlPlaneUrlPayload,
 } from '@acceleratio/shared';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import {
   getConfiguredOrigins,
   setControlPlaneOrigin,
@@ -224,7 +224,15 @@ export class SystemService implements OnModuleInit {
     const [row] = await this.db
       .insert(systemSetting)
       .values({ id: SETTINGS_ID, ...patch })
-      .onConflictDoUpdate({ target: systemSetting.id, set: patch })
+      .onConflictDoUpdate({
+        target: systemSetting.id,
+        // Qualified: a bare `updated_at` is ambiguous with EXCLUDED here, so
+        // the schema's $onUpdate default cannot be used in an upsert.
+        set: {
+          ...patch,
+          updated_at: sql`greatest(now()::timestamp, ${systemSetting.updated_at} + interval '1 microsecond')`,
+        },
+      })
       .returning();
     return row;
   }

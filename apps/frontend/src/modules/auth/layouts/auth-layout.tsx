@@ -36,7 +36,7 @@ export const AuthLayout = ({ children }: { children: ReactNode }) => {
             {children}
           </div>
         </main>
-        <div className="absolute bottom-0 left-0 right-0 z-10 self-end p-6 text-white sm:p-8">
+        <div className="relative z-10 self-end p-6 text-white sm:p-8">
           <p className="max-w-2xl text-lg leading-relaxed font-normal tracking-[-0.03em] text-white/75 sm:text-[clamp(2rem,2.8vw,3rem)] sm:leading-[1.15] sm:font-medium sm:text-white">
             <span className="block">Your cloud.</span>
             <span className="block sm:text-white/90">Your data. Your control.</span>
