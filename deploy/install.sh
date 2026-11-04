@@ -59,7 +59,7 @@ VICTORIAMETRICS_DATA_DIR="${VICTORIAMETRICS_DATA_DIR:-/var/lib/victoria-metrics}
 VICTORIAMETRICS_RETENTION="${VICTORIAMETRICS_RETENTION:-14d}"
 
 ACCELERATIO_NAMESPACE="${ACCELERATIO_NAMESPACE:-acceleratio}"
-ACCELERATIO_VERSION="${ACCELERATIO_VERSION:-0.1.0}"
+ACCELERATIO_VERSION="${ACCELERATIO_VERSION:-0.1.1}"
 ACCELERATIO_API_IMAGE="${ACCELERATIO_API_IMAGE:-orazbayev/acceleratio-api:${ACCELERATIO_VERSION}}"
 ACCELERATIO_CONSOLE_IMAGE="${ACCELERATIO_CONSOLE_IMAGE:-orazbayev/acceleratio-frontend:${ACCELERATIO_VERSION}}"
 POSTGRES_IMAGE="${POSTGRES_IMAGE:-postgres:17-alpine}"
@@ -258,7 +258,7 @@ Common variables (environment or --config):
   VICTORIAMETRICS_DATA_DIR    default /var/lib/victoria-metrics
   VICTORIAMETRICS_RETENTION   default 14d
   ACCELERATIO_NAMESPACE       default acceleratio
-  ACCELERATIO_VERSION         default 0.1.0 (image tag for API and console)
+  ACCELERATIO_VERSION         default 0.1.1 (image tag for API and console)
   ACCELERATIO_API_IMAGE       default orazbayev/acceleratio-api:<version>
   ACCELERATIO_CONSOLE_IMAGE   default orazbayev/acceleratio-frontend:<version>
   POSTGRES_IMAGE              default postgres:17-alpine

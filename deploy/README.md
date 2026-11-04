@@ -9,13 +9,16 @@ other hardware. It provisions a single-node Kubernetes cluster:
 - Helm `3.18.0`
 - SeaweedFS `4.51.0` (master, volume, filer and S3)
 - SeaweedFS CSI `0.2.43` with the default StorageClass `seaweedfs-storage`
+- VictoriaMetrics single node (chart `0.50.0`), which scrapes kubelet and
+  cAdvisor metrics for the project Observability tab and keeps 14 days on the
+  server's own disk (`/var/lib/victoria-metrics`)
 
 and then deploys Acceleratio into the `acceleratio` namespace:
 
 - PostgreSQL (`postgres:17-alpine`), stored on the server's own disk
-- the API (`orazbayev/acceleratio-api:0.1.0`), which migrates the database on
+- the API (`orazbayev/acceleratio-api:0.1.1`), which migrates the database on
   every start through an init container
-- the console (`orazbayev/acceleratio-frontend:0.1.0`)
+- the console (`orazbayev/acceleratio-frontend:0.1.1`)
 
 When it finishes, the installer prints the dashboard URL.
 
@@ -164,8 +167,13 @@ Every variable can be set in the environment or in a file passed to
 | `SEAWEEDFS_DATA_DIR` | `/var/lib/seaweedfs` | hostPath for SeaweedFS state |
 | `SEAWEEDFS_S3_ENABLED` | `true` | in-cluster S3 on the filer |
 | `STORAGE_CLASS_NAME` | `seaweedfs-storage` | default StorageClass name |
+| `VICTORIAMETRICS_CHART_VERSION` | `0.50.0` | `victoria-metrics-single` chart version |
+| `VICTORIAMETRICS_NAMESPACE` | `victoria-metrics` | VictoriaMetrics namespace |
+| `VICTORIAMETRICS_RELEASE` | `victoria-metrics` | Helm release and Service name |
+| `VICTORIAMETRICS_DATA_DIR` | `/var/lib/victoria-metrics` | hostPath for the metrics database |
+| `VICTORIAMETRICS_RETENTION` | `14d` | how long metrics are kept |
 | `ACCELERATIO_NAMESPACE` | `acceleratio` | namespace for PostgreSQL, the API and the console |
-| `ACCELERATIO_VERSION` | `0.1.0` | image tag for the API and the console |
+| `ACCELERATIO_VERSION` | `0.1.1` | image tag for the API and the console |
 | `ACCELERATIO_API_IMAGE` | `orazbayev/acceleratio-api:<version>` | API image |
 | `ACCELERATIO_CONSOLE_IMAGE` | `orazbayev/acceleratio-frontend:<version>` | console image |
 | `POSTGRES_IMAGE` | `postgres:17-alpine` | PostgreSQL image |
