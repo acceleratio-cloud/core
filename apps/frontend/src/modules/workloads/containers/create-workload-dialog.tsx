@@ -8,7 +8,6 @@ import {
   Container,
   Database,
   GitBranch,
-  HardDrive,
   Plus,
   type LucideIcon,
 } from 'lucide-react';
@@ -33,7 +32,7 @@ import { CreateDockerWorkloadForm } from './create-docker-workload-form';
  * Types offered in the create dialog. Only `docker` exists in the API
  * contract today; the rest are shown as "coming soon".
  */
-export type WorkloadKind = 'docker' | 'github' | 's3-bucket' | 'volume';
+export type WorkloadKind = 'docker' | 'github' | 's3-bucket';
 
 type WorkloadOption = {
   value: WorkloadKind;
@@ -46,7 +45,6 @@ const workloadOptions: WorkloadOption[] = [
   { value: 'docker', label: 'Docker', icon: Container },
   { value: 'github', label: 'GitHub', icon: GitBranch, comingSoon: true },
   { value: 's3-bucket', label: 'S3 bucket', icon: Database, comingSoon: true },
-  { value: 'volume', label: 'Volume', icon: HardDrive, comingSoon: true },
 ];
 
 type Step = 'type' | 'docker';
