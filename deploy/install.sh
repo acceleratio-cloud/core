@@ -51,6 +51,13 @@ SEAWEEDFS_DATA_DIR="${SEAWEEDFS_DATA_DIR:-/var/lib/seaweedfs}"
 SEAWEEDFS_S3_ENABLED="${SEAWEEDFS_S3_ENABLED:-true}"
 STORAGE_CLASS_NAME="${STORAGE_CLASS_NAME:-seaweedfs-storage}"
 
+# scripts/cluster.sh reads this default; keep the KEY="${KEY:-default}" form.
+VICTORIAMETRICS_CHART_VERSION="${VICTORIAMETRICS_CHART_VERSION:-0.50.0}"
+VICTORIAMETRICS_NAMESPACE="${VICTORIAMETRICS_NAMESPACE:-victoria-metrics}"
+VICTORIAMETRICS_RELEASE="${VICTORIAMETRICS_RELEASE:-victoria-metrics}"
+VICTORIAMETRICS_DATA_DIR="${VICTORIAMETRICS_DATA_DIR:-/var/lib/victoria-metrics}"
+VICTORIAMETRICS_RETENTION="${VICTORIAMETRICS_RETENTION:-14d}"
+
 ACCELERATIO_NAMESPACE="${ACCELERATIO_NAMESPACE:-acceleratio}"
 ACCELERATIO_VERSION="${ACCELERATIO_VERSION:-0.1.0}"
 ACCELERATIO_API_IMAGE="${ACCELERATIO_API_IMAGE:-orazbayev/acceleratio-api:${ACCELERATIO_VERSION}}"
@@ -207,6 +214,8 @@ Installs on any Ubuntu/Debian server (bare metal, private server, any hardware):
   - SeaweedFS (master, volume, filer, S3)
   - SeaweedFS CSI driver and the configured default StorageClass
     (default seaweedfs-storage)
+  - VictoriaMetrics (single node) scraping kubelet and cAdvisor metrics
+    for the console's Observability tab
   - Acceleratio in namespace "acceleratio": PostgreSQL, API and console,
     then prints the dashboard URL
 
@@ -217,8 +226,8 @@ Options:
   --dry-run          Check prerequisites and print planned actions only.
   --config FILE      Load variables from FILE (shell syntax).
   --reset            Remove an existing k3s/SeaweedFS installation first.
-                     Destructive: deletes etcd, Cilium networking and
-                     SeaweedFS data. Requires --yes when stdin is not a TTY.
+                     Destructive: deletes etcd, Cilium networking,
+                     SeaweedFS data and VictoriaMetrics history. Requires --yes when stdin is not a TTY.
   --yes, -y          Do not ask for confirmation.
   --help, -h         Show this help.
 
@@ -243,6 +252,11 @@ Common variables (environment or --config):
   SEAWEEDFS_DATA_DIR          default /var/lib/seaweedfs
   SEAWEEDFS_S3_ENABLED        default true
   STORAGE_CLASS_NAME          default seaweedfs-storage
+  VICTORIAMETRICS_CHART_VERSION default 0.50.0
+  VICTORIAMETRICS_NAMESPACE   default victoria-metrics
+  VICTORIAMETRICS_RELEASE     default victoria-metrics
+  VICTORIAMETRICS_DATA_DIR    default /var/lib/victoria-metrics
+  VICTORIAMETRICS_RETENTION   default 14d
   ACCELERATIO_NAMESPACE       default acceleratio
   ACCELERATIO_VERSION         default 0.1.0 (image tag for API and console)
   ACCELERATIO_API_IMAGE       default orazbayev/acceleratio-api:<version>
@@ -627,12 +641,18 @@ reset_installation() {
       die "Refusing to remove unsafe data directory: '${POSTGRES_DATA_DIR}'"
       ;;
   esac
+  case "$VICTORIAMETRICS_DATA_DIR" in
+    ""|"/"|"/var"|"/var/lib"|"/etc")
+      die "Refusing to remove unsafe data directory: '${VICTORIAMETRICS_DATA_DIR}'"
+      ;;
+  esac
 
   log_warn "Removing existing installation"
   local helm_cmd=""
   helm_cmd="$(command -v helm 2>/dev/null || true)"
   if [ -n "$helm_cmd" ] && [ -f "$K3S_KUBECONFIG" ]; then
     export KUBECONFIG="$K3S_KUBECONFIG"
+    "$helm_cmd" uninstall "$VICTORIAMETRICS_RELEASE" -n "$VICTORIAMETRICS_NAMESPACE" --ignore-not-found >/dev/null 2>&1 || true
     "$helm_cmd" uninstall "$SEAWEEDFS_CSI_RELEASE" -n "$SEAWEEDFS_NAMESPACE" --ignore-not-found >/dev/null 2>&1 || true
     "$helm_cmd" uninstall "$SEAWEEDFS_RELEASE" -n "$SEAWEEDFS_NAMESPACE" --ignore-not-found >/dev/null 2>&1 || true
     "$helm_cmd" uninstall cilium -n kube-system --ignore-not-found >/dev/null 2>&1 || true
@@ -673,6 +693,7 @@ reset_installation() {
     fi
   done
   rm -rf "$SEAWEEDFS_DATA_DIR"
+  rm -rf "$VICTORIAMETRICS_DATA_DIR"
   rm -rf "$POSTGRES_DATA_DIR"
   rm -rf "$CONFIG_DIR"
   rm -rf /etc/rancher/k3s
@@ -924,14 +945,16 @@ prepare_helm_environment() {
 
 prepare_helm_repos() {
   if (( DRY_RUN )); then
-    log_info "DRY-RUN: would add SeaweedFS Helm repositories"
+    log_info "DRY-RUN: would add SeaweedFS and VictoriaMetrics Helm repositories"
     return 0
   fi
   log_info "Adding Helm repositories"
   "$HELM_BIN" repo add --force-update seaweedfs https://seaweedfs.github.io/seaweedfs/helm >/dev/null
   "$HELM_BIN" repo add --force-update seaweedfs-csi-driver https://seaweedfs.github.io/seaweedfs-csi-driver/helm >/dev/null
   "$HELM_BIN" repo update seaweedfs >/dev/null
+  "$HELM_BIN" repo add --force-update victoria-metrics https://victoriametrics.github.io/helm-charts/ >/dev/null
   "$HELM_BIN" repo update seaweedfs-csi-driver >/dev/null
+  "$HELM_BIN" repo update victoria-metrics >/dev/null
 }
 
 # ---------------------------------------------------------------------------
@@ -1228,6 +1251,61 @@ ensure_default_storage_class() {
 # Verification.
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# VictoriaMetrics.
+# ---------------------------------------------------------------------------
+
+write_victoriametrics_values() {
+  write_file "${CONFIG_DIR}/victoriametrics-values.yaml" 0644 <<EOF
+# ${MANAGED_BY} - manual edits will be overwritten.
+# Single-node VictoriaMetrics with the chart's built-in Kubernetes scrape
+# config (kubelet and cAdvisor through the API server). The API reads it
+# through the API server's service proxy for the Observability tab.
+# The TSDB lives on hostPath: it must not sit on the FUSE-backed SeaweedFS
+# StorageClass.
+server:
+  fullnameOverride: "${VICTORIAMETRICS_RELEASE}"
+  retentionPeriod: "${VICTORIAMETRICS_RETENTION}"
+  scrape:
+    enabled: true
+  persistentVolume:
+    enabled: false
+  extraArgs:
+    storageDataPath: /vm-data
+  extraVolumes:
+    - name: data
+      hostPath:
+        path: "${VICTORIAMETRICS_DATA_DIR}"
+        type: DirectoryOrCreate
+  extraVolumeMounts:
+    - name: data
+      mountPath: /vm-data
+EOF
+}
+
+install_victoriametrics() {
+  write_victoriametrics_values
+
+  if (( DRY_RUN )); then
+    log_info "DRY-RUN: would install VictoriaMetrics ${VICTORIAMETRICS_CHART_VERSION} in namespace ${VICTORIAMETRICS_NAMESPACE}"
+    return 0
+  fi
+
+  log_info "Installing VictoriaMetrics ${VICTORIAMETRICS_CHART_VERSION}"
+  install -d -m 0755 "$VICTORIAMETRICS_DATA_DIR"
+  ensure_namespace "$VICTORIAMETRICS_NAMESPACE"
+
+  "$HELM_BIN" upgrade --install "$VICTORIAMETRICS_RELEASE" victoria-metrics/victoria-metrics-single \
+    --version "$VICTORIAMETRICS_CHART_VERSION" \
+    --namespace "$VICTORIAMETRICS_NAMESPACE" \
+    --values "${CONFIG_DIR}/victoriametrics-values.yaml" \
+    --wait --timeout 10m
+
+  k3s kubectl -n "$VICTORIAMETRICS_NAMESPACE" rollout status \
+    "statefulset/${VICTORIAMETRICS_RELEASE}" --timeout=5m
+  log_ok "VictoriaMetrics is ready"
+}
+
 verify_installation() {
   if (( DRY_RUN )); then
     log_info "DRY-RUN: would verify the cluster and run a PVC smoke test"
@@ -1240,6 +1318,8 @@ verify_installation() {
   k3s kubectl get storageclass
   log_info "SeaweedFS pods:"
   k3s kubectl -n "$SEAWEEDFS_NAMESPACE" get pods -o wide
+  log_info "VictoriaMetrics pods:"
+  k3s kubectl -n "$VICTORIAMETRICS_NAMESPACE" get pods -o wide
   log_info "Cilium status:"
   k3s kubectl -n kube-system get daemonset/cilium deployment/cilium-operator
 
@@ -1569,6 +1649,8 @@ spec:
               value: "${ACCELERATIO_CORS_ORIGINS}"
             - name: SEAWEEDFS_NAMESPACE
               value: "${SEAWEEDFS_NAMESPACE}"
+            - name: VICTORIAMETRICS_ADDRESS
+              value: "${VICTORIAMETRICS_RELEASE}.${VICTORIAMETRICS_NAMESPACE}:8428"
             - name: PLATFORM_STORAGE_CLASS_NAME
               value: "${STORAGE_CLASS_NAME}"
             # Shown in the DNS instructions when an admin sets a custom domain.
@@ -1884,6 +1966,7 @@ print_summary() {
   printf '    k3s           %s (embedded etcd)\n' "$k3s_version"
   printf '    Cilium        %s (CNI, kube-proxy replacement)\n' "$CILIUM_VERSION"
   printf '    SeaweedFS     %s (namespace %s)\n' "$SEAWEEDFS_CHART_VERSION" "$SEAWEEDFS_NAMESPACE"
+  printf '    VictoriaMetrics %s (namespace %s)\n' "$VICTORIAMETRICS_CHART_VERSION" "$VICTORIAMETRICS_NAMESPACE"
   printf '    Storage       %s (default StorageClass)\n' "${default_sc:-$STORAGE_CLASS_NAME}"
   printf '\n'
 
@@ -1934,6 +2017,7 @@ main() {
   install_cilium
   install_seaweedfs
   install_csi
+  install_victoriametrics
   verify_installation
   resolve_acceleratio_urls
   configure_traefik

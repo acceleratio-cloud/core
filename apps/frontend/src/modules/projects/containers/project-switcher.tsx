@@ -23,6 +23,11 @@ import {
 import { Skeleton } from '@/shared/components/ui/skeleton';
 import { useProject } from '../providers/project-provider';
 import {
+  DEFAULT_PROJECT_TAB,
+  PROJECT_TAB_PARAM,
+  type ProjectTabId,
+} from '../tabs';
+import {
   CreateProjectDialog,
   type ProjectDraft,
 } from './create-project-dialog';
@@ -34,8 +39,17 @@ const SKELETON_ROWS = 2;
  * another project or creates one. The list loads when the menu opens, so the
  * header costs nothing until it is used.
  */
-export const ProjectSwitcher = () => {
+export const ProjectSwitcher = ({
+  activeTab = DEFAULT_PROJECT_TAB,
+}: {
+  /** Kept when switching, so Observability stays Observability. */
+  activeTab?: ProjectTabId;
+}) => {
   const router = useRouter();
+  const projectHref = (id: string) =>
+    activeTab === DEFAULT_PROJECT_TAB
+      ? `/project/${id}`
+      : `/project/${id}?${PROJECT_TAB_PARAM}=${activeTab}`;
   const { project } = useProject();
   const [projects, setProjects] = useState<Project[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -103,7 +117,7 @@ export const ProjectSwitcher = () => {
                     closeOnClick
                     label={item.name}
                     aria-current={isCurrent ? 'page' : undefined}
-                    render={<Link href={`/project/${item.id}`} />}
+                    render={<Link href={projectHref(item.id)} />}
                     className={cn(isCurrent && 'font-medium')}
                   >
                     <Boxes

@@ -57,3 +57,11 @@ export const getApiErrorMessage = (
 
   return fallback;
 };
+
+/** HTTP status of a failed API call, or null for network and other errors. */
+export const getApiErrorStatus = (error: unknown): number | null =>
+  axios.isAxiosError(error) ? (error.response?.status ?? null) : null;
+
+/** True when a request was cancelled by its AbortSignal. */
+export const isApiRequestCancelled = (error: unknown): boolean =>
+  axios.isCancel(error);

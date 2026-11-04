@@ -22,7 +22,8 @@ non-local contexts unless `ALLOW_REMOTE_KUBECONTEXT=1` is set. Use
 `make cluster-up` / `make cluster-down` for a disposable local k3d + Cilium
 cluster, and never point local development at a shared or production cluster.
 The local cluster reads the k3s, Cilium and SeaweedFS chart versions from
-`deploy/install.sh` and installs SeaweedFS + CSI (`SEAWEEDFS=0` skips it).
+`deploy/install.sh` and installs SeaweedFS + CSI (`SEAWEEDFS=0` skips it) and
+VictoriaMetrics for the project Observability tab (`VICTORIAMETRICS=0` skips it).
 See the Kubernetes section in [README.md](./README.md).
 
 ## Documentation

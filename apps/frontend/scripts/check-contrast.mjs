@@ -75,6 +75,14 @@ const pairs = [
     { fg: "edge-control", bg, min: NON_TEXT, kind: "control border" },
     { fg: "brand-fg", bg, min: NON_TEXT, kind: "focus ring" },
   ]),
+  ...["chart-1", "chart-2", "chart-3", "chart-4", "chart-5", "chart-6"].flatMap((fg) =>
+    ["surface-sunken", "surface-raised"].map((bg) => ({
+      fg,
+      bg,
+      min: NON_TEXT,
+      kind: "chart series",
+    })),
+  ),
 ]
 
 const info = [

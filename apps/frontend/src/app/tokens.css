@@ -74,6 +74,18 @@
   --selection: var(--amber-500);
   --selection-wash: color-mix(in oklch, var(--amber-500) 9%, var(--neutral-1000));
 
+  /* Categorical series colors for Observability charts, in the order series
+     are assigned (blue, orange, aqua, yellow, magenta, green). Validated for
+     colour-vision-deficiency separation and 3:1 on the chart wells; they
+     encode identity only, never status. */
+  --chart-1: oklch(0.575 0.163 255.5); /* #2a78d6 */
+  --chart-2: oklch(0.643 0.172 40.7); /* #e0602c */
+  --chart-3: oklch(0.590 0.120 164.3); /* #16936a */
+  --chart-4: oklch(0.630 0.134 73.2); /* #b97a00 */
+  --chart-5: oklch(0.622 0.171 0.8); /* #d55181 */
+  --chart-6: oklch(0.529 0.180 142.5); /* #008300 */
+  --chart-grid: var(--neutral-930);
+
   /* Dims the page behind a modal; the only place raw black is a token. */
   --scrim: oklch(0 0 0 / 40%);
 }
@@ -110,6 +122,14 @@
   --color-selection-wash: var(--selection-wash);
 
   --color-scrim: var(--scrim);
+
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-chart-6: var(--chart-6);
+  --color-chart-grid: var(--chart-grid);
 
   /* Names are edge-*, fg-* and brand rather than border-*, text-* and accent-*
      so they cannot collide with Tailwind's own utilities or shadcn's tokens. */

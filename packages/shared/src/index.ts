@@ -4,3 +4,4 @@ export * from './types/project';
 export * from './types/workload';
 export * from './types/storage-class';
 export * from './types/system';
+export * from './types/metrics';

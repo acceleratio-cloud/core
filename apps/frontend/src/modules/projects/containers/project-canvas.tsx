@@ -20,7 +20,6 @@ import { workloadNodeTypes } from '@/modules/workloads/components/workload-nodes
 import type { WorkloadNode } from '@/modules/workloads/utils/workload-nodes';
 import { toWorkloadNodes } from '@/modules/workloads/utils/workload-nodes';
 import { CanvasLoader } from '@/shared/components/canvas-loader';
-import { ProjectHeader } from '../components/project-header';
 import { useProject } from '../providers/project-provider';
 
 const emptyEdges: Edge[] = [];
@@ -56,11 +55,10 @@ export const ProjectCanvas = () => {
 
   return (
     <ReactFlowProvider>
-      <div className="relative min-h-0 flex-1 bg-surface-board">
-        <div className="pointer-events-none absolute inset-x-3 top-3 z-10 flex items-center justify-between gap-3">
-          <div className="pointer-events-auto min-w-0">
-            <ProjectHeader />
-          </div>
+      <div className="relative h-full min-h-0 flex-1 bg-surface-board">
+        {/* The project header floats over the left of this row (see
+            ProjectView); the create action stays with the canvas. */}
+        <div className="pointer-events-none absolute top-3 right-3 z-10 flex h-10 items-center">
           <div className="pointer-events-auto shrink-0">
             <CreateWorkloadDialog />
           </div>

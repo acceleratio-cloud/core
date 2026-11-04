@@ -14,6 +14,7 @@ src/
       containers/ - client components with state, effects and api calls
       components/ - presentational components: props in, markup out
       providers/ - context provider plus its useX hook
+      hooks/ - client hooks that own fetching or polling for the domain (useProjectMetrics)
       utils/ - pure helpers for the domain
       layouts/ - domain layouts (auth)
       tests/ - unit tests for this module; never colocate *.spec.ts next to source
@@ -36,6 +37,25 @@ src/
   interactive component.
 - Route files take the generated `PageProps<"...">` and `LayoutProps<"...">` types instead of
   hand-written prop types.
+
+## Project page
+
+- `/project/[id]` is one route with three tabs (`modules/projects/tabs.ts`): Overview (the workload
+  canvas), Observability and Settings. They are not routes: `ProjectView` reads `?tab=` through
+  `useSearchParams` and writes it with `history.replaceState` (Overview omits it), so a reload or a
+  shared link opens the same tab without a server round trip. The project switcher keeps the tab.
+- Panels mount on first visit and then stay mounted while hidden (`hidden` + `inert`), so the canvas
+  keeps its viewport and status stream. A shown panel replays a short fade-and-slide entrance whose
+  direction follows the tab order; the active tab pill slides between tabs.
+- `modules/observability/` is the Observability dashboard. It polls
+  `GET /projects/:projectId/metrics?range=` every 15 s only while its tab is active and the page is
+  visible, and draws with Recharts. Series colors are the `--chart-1…6` tokens, assigned to services
+  in workload order (never cycled; a seventh service folds into a neutral Other) so a service keeps
+  its color in every panel. Saturation gauges use the `status-*` colors and always repeat the level
+  as a word and an icon.
+- The console imports only types from `@acceleratio/shared`: the package is not resolvable at
+  runtime in the Next bundle, so contract constants the UI needs (metric ranges, the Other series
+  key) are mirrored in the module that uses them.
 
 ## Data fetching
 
@@ -446,6 +466,25 @@ duplicate status events; a leader lock is future work.
   `seaweedfs-volume`) locate the volume servers; `PLATFORM_STORAGE_CLASS_NAME` names the platform
   class.
 
+## Metrics
+
+- `application/metrics/` serves `GET /projects/:projectId/metrics?range=15m|1h|6h|24h|7d` (default
+  `1h`). Data comes from a single-node VictoriaMetrics that scrapes kubelet and cAdvisor metrics;
+  `deploy/install.sh` and `scripts/cluster.sh` install it in the `victoria-metrics` namespace with
+  its TSDB on hostPath.
+- `vendor/victoriametrics/victoriametrics.client.ts` queries the Prometheus API through the API
+  server's service proxy (`KubernetesService.proxyServiceRequest`, shared with the SeaweedFS filer
+  client), so it works with the API inside or outside the cluster. `VICTORIAMETRICS_ADDRESS`
+  (default `victoria-metrics.victoria-metrics:8428`) names the Service.
+- `metrics-query.ts` holds the pure parts: range → step and `rate()` window, the PromQL (summed
+  `by (pod)` in the project namespace), folding per-pod series into per-workload series and a
+  project total, and Kubernetes quantity parsing. Live pods map to workloads by the
+  `acceleratio.io/workload-id` label; pods that no longer exist are matched on the longest
+  `<external_name>-` prefix; anything else is an `other` series.
+- Readiness, restarts and container limits come from the live pod list, PVC capacity from the
+  claims, and cluster capacity from node allocatable. VictoriaMetrics being unreachable is a 503
+  that the console shows as "Metrics backend unavailable".
+
 ## Controllers
 
 - Thin: routing, param parsing, status codes. No validation, no try/catch, no database calls.
@@ -541,7 +580,8 @@ duplicate status events; a leader lock is future work.
   existing kubeconfig file; an exported shell value wins over `.env`, a leading
   `~` is expanded, and the default or in-cluster config is used when unset),
   `WORKLOAD_OBSERVER_ENABLED` (`false` disables the observer) and
-  `WORKLOAD_OBSERVER_RESYNC_MS` (full resync interval, default 60000).
+  `WORKLOAD_OBSERVER_RESYNC_MS` (full resync interval, default 60000) and `VICTORIAMETRICS_ADDRESS`
+  (`service.namespace:port` of VictoriaMetrics, default `victoria-metrics.victoria-metrics:8428`).
 - Every new variable is listed in `apps/api/.env.example`.
 
 ## Auth and errors

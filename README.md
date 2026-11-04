@@ -68,7 +68,7 @@ this order:
 For local development, use the disposable cluster:
 
 ```bash
-make cluster-up     # create k3d + k3s + Cilium + SeaweedFS; idempotent
+make cluster-up     # create k3d + k3s + Cilium + SeaweedFS + VictoriaMetrics; idempotent
 make dev            # picks up the k3d kubeconfig automatically
 make cluster-status # show nodes, Cilium and SeaweedFS pods, StorageClasses
 make cluster-down   # delete the cluster and its kubeconfig
@@ -85,6 +85,13 @@ StorageClass is `seaweedfs-storage` and the console's storage settings can
 create and use custom classes. Data lives inside the k3d node container and is
 deleted with the cluster. The CSI driver needs `/dev/fuse` in the node; set
 `SEAWEEDFS=0` to skip SeaweedFS (k3s `local-path` then stays the default).
+
+VictoriaMetrics (single node) scrapes kubelet and cAdvisor metrics for the
+project Observability tab. Its data lives inside the k3d node container with 7
+days of retention; set `VICTORIAMETRICS=0` to skip it, and the tab then shows
+that the metrics backend is unavailable. The API reaches it through the API
+server's service proxy at `VICTORIAMETRICS_ADDRESS` (default
+`victoria-metrics.victoria-metrics:8428`).
 
 The SeaweedFS S3 gateway runs with authentication on, as on a server, so S3 bucket
 services can be created locally. A cluster created before S3 was enabled has no

@@ -1,3 +1,5 @@
+import http from 'node:http';
+import https from 'node:https';
 import { Injectable, Logger } from '@nestjs/common';
 import {
   AppsV1Api,
@@ -12,6 +14,7 @@ import {
   INVALID_KUBECONFIG_MESSAGE,
   readKubeConfigSource,
 } from './kubeconfig-source';
+import type { ServiceProxyRequest, ServiceTarget } from './service-proxy';
 
 @Injectable()
 export class KubernetesService {
@@ -86,5 +89,69 @@ export class KubernetesService {
 
   get storageV1(): StorageV1Api {
     return (this.storageV1Api ??= this.config.makeApiClient(StorageV1Api));
+  }
+
+  /**
+   * Sends one request to a cluster-internal Service through the API server's
+   * service proxy and resolves once the response headers arrive. The API runs
+   * outside the cluster in development and these Services have no exposed
+   * port; the proxy reuses the kubeconfig credentials the API already holds.
+   * The caller reads or pipes the body and must consume it.
+   */
+  async proxyServiceRequest(
+    target: ServiceTarget,
+    input: ServiceProxyRequest,
+  ): Promise<http.IncomingMessage> {
+    const cluster = this.config.getCurrentCluster();
+
+    if (!cluster) {
+      throw new Error('The kubeconfig has no current cluster');
+    }
+
+    const { service, namespace, port } = target;
+    const url = new URL(
+      `${cluster.server.replace(/\/+$/, '')}/api/v1/namespaces/${namespace}/services/${service}:${port}/proxy${input.path}`,
+    );
+
+    for (const [key, value] of Object.entries(input.query ?? {})) {
+      url.searchParams.set(key, value);
+    }
+
+    const options: https.RequestOptions = {
+      method: input.method,
+      headers: { ...input.headers },
+    };
+
+    // Adds the client certificate, CA, token or exec credentials.
+    await this.config.applyToHTTPSOptions(options);
+
+    const transport = url.protocol === 'http:' ? http : https;
+
+    return new Promise((resolve, reject) => {
+      const request = transport.request(url, options, resolve);
+
+      request.on('error', reject);
+
+      if (input.timeoutMs !== undefined) {
+        request.setTimeout(input.timeoutMs, () => {
+          request.destroy(
+            new Error(
+              `Service proxy request timed out after ${input.timeoutMs}ms`,
+            ),
+          );
+        });
+      }
+
+      if (input.body === undefined) {
+        request.end();
+      } else if (Buffer.isBuffer(input.body)) {
+        request.end(input.body);
+      } else if (typeof input.body === 'function') {
+        input.body(request);
+      } else {
+        input.body.on('error', (error) => request.destroy(error));
+        input.body.pipe(request);
+      }
+    });
   }
 }

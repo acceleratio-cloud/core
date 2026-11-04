@@ -22,6 +22,8 @@ import { workloadsApi } from '@/api/workloads';
 
 type ProjectContextValue = {
   project: Project;
+  /** Applies a project the API returned, such as after a rename. */
+  replaceProject: (project: Project) => void;
   workloads: Workload[];
   isLoadingWorkloads: boolean;
   workloadsError: string | null;
@@ -166,12 +168,13 @@ const mergeWorkloads = (
 };
 
 export const ProjectProvider = ({
-  project,
+  project: initialProject,
   children,
 }: {
   project: Project;
   children: ReactNode;
 }) => {
+  const [project, setProject] = useState(initialProject);
   const [workloads, setWorkloads] = useState<Workload[]>([]);
   const [isLoadingWorkloads, setIsLoadingWorkloads] = useState(true);
   const [workloadsError, setWorkloadsError] = useState<string | null>(null);
@@ -443,9 +446,14 @@ export const ProjectProvider = ({
     };
   }, [refreshWorkloads]);
 
+  const replaceProject = useCallback((next: Project) => {
+    setProject((current) => (current.id === next.id ? next : current));
+  }, []);
+
   const value = useMemo(
     () => ({
       project,
+      replaceProject,
       workloads,
       isLoadingWorkloads,
       workloadsError,
@@ -456,6 +464,7 @@ export const ProjectProvider = ({
     }),
     [
       project,
+      replaceProject,
       workloads,
       isLoadingWorkloads,
       workloadsError,

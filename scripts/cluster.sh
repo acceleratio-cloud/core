@@ -2,7 +2,8 @@
 #
 # Manage a disposable local Kubernetes cluster for development.
 #
-#   ./scripts/cluster.sh up      create a k3d cluster, install Cilium and SeaweedFS
+#   ./scripts/cluster.sh up      create a k3d cluster, install Cilium, SeaweedFS
+#                                and VictoriaMetrics
 #   ./scripts/cluster.sh down    delete the cluster and its kubeconfig
 #   ./scripts/cluster.sh status  show the cluster, nodes, pods and StorageClasses
 #   ./scripts/cluster.sh kubeconfig  print the kubeconfig path used by the API
@@ -12,6 +13,8 @@
 # Cilium installed for CNI and CiliumNetworkPolicy support. SeaweedFS and its
 # CSI driver provide the default StorageClass `seaweedfs-storage`, as on a
 # server installed by deploy/install.sh. Set SEAWEEDFS=0 to skip them.
+# VictoriaMetrics scrapes kubelet and cAdvisor metrics for the console's
+# Observability tab. Set VICTORIAMETRICS=0 to skip it.
 #
 set -euo pipefail
 
@@ -71,6 +74,10 @@ SEAWEEDFS_NAMESPACE="seaweedfs"
 SEAWEEDFS_RELEASE="seaweedfs"
 SEAWEEDFS_CSI_RELEASE="seaweedfs-csi"
 STORAGE_CLASS_NAME="seaweedfs-storage"
+VICTORIAMETRICS_CHART_VERSION="${VICTORIAMETRICS_CHART_VERSION:-}"
+VICTORIAMETRICS="${VICTORIAMETRICS:-1}"
+VICTORIAMETRICS_NAMESPACE="victoria-metrics"
+VICTORIAMETRICS_RELEASE="victoria-metrics"
 
 load_cluster_versions() {
   K3S_VERSION="${K3S_VERSION:-$(installer_default K3S_VERSION)}"
@@ -78,6 +85,7 @@ load_cluster_versions() {
   CILIUM_VERSION="${CILIUM_VERSION:-$(installer_default CILIUM_VERSION)}"
   SEAWEEDFS_CHART_VERSION="${SEAWEEDFS_CHART_VERSION:-$(installer_default SEAWEEDFS_CHART_VERSION)}"
   SEAWEEDFS_CSI_CHART_VERSION="${SEAWEEDFS_CSI_CHART_VERSION:-$(installer_default SEAWEEDFS_CSI_CHART_VERSION)}"
+  VICTORIAMETRICS_CHART_VERSION="${VICTORIAMETRICS_CHART_VERSION:-$(installer_default VICTORIAMETRICS_CHART_VERSION)}"
 }
 
 version_ge() {
@@ -254,6 +262,39 @@ EOF_VALUES
   done
 }
 
+# Mirrors install_victoriametrics in deploy/install.sh. The TSDB lives on
+# hostPath inside the k3d node container, so it goes away with the cluster.
+install_victoriametrics() {
+  log "Installing VictoriaMetrics ${VICTORIAMETRICS_CHART_VERSION}"
+  KUBECONFIG="$KUBECONFIG_PATH" helm upgrade --install "$VICTORIAMETRICS_RELEASE" victoria-metrics-single \
+    --repo https://victoriametrics.github.io/helm-charts/ \
+    --version "$VICTORIAMETRICS_CHART_VERSION" \
+    --namespace "$VICTORIAMETRICS_NAMESPACE" --create-namespace \
+    --values - \
+    --wait --timeout 10m <<EOF_VALUES
+server:
+  fullnameOverride: "${VICTORIAMETRICS_RELEASE}"
+  retentionPeriod: 7d
+  scrape:
+    enabled: true
+  persistentVolume:
+    enabled: false
+  extraArgs:
+    storageDataPath: /vm-data
+  extraVolumes:
+    - name: data
+      hostPath:
+        path: /var/lib/victoria-metrics
+        type: DirectoryOrCreate
+  extraVolumeMounts:
+    - name: data
+      mountPath: /vm-data
+EOF_VALUES
+
+  kube -n "$VICTORIAMETRICS_NAMESPACE" rollout status \
+    "statefulset/${VICTORIAMETRICS_RELEASE}" --timeout=5m
+}
+
 up() {
   local exists_status=0
 
@@ -307,6 +348,10 @@ up() {
     install_seaweedfs
   fi
 
+  if [[ "$VICTORIAMETRICS" != "0" ]]; then
+    install_victoriametrics
+  fi
+
   log "Local cluster is ready"
   printf '    KUBECONFIG: %s\n' "$KUBECONFIG_PATH"
   printf '    Next: make dev (it picks up this kubeconfig automatically)\n'
@@ -355,6 +400,8 @@ status() {
     -l k8s-app=cilium || true
   printf '\n'
   kube -n "$SEAWEEDFS_NAMESPACE" get pods 2>/dev/null || true
+  printf '\n'
+  kube -n "$VICTORIAMETRICS_NAMESPACE" get pods 2>/dev/null || true
   printf '\n'
   kube get storageclass || true
 }

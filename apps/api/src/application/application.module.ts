@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { AuthController } from '@/application/auth/auth.controller';
 import { HealthController } from '@/application/health/health.controller';
+import { MetricsController } from '@/application/metrics/metrics.controller';
+import { MetricsService } from '@/application/metrics/metrics.service';
 import { NodeController } from '@/application/node/node.controller';
 import { NodeService } from '@/application/node/node.service';
 import { ProjectController } from '@/application/project/project.controller';
@@ -31,6 +33,7 @@ import { WorkloadTypeRegistry } from '@/application/workload/workload-type.regis
 import { WorkloadTypeResolver } from '@/application/workload/workload-type.resolver';
 import { WorkloadVersionService } from '@/application/workload/workload-version.service';
 import { SeaweedfsFilerClient } from '@/vendor/seaweedfs/seaweedfs-filer.client';
+import { VictoriaMetricsClient } from '@/vendor/victoriametrics/victoriametrics.client';
 
 /**
  * Single Nest module for every application submodule. A submodule owns its
@@ -43,6 +46,7 @@ import { SeaweedfsFilerClient } from '@/vendor/seaweedfs/seaweedfs-filer.client'
   controllers: [
     AuthController,
     HealthController,
+    MetricsController,
     NodeController,
     ProjectController,
     StorageClassController,
@@ -65,6 +69,8 @@ import { SeaweedfsFilerClient } from '@/vendor/seaweedfs/seaweedfs-filer.client'
     S3BucketWorkloadService,
     S3BucketObjectsService,
     SeaweedfsFilerClient,
+    VictoriaMetricsClient,
+    MetricsService,
     WorkloadStatusDeriverRegistry,
     WorkloadEventsService,
     WorkloadMutationGuard,
