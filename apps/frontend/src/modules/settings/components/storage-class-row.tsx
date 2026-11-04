@@ -1,8 +1,18 @@
 import type { StorageClass } from '@acceleratio/shared';
-import { Copy, Eye, Lock, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
+import {
+  Copy,
+  Eye,
+  Gauge,
+  LoaderCircle,
+  Lock,
+  MoreHorizontal,
+  Pencil,
+  Trash2,
+} from 'lucide-react';
 
 import { cn } from '@/lib/utils';
-import { buttonVariants } from '@/shared/components/ui/button';
+import { formatRelativeTime } from '@/modules/workloads/utils/format-time';
+import { Button, buttonVariants } from '@/shared/components/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -11,64 +21,95 @@ import {
   DropdownMenuTrigger,
 } from '@/shared/components/ui/dropdown-menu';
 import {
-  BINDING_MODE_LABELS,
   CLUSTER_STATUS_LABELS,
+  formatIops,
+  formatMbps,
+  profileSummary,
 } from '../utils/storage-class-form';
 
 type StorageClassRowProps = {
   storageClass: StorageClass;
+  /** True while any benchmark runs: one at a time across the cluster. */
+  benchmarkBusy: boolean;
   onView: () => void;
   onEdit: () => void;
   onDuplicate: () => void;
   onDelete: () => void;
+  onBenchmark: () => void;
 };
 
-const summarize = (storageClass: StorageClass): string[] => {
-  const parameters = storageClass.parameters;
+// Menu icons follow the console's other menus (user menu, project switcher).
+const MENU_ICON = 'size-3.5 text-muted-foreground';
 
-  if (!parameters) {
-    return ['Settings unavailable'];
+const usageLabel = (count: number | null) =>
+  count === null
+    ? null
+    : count === 0
+      ? 'Not used by any volume yet'
+      : `Used by ${count} ${count === 1 ? 'volume' : 'volumes'}`;
+
+const BenchmarkSummary = ({ storageClass }: { storageClass: StorageClass }) => {
+  const benchmark = storageClass.latest_benchmark;
+
+  if (!benchmark) {
+    return <span>Not benchmarked</span>;
   }
 
-  const items = [`Replication ${parameters.replication}`];
-
-  if (parameters.disk_type) {
-    items.push(`Disk ${parameters.disk_type}`);
+  if (benchmark.status === 'pending' || benchmark.status === 'running') {
+    return (
+      <span role="status" className="inline-flex items-center gap-1.5">
+        <LoaderCircle
+          aria-hidden="true"
+          strokeWidth={1.75}
+          className="size-3 animate-spin motion-reduce:animate-none"
+        />
+        Benchmark running, about 2 minutes
+      </span>
+    );
   }
 
-  if (parameters.ttl) {
-    items.push(`TTL ${parameters.ttl}`);
+  if (benchmark.status === 'failed' || !benchmark.results) {
+    return (
+      <span
+        className="text-destructive"
+        title={benchmark.status_message ?? undefined}
+      >
+        Last benchmark failed
+        {benchmark.status_message ? `: ${benchmark.status_message}` : ''}
+      </span>
+    );
   }
 
-  if (storageClass.reclaim_policy) {
-    items.push(`Reclaim ${storageClass.reclaim_policy}`);
-  }
+  const results = benchmark.results;
+  const when = benchmark.finished_at ?? benchmark.created_at;
 
-  if (storageClass.volume_binding_mode) {
-    items.push(BINDING_MODE_LABELS[storageClass.volume_binding_mode]);
-  }
-
-  items.push(storageClass.allow_volume_expansion ? 'Expandable' : 'Fixed size');
-
-  return items;
+  return (
+    <span className="tabular-nums">
+      {formatIops(results.random_read_iops)} read /{' '}
+      {formatIops(results.random_write_iops)} write IOPS ·{' '}
+      {formatMbps(results.sequential_read_mbps)} /{' '}
+      {formatMbps(results.sequential_write_mbps)} MB/s ·{' '}
+      <time dateTime={when}>{formatRelativeTime(when)}</time>
+    </span>
+  );
 };
-
-const volumeLabel = (count: number | null) =>
-  count === null ? null : `${count} ${count === 1 ? 'volume' : 'volumes'}`;
 
 export const StorageClassRow = ({
   storageClass,
+  benchmarkBusy,
   onView,
   onEdit,
   onDuplicate,
   onDelete,
+  onBenchmark,
 }: StorageClassRowProps) => {
   const isPlatform = storageClass.kind === 'platform';
   const status = storageClass.cluster_status;
-  const volumes = volumeLabel(storageClass.volume_count);
+  const usage = usageLabel(storageClass.volume_count);
+  const canBenchmark = status !== 'missing' && !benchmarkBusy;
 
   return (
-    <li className="flex flex-wrap items-start gap-3 py-4 first:pt-0 last:pb-0">
+    <li className="flex flex-wrap items-start gap-x-4 gap-y-3 py-4 first:pt-0 last:pb-0">
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           {isPlatform ? (
@@ -89,33 +130,19 @@ export const StorageClassRow = ({
               Default
             </span>
           ) : null}
-          {isPlatform ? (
-            <span className="text-[11px] text-muted-foreground">
-              Managed by the installer
-            </span>
-          ) : null}
         </div>
 
-        <p
-          title={storageClass.external_name}
-          className="mt-1 truncate font-mono text-[11px] text-muted-foreground"
-        >
-          {storageClass.external_name}
-        </p>
-
-        <p className="mt-1.5 text-[13px] text-fg-secondary">
-          {summarize(storageClass).join(' · ')}
-        </p>
-
         {storageClass.description ? (
-          <p className="mt-1 text-[13px] text-muted-foreground">
+          <p className="mt-1 text-[13px] text-fg-secondary">
             {storageClass.description}
           </p>
         ) : null}
-      </div>
 
-      <div className="flex shrink-0 items-center gap-3">
-        <div className="flex flex-col items-end gap-1 text-[11px] text-muted-foreground">
+        <p className="mt-1.5 text-[13px] text-foreground">
+          {profileSummary(storageClass).join(' · ')}
+        </p>
+
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-muted-foreground">
           <span className="inline-flex items-center gap-1.5">
             <span
               aria-hidden="true"
@@ -129,25 +156,62 @@ export const StorageClassRow = ({
             />
             {CLUSTER_STATUS_LABELS[status]}
           </span>
-          {volumes ? <span className="tabular-nums">{volumes}</span> : null}
+          {usage ? <span className="tabular-nums">{usage}</span> : null}
+          <BenchmarkSummary storageClass={storageClass} />
         </div>
+      </div>
+
+      <div className="flex shrink-0 items-center gap-1.5">
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={!canBenchmark}
+          title={
+            benchmarkBusy
+              ? 'A benchmark is already running'
+              : status === 'missing'
+                ? 'The profile is missing from the cluster'
+                : undefined
+          }
+          onClick={onBenchmark}
+        >
+          <Gauge
+            aria-hidden="true"
+            strokeWidth={1.75}
+            data-icon="inline-start"
+          />
+          Run benchmark
+        </Button>
 
         <DropdownMenu>
           <DropdownMenuTrigger
             aria-label={`Actions for ${storageClass.name}`}
             className={buttonVariants({ variant: 'ghost', size: 'icon-sm' })}
           >
-            <MoreHorizontal aria-hidden="true" strokeWidth={1.75} />
+            <MoreHorizontal
+              aria-hidden="true"
+              strokeWidth={1.75}
+              className="size-4"
+            />
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-44">
+          <DropdownMenuContent align="end" className="w-44 min-w-44">
             {isPlatform ? (
               <DropdownMenuItem onClick={onView}>
-                <Eye aria-hidden="true" strokeWidth={1.75} />
+                <Eye
+                  aria-hidden="true"
+                  strokeWidth={1.75}
+                  className={MENU_ICON}
+                />
                 View settings
               </DropdownMenuItem>
             ) : (
               <DropdownMenuItem onClick={onEdit}>
-                <Pencil aria-hidden="true" strokeWidth={1.75} />
+                <Pencil
+                  aria-hidden="true"
+                  strokeWidth={1.75}
+                  className={MENU_ICON}
+                />
                 Edit
               </DropdownMenuItem>
             )}
@@ -155,7 +219,11 @@ export const StorageClassRow = ({
               onClick={onDuplicate}
               disabled={!storageClass.parameters}
             >
-              <Copy aria-hidden="true" strokeWidth={1.75} />
+              <Copy
+                aria-hidden="true"
+                strokeWidth={1.75}
+                className={MENU_ICON}
+              />
               Duplicate
             </DropdownMenuItem>
             {isPlatform ? null : (
@@ -165,7 +233,11 @@ export const StorageClassRow = ({
                   onClick={onDelete}
                   className="text-destructive data-highlighted:text-destructive"
                 >
-                  <Trash2 aria-hidden="true" strokeWidth={1.75} />
+                  <Trash2
+                    aria-hidden="true"
+                    strokeWidth={1.75}
+                    className="size-3.5"
+                  />
                   Delete
                 </DropdownMenuItem>
               </>

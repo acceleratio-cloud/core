@@ -10,11 +10,12 @@ import {
 import type { V1StorageClass } from '@kubernetes/client-node';
 import type {
   CreateStorageClassPayload,
+  StorageBenchmark,
   StorageClass,
   StorageEnvironment,
   UpdateStorageClassPayload,
 } from '@acceleratio/shared';
-import { asc, eq, sql } from 'drizzle-orm';
+import { asc, desc, eq, sql } from 'drizzle-orm';
 import {
   CONFLICT_ID_PREFIX_LENGTH,
   storageClassExternalName,
@@ -26,6 +27,8 @@ import {
   toNestException,
 } from '@/vendor/kubernetes/kubernetes-error';
 import { KubernetesService } from '@/vendor/kubernetes/kubernetes.service';
+import { toStorageBenchmark } from './benchmark/storage-benchmark.results';
+import { storageBenchmark } from './schemas/storage-benchmark.schema';
 import {
   storageClass,
   type NewStorageClassRow,
@@ -138,7 +141,7 @@ export class StorageClassService {
   async list(): Promise<StorageClass[]> {
     await this.ensurePlatformRow();
 
-    const [rows, cluster] = await Promise.all([
+    const [rows, cluster, benchmarks] = await Promise.all([
       this.db
         .select()
         .from(storageClass)
@@ -149,20 +152,24 @@ export class StorageClassService {
           asc(storageClass.id),
         ),
       this.readClusterState(),
+      this.latestBenchmarks(),
     ]);
 
-    return rows.map((row) => this.present(row, cluster));
+    return rows.map((row) =>
+      this.present(row, cluster, benchmarks.get(row.id) ?? null),
+    );
   }
 
   async get(id: string): Promise<StorageClass> {
     await this.ensurePlatformRow();
 
-    const [row, cluster] = await Promise.all([
+    const [row, cluster, benchmarks] = await Promise.all([
       this.findRow(id),
       this.readClusterState(),
+      this.latestBenchmarks(id),
     ]);
 
-    return this.present(row, cluster);
+    return this.present(row, cluster, benchmarks.get(row.id) ?? null);
   }
 
   async create(payload: CreateStorageClassPayload): Promise<StorageClass> {
@@ -202,10 +209,14 @@ export class StorageClassService {
       throw toNestException(error);
     }
 
-    return this.present(row, {
-      classes: new Map([[row.external_name, created]]),
-      volumeCounts: new Map(),
-    });
+    return this.present(
+      row,
+      {
+        classes: new Map([[row.external_name, created]]),
+        volumeCounts: new Map(),
+      },
+      null,
+    );
   }
 
   async update(
@@ -361,6 +372,25 @@ export class StorageClassService {
 
       throw error;
     }
+  }
+
+  /** The newest benchmark per profile (one row each, `distinct on`). */
+  private async latestBenchmarks(
+    id?: string,
+  ): Promise<Map<string, StorageBenchmark>> {
+    const query = this.db
+      .selectDistinctOn([storageBenchmark.storage_class_id])
+      .from(storageBenchmark);
+    const rows = await (
+      id ? query.where(eq(storageBenchmark.storage_class_id, id)) : query
+    ).orderBy(
+      storageBenchmark.storage_class_id,
+      desc(storageBenchmark.created_at),
+    );
+
+    return new Map(
+      rows.map((row) => [row.storage_class_id, toStorageBenchmark(row)]),
+    );
   }
 
   private async findRow(id: string): Promise<StorageClassRow> {
@@ -555,6 +585,7 @@ export class StorageClassService {
   private present(
     row: StorageClassRow,
     cluster: ClusterState | undefined,
+    latestBenchmark: StorageBenchmark | null,
   ): StorageClass {
     const live = cluster
       ? (cluster.classes.get(row.external_name) ?? null)
@@ -569,6 +600,7 @@ export class StorageClassService {
       description: row.description,
       external_name: row.external_name,
       volume_count: volumeCount,
+      latest_benchmark: latestBenchmark,
       created_at: row.created_at.toISOString(),
       updated_at: row.updated_at.toISOString(),
     };

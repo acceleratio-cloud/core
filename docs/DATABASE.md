@@ -116,6 +116,16 @@ erDiagram
         timestamp created_at
         timestamp updated_at
     }
+    storage_class ||--o{ storage_benchmark : "measured by"
+    storage_benchmark {
+        uuid id PK
+        uuid storage_class_id FK
+        storage_benchmark_status status
+        jsonb results
+        varchar external_name
+        timestamp started_at
+        timestamp finished_at
+    }
 ```
 
 ## Tables
@@ -212,6 +222,16 @@ Invariants:
   database half of the delete guard; the API also refuses to delete a class that PersistentVolumes or
   claims in the cluster still use.
 
+### `storage_benchmark`
+
+One fio run against a temporary volume of a storage profile. `storage_class_id` references
+`storage_class` with `ON DELETE CASCADE` (the history goes with its profile). `status` follows
+`pending` → `running` → `succeeded` or `failed`; `results` holds random read/write IOPS, sequential
+read/write MB/s and random latencies when it succeeded, and `status_message` explains a failure.
+`external_name` is the Job and claim name in the benchmark namespace. The partial unique index
+`storage_benchmark_active_unique` allows only one `pending` or `running` row, so one benchmark runs
+across the cluster at a time.
+
 ### better-auth tables
 
 `user`, `session`, `account`, and `verification` are written by better-auth, not by application code.
@@ -228,6 +248,7 @@ library; do not repurpose them.
 | `workload_status` | `draft`, `deploying`, `running`, `stopped`, `failed` | `workload.status` |
 | `storage_class_kind` | `platform`, `custom` | `storage_class.kind` |
 | `storage_class_reclaim_policy` | `Delete`, `Retain` | `storage_class.reclaim_policy` |
+| `storage_benchmark_status` | `pending`, `running`, `succeeded`, `failed` | `storage_benchmark.status` |
 | `storage_class_volume_binding_mode` | `Immediate`, `WaitForFirstConsumer` | `storage_class.volume_binding_mode` |
 
 Enum values are part of the database contract. Add a value with a migration; never reorder or remove

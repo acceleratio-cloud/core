@@ -1,5 +1,6 @@
 import type {
   CreateStorageClassPayload,
+  StorageBenchmark,
   StorageClass,
   StorageEnvironment,
   UpdateStorageClassPayload,
@@ -31,5 +32,17 @@ export const storageClassesApi = {
   },
   remove: async (id: string) => {
     await api.delete(`/storage-classes/${id}`);
+  },
+  benchmarks: async (id: string) => {
+    const { data } = await api.get<StorageBenchmark[]>(
+      `/storage-classes/${id}/benchmarks`,
+    );
+    return data;
+  },
+  startBenchmark: async (id: string) => {
+    const { data } = await api.post<StorageBenchmark>(
+      `/storage-classes/${id}/benchmarks`,
+    );
+    return data;
   },
 };

@@ -1,49 +1,49 @@
-"use client"
+'use client';
 
-import { useState } from "react"
+import { useState } from 'react';
 
-import { cn } from "@/lib/utils"
-import { Button } from "@/shared/components/ui/button"
-import { SettingsSection } from "../components/settings-section"
+import { cn } from '@/lib/utils';
+import { Button } from '@/shared/components/ui/button';
+import { SettingsSection } from '../components/settings-section';
 
 type CloudProvider = {
-  id: string
-  name: string
-  short: string
-  meta: string
-}
+  id: string;
+  name: string;
+  short: string;
+  meta: string;
+};
 
 const CLOUD_PROVIDERS: CloudProvider[] = [
   {
-    id: "aws",
-    name: "Amazon Web Services",
-    short: "AWS",
-    meta: "EC2 instances",
+    id: 'aws',
+    name: 'Amazon Web Services',
+    short: 'AWS',
+    meta: 'EC2 instances',
   },
   {
-    id: "gcp",
-    name: "Google Cloud",
-    short: "GCP",
-    meta: "Compute Engine",
+    id: 'gcp',
+    name: 'Google Cloud',
+    short: 'GCP',
+    meta: 'Compute Engine',
   },
   {
-    id: "azure",
-    name: "Microsoft Azure",
-    short: "AZ",
-    meta: "Virtual machines",
+    id: 'azure',
+    name: 'Microsoft Azure',
+    short: 'AZ',
+    meta: 'Virtual machines',
   },
-]
+];
 
 export const CloudProvidersSettings = () => {
-  const [connectedIds, setConnectedIds] = useState<string[]>([])
+  const [connectedIds, setConnectedIds] = useState<string[]>([]);
 
   const toggleConnection = (id: string) => {
     setConnectedIds((currentIds) =>
       currentIds.includes(id)
         ? currentIds.filter((currentId) => currentId !== id)
-        : [...currentIds, id]
-    )
-  }
+        : [...currentIds, id],
+    );
+  };
 
   return (
     <SettingsSection
@@ -53,7 +53,7 @@ export const CloudProvidersSettings = () => {
     >
       <ul className="divide-y divide-border">
         {CLOUD_PROVIDERS.map((provider) => {
-          const connected = connectedIds.includes(provider.id)
+          const connected = connectedIds.includes(provider.id);
 
           return (
             <li
@@ -77,28 +77,28 @@ export const CloudProvidersSettings = () => {
                 <span
                   aria-hidden="true"
                   className={cn(
-                    "size-1.5 rounded-full",
+                    'size-1.5 rounded-full',
                     connected
-                      ? "bg-foreground"
-                      : "border border-muted-foreground"
+                      ? 'bg-foreground'
+                      : 'border border-muted-foreground',
                   )}
                 />
-                {connected ? "Connected" : "Not connected"}
+                {connected ? 'Connected' : 'Not connected'}
               </span>
 
               <Button
                 type="button"
                 size="sm"
-                variant={connected ? "ghost" : "outline"}
+                variant={connected ? 'ghost' : 'outline'}
                 onClick={() => toggleConnection(provider.id)}
-                aria-label={`${connected ? "Disconnect" : "Connect"} ${provider.name}`}
+                aria-label={`${connected ? 'Disconnect' : 'Connect'} ${provider.name}`}
               >
-                {connected ? "Disconnect" : "Connect"}
+                {connected ? 'Disconnect' : 'Connect'}
               </Button>
             </li>
-          )
+          );
         })}
       </ul>
     </SettingsSection>
-  )
-}
+  );
+};

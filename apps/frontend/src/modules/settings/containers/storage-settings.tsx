@@ -16,6 +16,7 @@ import {
   type StorageClassDialogMode,
   type StorageClassForm,
 } from '../utils/storage-class-form';
+import { StorageBenchmarkDialog } from './storage-benchmark-dialog';
 import { StorageClassDeleteDialog } from './storage-class-delete-dialog';
 import { StorageClassDialog } from './storage-class-dialog';
 
@@ -26,6 +27,12 @@ type DialogState = {
 };
 
 const CLOSED: DialogState = { open: false, mode: 'create', storageClass: null };
+/** How often the list is re-read while a benchmark runs. */
+const BENCHMARK_POLL_MS = 5000;
+
+const isBenchmarkActive = (storageClass: StorageClass) =>
+  storageClass.latest_benchmark?.status === 'pending' ||
+  storageClass.latest_benchmark?.status === 'running';
 
 export const StorageSettings = () => {
   const [classes, setClasses] = useState<StorageClass[]>([]);
@@ -36,6 +43,8 @@ export const StorageSettings = () => {
   const [error, setError] = useState<string | null>(null);
   const [dialog, setDialog] = useState<DialogState>(CLOSED);
   const [deleting, setDeleting] = useState<StorageClass | null>(null);
+  const [benchmarking, setBenchmarking] = useState<StorageClass | null>(null);
+  const benchmarkBusy = classes.some(isBenchmarkActive);
 
   const load = useCallback(async () => {
     const [list, env] = await Promise.all([
@@ -74,6 +83,54 @@ export const StorageSettings = () => {
     };
   }, [load]);
 
+  // A running benchmark finishes in the background; re-read the list until
+  // it has a result. Only runs while a benchmark is active.
+  useEffect(() => {
+    if (!benchmarkBusy) {
+      return;
+    }
+
+    let active = true;
+    const timer = setInterval(() => {
+      storageClassesApi
+        .list()
+        .then((list) => {
+          if (!active) {
+            return;
+          }
+
+          setClasses(list);
+
+          for (const item of list) {
+            const before = classes.find((current) => current.id === item.id);
+
+            if (
+              before &&
+              isBenchmarkActive(before) &&
+              !isBenchmarkActive(item) &&
+              item.latest_benchmark
+            ) {
+              if (item.latest_benchmark.status === 'succeeded') {
+                sileo.success({ title: `Benchmark of ${item.name} finished` });
+              } else {
+                sileo.error({
+                  title: `Benchmark of ${item.name} failed`,
+                  description:
+                    item.latest_benchmark.status_message ?? undefined,
+                });
+              }
+            }
+          }
+        })
+        .catch(() => undefined);
+    }, BENCHMARK_POLL_MS);
+
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [benchmarkBusy, classes]);
+
   const retry = () => {
     setError(null);
     setIsLoading(true);
@@ -102,17 +159,14 @@ export const StorageSettings = () => {
       setClasses((current) =>
         current.map((item) => (item.id === updated.id ? updated : item)),
       );
-      sileo.success({ title: 'Storage class saved' });
+      sileo.success({ title: 'Storage profile saved' });
       return;
     }
 
     const created = await storageClassesApi.create(toCreatePayload(form));
 
     setClasses((current) => [...current, created]);
-    sileo.success({
-      title: 'Storage class created',
-      description: created.external_name,
-    });
+    sileo.success({ title: 'Storage profile created' });
   };
 
   const handleDelete = async (storageClass: StorageClass) => {
@@ -120,14 +174,26 @@ export const StorageSettings = () => {
     setClasses((current) =>
       current.filter((item) => item.id !== storageClass.id),
     );
-    sileo.success({ title: 'Storage class deleted' });
+    sileo.success({ title: 'Storage profile deleted' });
+  };
+
+  const handleBenchmark = async (storageClass: StorageClass) => {
+    const benchmark = await storageClassesApi.startBenchmark(storageClass.id);
+
+    setClasses((current) =>
+      current.map((item) =>
+        item.id === storageClass.id
+          ? { ...item, latest_benchmark: benchmark }
+          : item,
+      ),
+    );
   };
 
   return (
     <SettingsSection
       id="storage"
-      title="Storage configuration"
-      description="SeaweedFS storage classes for volumes and buckets. Tune replication, disk tier and caching per workload."
+      title="Storage profiles"
+      description="Choose how volumes and buckets keep their data: how many copies, on which disks, and for how long."
       action={
         <Button type="button" size="sm" onClick={() => openDialog('create')}>
           <Plus
@@ -135,7 +201,7 @@ export const StorageSettings = () => {
             strokeWidth={1.75}
             data-icon="inline-start"
           />
-          New storage class
+          New profile
         </Button>
       }
     >
@@ -144,14 +210,14 @@ export const StorageSettings = () => {
           role="status"
           className="mb-5 rounded-md border border-border bg-surface-muted px-3 py-2.5 text-[13px] text-fg-secondary"
         >
-          The SeaweedFS CSI driver is not installed in this cluster. Classes can
-          be created, but no volumes will be provisioned from them.
+          The SeaweedFS CSI driver is not installed in this cluster. Profiles
+          can be created, but no volumes will be provisioned from them.
         </p>
       ) : null}
 
       {isLoading ? (
         <div aria-busy="true" className="flex flex-col gap-4">
-          <span className="sr-only">Loading storage classes</span>
+          <span className="sr-only">Loading storage profiles</span>
           <Skeleton className="h-14 w-full" />
           <Skeleton className="h-14 w-full" />
         </div>
@@ -170,6 +236,8 @@ export const StorageSettings = () => {
             <StorageClassRow
               key={storageClass.id}
               storageClass={storageClass}
+              benchmarkBusy={benchmarkBusy}
+              onBenchmark={() => setBenchmarking(storageClass)}
               onView={() => openDialog('view', storageClass)}
               onEdit={() => openDialog('edit', storageClass)}
               onDuplicate={() => openDialog('duplicate', storageClass)}
@@ -196,6 +264,16 @@ export const StorageSettings = () => {
           }
         }}
         onDelete={handleDelete}
+      />
+
+      <StorageBenchmarkDialog
+        storageClass={benchmarking}
+        onOpenChange={(open) => {
+          if (!open) {
+            setBenchmarking(null);
+          }
+        }}
+        onStart={handleBenchmark}
       />
     </SettingsSection>
   );

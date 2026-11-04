@@ -60,10 +60,10 @@ export const StorageClassDeleteDialog = ({
     <Dialog open={storageClass !== null} onOpenChange={handleOpenChange}>
       <DialogContent showCloseButton={!isDeleting}>
         <DialogHeader>
-          <DialogTitle>Delete storage class</DialogTitle>
+          <DialogTitle>Delete storage profile</DialogTitle>
           <DialogDescription>
-            Delete {storageClass?.name}? Its StorageClass is removed from the
-            cluster. A class that volumes still use cannot be deleted.
+            Delete {storageClass?.name}? Volumes can no longer pick it. A
+            profile that volumes still use cannot be deleted.
           </DialogDescription>
         </DialogHeader>
 
@@ -82,7 +82,7 @@ export const StorageClassDeleteDialog = ({
             loading={isDeleting}
             onClick={handleDelete}
           >
-            Delete class
+            Delete profile
           </Button>
         </DialogFooter>
       </DialogContent>

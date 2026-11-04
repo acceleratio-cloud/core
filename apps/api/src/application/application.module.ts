@@ -5,6 +5,8 @@ import { NodeService } from '@/application/node/node.service';
 import { ProjectController } from '@/application/project/project.controller';
 import { ProjectIsolationService } from '@/application/project/project-isolation.service';
 import { ProjectService } from '@/application/project/project.service';
+import { StorageBenchmarkController } from '@/application/storage-class/benchmark/storage-benchmark.controller';
+import { StorageBenchmarkService } from '@/application/storage-class/benchmark/storage-benchmark.service';
 import { StorageClassController } from '@/application/storage-class/storage-class.controller';
 import { StorageClassService } from '@/application/storage-class/storage-class.service';
 import { DockerWorkloadStatusDeriver } from '@/application/workload/docker/docker-workload.deriver';
@@ -34,6 +36,7 @@ import { WorkloadVersionService } from '@/application/workload/workload-version.
     NodeController,
     ProjectController,
     StorageClassController,
+    StorageBenchmarkController,
     WorkloadController,
   ],
   providers: [
@@ -41,6 +44,7 @@ import { WorkloadVersionService } from '@/application/workload/workload-version.
     ProjectService,
     ProjectIsolationService,
     StorageClassService,
+    StorageBenchmarkService,
     DockerWorkloadStatusDeriver,
     DockerWorkloadService,
     WorkloadStatusDeriverRegistry,

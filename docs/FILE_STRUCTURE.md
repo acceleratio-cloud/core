@@ -396,6 +396,9 @@ calls.
   `csidrivers` (`storage.k8s.io`), `list` on `persistentvolumes` and `persistentvolumeclaims` (core,
   cluster-wide) for the delete guard and volume counts, and `get` on `statefulsets` (`apps`) in the
   SeaweedFS namespace for the volume server count.
+- Benchmarks add `get` and `create` on `namespaces`, `create`, `get` and `delete` on
+  `persistentvolumeclaims`, `create`, `get` and `delete` on `jobs` (`batch`), `list` on `pods`, `get` on
+  `pods/log` in the benchmark namespace, and `patch` on `persistentvolumes`.
 - The dev setup uses an admin kubeconfig. An in-cluster installation needs a `ClusterRole` with those
   rules and a `ClusterRoleBinding` to the API service account.
 
@@ -421,6 +424,15 @@ duplicate status events; a leader lock is future work.
 - Delete counts PersistentVolumes and unbound claims of the class and returns 409 while any exist,
   then deletes the row and the object in one transaction, so a database reference or a failed
   cluster delete keeps both.
+- The console calls these "storage profiles" and leads with presets; driver terms sit under
+  Advanced.
+- `benchmark/` runs fio on a temporary 2 GiB claim of a profile in `BENCHMARK_NAMESPACE` (default
+  `acceleratio-benchmarks`) with `BENCHMARK_IMAGE` (default: Alpine pinned by digest, which installs
+  fio from the Alpine mirror, so the cluster needs outbound access). `POST/GET
+  /storage-classes/:id/benchmarks`. The API polls the Job every 5 s, resumes active runs on bootstrap,
+  parses fio's JSON from the pod log and then deletes the Job and claim, switching the volume to
+  `Delete` first so `Retain` profiles leave no data. Write tests are bounded by bytes because
+  SeaweedFS is append-only and overwrites would exhaust the claim's quota.
 - `SEAWEEDFS_NAMESPACE` (default `seaweedfs`) and `SEAWEEDFS_VOLUME_STATEFULSET` (default
   `seaweedfs-volume`) locate the volume servers; `PLATFORM_STORAGE_CLASS_NAME` names the platform
   class.

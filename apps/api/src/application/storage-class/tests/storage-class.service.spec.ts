@@ -101,6 +101,14 @@ const createDatabase = (rows: StorageClassRow[]) => {
   const from = jest.fn().mockReturnValue({ orderBy, where });
   const select = jest.fn().mockReturnValue({ from });
 
+  // Latest benchmark per profile: `selectDistinctOn().from()[.where()].orderBy()`.
+  const benchmarkOrderBy = jest.fn().mockResolvedValue([]);
+  const benchmarkFrom = jest.fn().mockReturnValue({
+    orderBy: benchmarkOrderBy,
+    where: jest.fn().mockReturnValue({ orderBy: benchmarkOrderBy }),
+  });
+  const selectDistinctOn = jest.fn().mockReturnValue({ from: benchmarkFrom });
+
   const updateReturning = jest.fn().mockResolvedValue(rows.slice(0, 1));
   const set = jest.fn().mockReturnValue({
     where: jest.fn().mockReturnValue({ returning: updateReturning }),
@@ -122,6 +130,7 @@ const createDatabase = (rows: StorageClassRow[]) => {
   return {
     db: {
       select,
+      selectDistinctOn,
       insert,
       update,
       delete: remove,
@@ -134,6 +143,7 @@ const createDatabase = (rows: StorageClassRow[]) => {
     deleteWhere,
     txDelete,
     transaction,
+    benchmarkOrderBy,
   };
 };
 
@@ -211,6 +221,40 @@ describe('StorageClassService.list', () => {
       cluster_status: 'ready',
       volume_count: 0,
       parameters: { disk_type: 'ssd' },
+    });
+  });
+
+  it('attaches the latest benchmark of each profile', async () => {
+    const { service, benchmarkOrderBy } = createService([customRow]);
+
+    benchmarkOrderBy.mockResolvedValue([
+      {
+        id: '9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a',
+        storage_class_id: customId,
+        status: 'succeeded',
+        status_message: null,
+        results: {
+          random_read_iops: 1000,
+          random_write_iops: 500,
+          sequential_read_mbps: 120,
+          sequential_write_mbps: 90,
+          random_read_latency_ms: 0.5,
+          random_write_latency_ms: 1.2,
+        },
+        external_name: 'storage-benchmark-9d8c7b6a5f4e',
+        started_at: new Date('2026-11-03T09:00:00.000Z'),
+        finished_at: new Date('2026-11-03T09:02:00.000Z'),
+        created_at: new Date('2026-11-03T09:00:00.000Z'),
+        updated_at: new Date('2026-11-03T09:02:00.000Z'),
+      },
+    ]);
+
+    const [custom] = await service.list();
+
+    expect(custom.latest_benchmark).toMatchObject({
+      status: 'succeeded',
+      results: { random_read_iops: 1000 },
+      finished_at: '2026-11-03T09:02:00.000Z',
     });
   });
 

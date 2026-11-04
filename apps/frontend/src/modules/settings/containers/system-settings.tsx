@@ -1,20 +1,31 @@
-"use client"
+'use client';
 
-import { useState, type FormEvent } from "react"
+import { useState, type FormEvent } from 'react';
 
-import { Field, FieldGroup, FieldLabel } from "@/shared/components/ui/field"
-import { Input } from "@/shared/components/ui/input"
-import { Select } from "@/shared/components/ui/select"
-import { SettingsActions } from "../components/settings-actions"
-import { SettingsSection } from "../components/settings-section"
+import { Field, FieldGroup, FieldLabel } from '@/shared/components/ui/field';
+import { Input } from '@/shared/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/shared/components/ui/select';
+import { SettingsActions } from '../components/settings-actions';
+import { SettingsSection } from '../components/settings-section';
+
+const UPDATE_CHANNELS = [
+  { value: 'stable', label: 'Stable' },
+  { value: 'edge', label: 'Edge' },
+];
 
 export const SystemSettings = () => {
-  const [saved, setSaved] = useState(false)
+  const [saved, setSaved] = useState(false);
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    setSaved(true)
-  }
+    event.preventDefault();
+    setSaved(true);
+  };
 
   return (
     <SettingsSection
@@ -42,12 +53,20 @@ export const SystemSettings = () => {
                 Update channel
               </FieldLabel>
               <Select
-                id="system-update-channel"
                 name="update_channel"
                 defaultValue="stable"
+                items={UPDATE_CHANNELS}
               >
-                <option value="stable">Stable</option>
-                <option value="edge">Edge</option>
+                <SelectTrigger id="system-update-channel">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {UPDATE_CHANNELS.map((channel) => (
+                    <SelectItem key={channel.value} value={channel.value}>
+                      {channel.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
               </Select>
             </Field>
           </div>
@@ -68,5 +87,5 @@ export const SystemSettings = () => {
         <SettingsActions saved={saved} />
       </form>
     </SettingsSection>
-  )
-}
+  );
+};

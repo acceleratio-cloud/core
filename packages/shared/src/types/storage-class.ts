@@ -56,6 +56,8 @@ export interface StorageClass {
   cluster_status: StorageClassClusterStatus;
   /** PersistentVolumes using the class; null when the cluster is unreachable. */
   volume_count: number | null;
+  /** Most recent benchmark run, or null when the class was never benchmarked. */
+  latest_benchmark: StorageBenchmark | null;
   created_at: string;
   updated_at: string;
 }
@@ -80,4 +82,29 @@ export interface StorageEnvironment {
   csi_driver_installed: boolean | null;
   /** SeaweedFS volume servers; null when unknown. */
   volume_servers: number | null;
+}
+
+export type StorageBenchmarkStatus =
+  'pending' | 'running' | 'succeeded' | 'failed';
+
+/** fio results; IOPS are operations per second, throughput is MB/s. */
+export interface StorageBenchmarkResults {
+  random_read_iops: number;
+  random_write_iops: number;
+  sequential_read_mbps: number;
+  sequential_write_mbps: number;
+  /** Mean completion latency of the random tests, in milliseconds. */
+  random_read_latency_ms: number;
+  random_write_latency_ms: number;
+}
+
+export interface StorageBenchmark {
+  id: string;
+  storage_class_id: string;
+  status: StorageBenchmarkStatus;
+  status_message: string | null;
+  results: StorageBenchmarkResults | null;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string;
 }

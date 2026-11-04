@@ -1,61 +1,68 @@
-"use client"
+'use client';
 
-import Link from "next/link"
-import { usePathname } from "next/navigation"
-import { useEffect, useRef, useSyncExternalStore } from "react"
-import { House, Search, Server, Settings, Store } from "lucide-react"
-import type { LucideIcon } from "lucide-react"
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { useEffect, useRef, useSyncExternalStore } from 'react';
+import { House, Search, Server, Settings, Store } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 
-import { cn } from "@/lib/utils"
-import { Separator } from "@/shared/components/ui/separator"
-import { Kbd } from "../components/ui/kbd"
-import { LogoIcon } from "../icons/logo-icon"
-import { UserMenu } from "./user-menu"
+import { cn } from '@/lib/utils';
+import { Separator } from '@/shared/components/ui/separator';
+import { Kbd } from '../components/ui/kbd';
+import { LogoIcon } from '../icons/logo-icon';
+import { UserMenu } from './user-menu';
 
 type NavLink = {
-  label: string
-  href: string
-  icon: LucideIcon
-}
+  label: string;
+  href: string;
+  icon: LucideIcon;
+};
 
 const links: NavLink[] = [
-  { label: "Overview", href: "/", icon: House },
-  { label: "Marketplace", href: "/marketplace", icon: Store },
-  { label: "Servers", href: "/servers", icon: Server },
-  { label: "Settings", href: "/settings", icon: Settings },
-]
+  { label: 'Overview', href: '/', icon: House },
+  { label: 'Marketplace', href: '/marketplace', icon: Store },
+  { label: 'Servers', href: '/servers', icon: Server },
+  { label: 'Settings', href: '/settings', icon: Settings },
+];
 
 const isActivePath = (pathname: string, href: string) =>
-  href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(`${href}/`)
+  href === '/'
+    ? pathname === '/'
+    : pathname === href || pathname.startsWith(`${href}/`);
 
-const subscribeToPlatform = () => () => {}
+const subscribeToPlatform = () => () => {};
 
 const useIsApplePlatform = () =>
   useSyncExternalStore(
     subscribeToPlatform,
     () => /mac|iphone|ipad/i.test(navigator.userAgent),
     () => true,
-  )
+  );
 
 export const Navbar = () => {
-  const pathname = usePathname()
-  const searchRef = useRef<HTMLInputElement>(null)
-  const isApple = useIsApplePlatform()
+  const pathname = usePathname();
+  const searchRef = useRef<HTMLInputElement>(null);
+  const isApple = useIsApplePlatform();
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key.toLowerCase() !== "k" || !(event.metaKey || event.ctrlKey)) {
-        return
+      // Autofill and datalist picks dispatch keydown events without a key.
+      if (
+        typeof event.key !== 'string' ||
+        event.key.toLowerCase() !== 'k' ||
+        !(event.metaKey || event.ctrlKey)
+      ) {
+        return;
       }
 
-      event.preventDefault()
-      searchRef.current?.focus()
-      searchRef.current?.select()
-    }
+      event.preventDefault();
+      searchRef.current?.focus();
+      searchRef.current?.select();
+    };
 
-    window.addEventListener("keydown", onKeyDown)
-    return () => window.removeEventListener("keydown", onKeyDown)
-  }, [])
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   return (
     <div className="flex h-full items-center gap-3 px-4 sm:px-5">
@@ -71,14 +78,15 @@ export const Navbar = () => {
         </span>
       </Link>
 
-      <Separator
-        orientation="vertical"
-        className="mx-0.5 h-4 self-center!"
-      />
+      <Separator orientation="vertical" className="mx-0.5 h-4 self-center!" />
 
       <nav aria-label="Primary" className="flex min-w-0 items-center gap-1.5">
         {links.map((link) => (
-          <NavItem key={link.href} link={link} active={isActivePath(pathname, link.href)} />
+          <NavItem
+            key={link.href}
+            link={link}
+            active={isActivePath(pathname, link.href)}
+          />
         ))}
       </nav>
 
@@ -102,38 +110,38 @@ export const Navbar = () => {
             placeholder="Quick search..."
             className="min-w-0 flex-1 bg-transparent text-[13px] text-foreground outline-none placeholder:text-muted-foreground"
           />
-          <Kbd>{isApple ? "⌘K" : "Ctrl K"}</Kbd>
+          <Kbd>{isApple ? '⌘K' : 'Ctrl K'}</Kbd>
         </div>
 
         <UserMenu />
       </div>
     </div>
-  )
-}
+  );
+};
 
 const NavItem = ({ link, active }: { link: NavLink; active: boolean }) => {
-  const Icon = link.icon
+  const Icon = link.icon;
 
   return (
     <Link
       href={link.href}
-      aria-current={active ? "page" : undefined}
+      aria-current={active ? 'page' : undefined}
       className={cn(
-        "flex h-8 shrink-0 items-center gap-2 rounded-md border px-3 text-[13px] outline-0 transition-[background-color,border-color,color,scale] duration-100 ease-out focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring motion-reduce:transition-none",
+        'flex h-8 shrink-0 items-center gap-2 rounded-md border px-3 text-[13px] outline-0 transition-[background-color,border-color,color,scale] duration-100 ease-out focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring motion-reduce:transition-none',
         active
-          ? "border-border bg-surface-panel font-medium text-foreground"
-          : "border-transparent text-muted-foreground hover:bg-surface-panel/60 hover:text-foreground active:scale-[0.98] motion-reduce:active:scale-100",
+          ? 'border-border bg-surface-panel font-medium text-foreground'
+          : 'border-transparent text-muted-foreground hover:bg-surface-panel/60 hover:text-foreground active:scale-[0.98] motion-reduce:active:scale-100',
       )}
     >
       <Icon
         aria-hidden="true"
         strokeWidth={1.75}
         className={cn(
-          "size-3.5 shrink-0",
-          active ? "text-foreground" : "text-muted-foreground",
+          'size-3.5 shrink-0',
+          active ? 'text-foreground' : 'text-muted-foreground',
         )}
       />
       <span className="sr-only sm:not-sr-only sm:truncate">{link.label}</span>
     </Link>
-  )
-}
+  );
+};
