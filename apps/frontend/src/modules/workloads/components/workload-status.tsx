@@ -1,0 +1,105 @@
+import type { WorkloadStatus as WorkloadStatusValue } from '@acceleratio/shared';
+
+import { cn } from '@/lib/utils';
+
+const statusStyles: Record<
+  WorkloadStatusValue,
+  { label: string; dot: string; text: string }
+> = {
+  draft: {
+    label: 'Draft',
+    dot: 'border border-muted-foreground bg-transparent',
+    text: 'text-muted-foreground',
+  },
+  deploying: {
+    label: 'Deploying',
+    dot: 'animate-pulse bg-muted-foreground motion-reduce:animate-none',
+    text: 'text-muted-foreground',
+  },
+  running: {
+    label: 'Running',
+    dot: 'bg-status-success',
+    text: 'text-foreground',
+  },
+  stopped: {
+    label: 'Stopped',
+    dot: 'bg-muted-foreground/40',
+    text: 'text-muted-foreground',
+  },
+  failed: {
+    label: 'Failed',
+    dot: 'bg-destructive',
+    text: 'text-destructive',
+  },
+};
+
+/** The status word alone, in its tone, for places that draw their own marker. */
+export const WorkloadStatusLabel = ({
+  status,
+  className,
+}: {
+  status: WorkloadStatusValue;
+  className?: string;
+}) => (
+  <span className={cn('font-medium', statusStyles[status].text, className)}>
+    {statusStyles[status].label}
+  </span>
+);
+
+type WorkloadStatusProps = {
+  status: WorkloadStatusValue;
+  statusMessage?: string | null;
+  compact?: boolean;
+  /** Replaces the status word, e.g. "Ready" for a running bucket. */
+  label?: string;
+  className?: string;
+};
+
+/**
+ * Presentational status for a workload. `running` and `failed` take the
+ * success and danger status colors; every state also keeps its own label and
+ * dot style so meaning never depends on color alone.
+ */
+export const WorkloadStatus = ({
+  status,
+  statusMessage,
+  compact = false,
+  label,
+  className,
+}: WorkloadStatusProps) => {
+  const style = statusStyles[status];
+
+  return (
+    <span className={cn('flex min-w-0 flex-col gap-1', className)}>
+      <span className="flex min-w-0 items-center gap-1.5">
+        <span
+          aria-hidden="true"
+          className={cn('size-1.5 shrink-0 rounded-full', style.dot)}
+        />
+        <span
+          className={cn(
+            'truncate leading-none font-medium',
+            compact ? 'text-[11px]' : 'text-xs',
+            style.text,
+          )}
+        >
+          {label ?? style.label}
+        </span>
+      </span>
+
+      {status === 'failed' && statusMessage ? (
+        <span
+          title={statusMessage}
+          className={cn(
+            'text-destructive',
+            compact
+              ? 'line-clamp-1 text-[10px] leading-snug'
+              : 'line-clamp-2 text-[11px] leading-snug',
+          )}
+        >
+          {statusMessage}
+        </span>
+      ) : null}
+    </span>
+  );
+};

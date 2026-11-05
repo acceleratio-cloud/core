@@ -1,0 +1,143 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  BUN_VERSION: "1.4.0"
+  NODE_VERSION: "22"
+
+jobs:
+  api:
+    name: API (lint, test, build, migrations)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # drizzle-kit loads the config, which expects a connection string. The
+      # check below never connects to the database.
+      DATABASE_URL: postgres://ci:ci@127.0.0.1:5432/ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-api-${{ runner.os }}-${{ hashFiles('apps/api/bun.lock', 'packages/shared/bun.lock') }}
+          restore-keys: bun-api-${{ runner.os }}-
+
+      # The shared package is a file: dependency: build it before installing
+      # the API, which copies it into node_modules.
+      - name: Build shared package
+        working-directory: packages/shared
+        run: bun install --frozen-lockfile && bun run build
+      - name: Install
+        working-directory: apps/api
+        run: bun install --frozen-lockfile
+      # `bun run lint` passes --fix; CI must only report.
+      - name: Lint
+        working-directory: apps/api
+        run: bun x eslint "{src,tests}/**/*.ts"
+      - name: Unit tests
+        working-directory: apps/api
+        run: bun run test
+      - name: Build
+        working-directory: apps/api
+        run: bun run build
+      - name: Check Drizzle migrations
+        working-directory: apps/api
+        run: bun run db:check
+
+  frontend:
+    name: Console (lint, test, build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-frontend-${{ runner.os }}-${{ hashFiles('apps/frontend/bun.lock', 'packages/shared/bun.lock') }}
+          restore-keys: bun-frontend-${{ runner.os }}-
+      - uses: actions/cache@v4
+        with:
+          path: apps/frontend/.next/cache
+          key: next-${{ runner.os }}-${{ hashFiles('apps/frontend/bun.lock') }}-${{ hashFiles('apps/frontend/src/**') }}
+          restore-keys: next-${{ runner.os }}-${{ hashFiles('apps/frontend/bun.lock') }}-
+
+      - name: Build shared package
+        working-directory: packages/shared
+        run: bun install --frozen-lockfile && bun run build
+      - name: Install
+        working-directory: apps/frontend
+        run: bun install --frozen-lockfile
+      - name: Lint
+        working-directory: apps/frontend
+        run: bun run lint
+      - name: Unit tests
+        working-directory: apps/frontend
+        run: bun run test
+      - name: Check colour contrast
+        working-directory: apps/frontend
+        run: bun run check:contrast
+      # next build also type-checks the project.
+      - name: Build
+        working-directory: apps/frontend
+        run: bun run build
+
+  shell:
+    name: Shell scripts (ShellCheck)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: ShellCheck
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(git ls-files '*.sh')
+          shellcheck --severity=warning "${files[@]}"
+
+  images:
+    name: Docker build (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: api
+            dockerfile: apps/api/Dockerfile
+          - name: console
+            dockerfile: apps/frontend/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      # Build only, to catch Dockerfile breakage before a release. Nothing is
+      # pushed from CI; publishing lives in release.yml.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: false
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}

@@ -1,0 +1,175 @@
+/*
+  Design tokens (light).
+
+  Tier 1 (primitives) are raw values and are never used by components.
+  Tier 2 (semantic) are the names components read, through the Tailwind
+  utilities declared in @theme below: bg-surface-*, text-fg-*, border-edge-*,
+  bg-brand, text-status-*.
+  Every contrast pair that matters is checked by `bun run check:contrast`.
+*/
+
+:root {
+  /* ---- Tier 1: primitives ---- */
+  /* Neutral ramp: the number is the OKLCH lightness times 1000. */
+  --neutral-200: oklch(0.2 0 0);
+  --neutral-300: oklch(0.3 0 0);
+  --neutral-400: oklch(0.4 0 0);
+  --neutral-500: oklch(0.5 0 0);
+  --neutral-600: oklch(0.6 0 0);
+  --neutral-700: oklch(0.7 0 0);
+  --neutral-890: oklch(0.89 0 0);
+  --neutral-930: oklch(0.93 0 0);
+  --neutral-940: oklch(0.94 0 0);
+  --neutral-875: oklch(0.875 0 0);  --neutral-935: oklch(0.935 0 0);
+  --neutral-975: oklch(0.975 0 0);
+  --neutral-955: oklch(0.955 0 0);
+  --neutral-970: oklch(0.97 0 0);
+  --neutral-985: oklch(0.985 0 0);
+  --neutral-990: oklch(0.99 0 0);
+  --neutral-1000: oklch(1 0 0);
+
+  /* The one chromatic accent: a signal sky blue, used sparingly. Status hues
+     are dark enough to read as text on white and to hold as small fills. */
+  --sky-700: oklch(0.5 0.15 245);
+  --green-700: oklch(0.5 0.13 150);
+  --amber-700: oklch(0.5 0.11 70);
+  --red-600: oklch(0.52 0.2 27);
+  /* Canvas selection only: a bright amber, lighter than the amber-700 warning
+     text so the ring reads as a highlight. */
+  --amber-500: oklch(0.77 0.17 75);
+
+  /* ---- Tier 2: semantic ---- */
+  /* Higher is closer to the user. The canvas is the lowest, tinted ground; the
+     panel and cards are whiter and sit on it. The board (graph workspaces) is
+     lifted off the darker shell so the work area reads as one light sheet in
+     a grey frame; white cards and the floating details panel separate from it
+     by edge and shadow. Keep the board lighter than the shell. */
+  --surface-canvas: var(--neutral-935);
+  --surface-board: var(--neutral-975);
+  --surface-sunken: var(--neutral-985);
+  --surface-panel: var(--neutral-990);
+  --surface-raised: var(--neutral-1000);
+  --surface-muted: var(--neutral-940);
+
+  --edge-subtle: var(--neutral-930);
+  --edge-default: var(--neutral-890);
+  --edge-control: var(--neutral-600);
+  --fg-primary: var(--neutral-200);
+  --fg-secondary: var(--neutral-400);
+  --fg-tertiary: var(--neutral-500);
+  --fg-disabled: var(--neutral-700);
+  --fg-on-brand: var(--neutral-1000);
+
+  /* brand is a near-black fill that carries white text; hover and press move
+     it toward grey rather than darkening it further. brand-fg is the sky
+     accent: links, focus rings and selected text, never a fill. */
+  --brand: var(--neutral-200);
+  --brand-hover: var(--neutral-300);
+  --brand-press: var(--neutral-400);
+  --brand-fg: var(--sky-700);
+  --brand-wash: color-mix(in oklch, var(--neutral-200) 6%, transparent);
+
+  --status-success: var(--green-700);
+  --status-warning: var(--amber-700);
+  --status-danger: var(--red-600);
+
+  /* The selected node on the project canvas: an amber ring over a faint
+     amber wash. Not used for text, focus or actions. */
+  --selection: var(--amber-500);
+  --selection-wash: color-mix(in oklch, var(--amber-500) 9%, var(--neutral-1000));
+
+  /* Categorical series colors for Observability charts, in the order series
+     are assigned (blue, orange, aqua, yellow, magenta, green). Validated for
+     colour-vision-deficiency separation and 3:1 on the chart wells; they
+     encode identity only, never status. */
+  --chart-1: oklch(0.575 0.163 255.5); /* #2a78d6 */
+  --chart-2: oklch(0.643 0.172 40.7); /* #e0602c */
+  --chart-3: oklch(0.590 0.120 164.3); /* #16936a */
+  --chart-4: oklch(0.630 0.134 73.2); /* #b97a00 */
+  --chart-5: oklch(0.622 0.171 0.8); /* #d55181 */
+  --chart-6: oklch(0.529 0.180 142.5); /* #008300 */
+  --chart-grid: var(--neutral-930);
+  /* The dot grid on pan-and-zoom boards: decorative, a step darker than the
+     board so it stays visible without competing with nodes. */
+  --board-grid: var(--neutral-875);
+
+  /* The instance terminal dock: the one deliberately dark surface, so a shell
+     reads as a shell. Hex because xterm.js mirrors these values in its own
+     theme (modules/terminal/utils/terminal-theme.ts); keep them in sync. */
+  --terminal-surface: #101112;
+  --terminal-chrome: #18191b;
+  --terminal-edge: #2a2b2e;
+  --terminal-tab-active: #232427;
+  --terminal-fg: #e4e4e6;
+  --terminal-fg-muted: #8b8c91;
+
+  /* Dims the page behind a modal; the only place raw black is a token. */
+  --scrim: oklch(0 0 0 / 40%);
+}
+
+@theme inline {
+  --color-surface-canvas: var(--surface-canvas);
+  --color-surface-board: var(--surface-board);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-surface-panel: var(--surface-panel);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-muted: var(--surface-muted);
+
+  --color-edge-subtle: var(--edge-subtle);
+  --color-edge-default: var(--edge-default);
+  --color-edge-control: var(--edge-control);
+
+  --color-fg-primary: var(--fg-primary);
+  --color-fg-secondary: var(--fg-secondary);
+  --color-fg-tertiary: var(--fg-tertiary);
+  --color-fg-disabled: var(--fg-disabled);
+  --color-fg-on-brand: var(--fg-on-brand);
+
+  --color-brand: var(--brand);
+  --color-brand-hover: var(--brand-hover);
+  --color-brand-press: var(--brand-press);
+  --color-brand-fg: var(--brand-fg);
+  --color-brand-wash: var(--brand-wash);
+
+  --color-status-success: var(--status-success);
+  --color-status-warning: var(--status-warning);
+  --color-status-danger: var(--status-danger);
+
+  --color-selection: var(--selection);
+  --color-selection-wash: var(--selection-wash);
+
+  --color-scrim: var(--scrim);
+
+  --color-terminal-surface: var(--terminal-surface);
+  --color-terminal-chrome: var(--terminal-chrome);
+  --color-terminal-edge: var(--terminal-edge);
+  --color-terminal-tab-active: var(--terminal-tab-active);
+  --color-terminal-fg: var(--terminal-fg);
+  --color-terminal-fg-muted: var(--terminal-fg-muted);
+
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-chart-6: var(--chart-6);
+  --color-chart-grid: var(--chart-grid);
+
+  /* Names are edge-*, fg-* and brand rather than border-*, text-* and accent-*
+     so they cannot collide with Tailwind's own utilities or shadcn's tokens. */
+
+  --radius-control: calc(var(--radius) * 0.8);
+  --radius-surface: calc(var(--radius) * 1.4);
+  --shadow-float: 0 1px 2px oklch(0 0 0 / 8%), 0 4px 14px oklch(0 0 0 / 8%);
+  /* A side panel floating over a board: deeper and wider than float so its
+     edge holds against a light ground. */
+  --shadow-panel: 0 1px 3px oklch(0 0 0 / 8%), 0 12px 32px -4px oklch(0 0 0 / 14%);
+  --shadow-modal: 0 12px 40px oklch(0 0 0 / 18%), 0 2px 8px oklch(0 0 0 / 10%);
+
+  /* Button volume without gradients. The dark brand key sits on a contact
+     shadow; light keys get a 1px inner bottom shade. The inset shadow reads as
+     pressed in. */
+  --shadow-key: 0 1px 2px oklch(0 0 0 / 30%);
+  --shadow-key-soft: inset 0 -1px 0 oklch(0 0 0 / 5%), 0 1px 2px oklch(0 0 0 / 10%);
+  --shadow-key-pressed: inset 0 1px 3px oklch(0 0 0 / 22%);
+}
