@@ -5,6 +5,26 @@ import { Dialog as DialogPrimitive } from "@base-ui/react/dialog"
 import { X } from "lucide-react"
 import { cn } from "cn"
 
+/**
+ * Base UI reads a ref container while it mounts the portal and, when
+ * `current` is still null (a hook that fills it in an effect runs after the
+ * portal's layout effect), silently falls back to the parent portal. That put
+ * dialogs inside the pointer-events-none drawer, under the project header.
+ * Treat an unfilled ref as "mount on the body".
+ */
+const resolveContainer = <T,>(container: T): T | HTMLElement => {
+  if (
+    container &&
+    typeof container === "object" &&
+    "current" in container &&
+    (container as { current: unknown }).current === null &&
+    typeof document !== "undefined"
+  ) {
+    return document.body
+  }
+  return container
+}
+
 function Dialog(props: React.ComponentProps<typeof DialogPrimitive.Root>) {
   return <DialogPrimitive.Root data-slot="dialog" {...props} />
 }
@@ -38,17 +58,17 @@ function DialogContent({
   container?: React.ComponentProps<typeof DialogPrimitive.Portal>["container"]
 }) {
   return (
-    <DialogPrimitive.Portal container={container}>
+    <DialogPrimitive.Portal container={resolveContainer(container)}>
       {/* Base UI skips the backdrop of a dialog nested in another one. */}
       <DialogPrimitive.Backdrop
         forceRender
         data-slot="dialog-backdrop"
-        className="fixed inset-0 z-50 bg-scrim transition-opacity duration-150 ease-out data-[starting-style]:opacity-0 data-[ending-style]:opacity-0 motion-reduce:transition-none"
+        className="pointer-events-auto fixed inset-0 z-50 bg-scrim transition-opacity duration-150 ease-out data-[starting-style]:opacity-0 data-[ending-style]:opacity-0 motion-reduce:transition-none"
       />
       <DialogPrimitive.Popup
         data-slot="dialog-content"
         className={cn(
-          "fixed top-1/2 left-1/2 z-50 w-[calc(100vw-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border bg-popover p-6 text-popover-foreground shadow-modal outline-none",
+          "pointer-events-auto fixed top-1/2 left-1/2 z-50 w-[calc(100vw-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border bg-popover p-6 text-popover-foreground shadow-modal outline-none",
           "transition-[opacity,scale] duration-150 ease-out motion-reduce:transition-none",
           "data-[starting-style]:scale-[0.98] data-[starting-style]:opacity-0",
           "data-[ending-style]:scale-[0.98] data-[ending-style]:opacity-0",

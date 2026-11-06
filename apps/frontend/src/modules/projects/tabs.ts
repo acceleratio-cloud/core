@@ -1,17 +1,17 @@
-export type ProjectTabId = 'overview' | 'observability' | 'settings';
+export type ProjectTabId = 'architecture' | 'observability' | 'settings';
 
 export type ProjectTab = {
   id: ProjectTabId;
   label: string;
 };
 
-export const DEFAULT_PROJECT_TAB: ProjectTabId = 'overview';
+export const DEFAULT_PROJECT_TAB: ProjectTabId = 'architecture';
 
 /** Query parameter that holds the selected tab, so a reload keeps it. */
 export const PROJECT_TAB_PARAM = 'tab';
 
 export const PROJECT_TABS: ProjectTab[] = [
-  { id: 'overview', label: 'Overview' },
+  { id: 'architecture', label: 'Architecture' },
   { id: 'observability', label: 'Observability' },
   { id: 'settings', label: 'Settings' },
 ];
