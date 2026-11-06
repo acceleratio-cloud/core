@@ -89,6 +89,42 @@ export const validateNodeIp = (ip: string): string => {
   return ip;
 };
 
+const apiHost = (url: string): string => {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return '';
+  }
+};
+
+/**
+ * The address k3s advertises for the node. An explicit choice must be bound to
+ * one of the server's interfaces (kubelet refuses a NAT or floating IP, which
+ * is often what the SSH address is); otherwise the source address the server
+ * uses to reach the cluster is taken, falling back to the SSH host.
+ */
+export const resolveNodeIp = (
+  output: string,
+  requested: string | null,
+  sshHost: string,
+): { ip: string } | { error: string } => {
+  const facts = parseFacts(output);
+  const local = (facts.get('HOST_IPS') ?? '').split(/\s+/).filter(Boolean);
+  const ip = requested || facts.get('ROUTE_IP') || sshHost;
+
+  if (isIP(ip) === 0) {
+    return { error: 'Node IP must be an IP address' };
+  }
+
+  if (local.length > 0 && !local.includes(ip)) {
+    return {
+      error: `Node IP ${ip} is not assigned to the server (it has ${local.join(', ')}). Use an address of the server itself, not a public NAT address.`,
+    };
+  }
+
+  return { ip };
+};
+
 /**
  * Collects facts from the server. It never fails: every value is printed as
  * KEY=value and judged by `evaluatePreflight`. Peers are IPs of the cluster's
@@ -108,6 +144,8 @@ export const preflightScript = (target: JoinTarget, peers: string[]): string =>
     'if command -v curl >/dev/null 2>&1; then echo CURL=1; else echo CURL=0; fi',
     'if [ -e /usr/local/bin/k3s ] || [ -d /var/lib/rancher/k3s ]; then echo K3S_PRESENT=1; else echo K3S_PRESENT=0; fi',
     `if ss -ltn 2>/dev/null | grep -q ':10250 '; then echo PORT_10250_BUSY=1; else echo PORT_10250_BUSY=0; fi`,
+    'echo "HOST_IPS=$(hostname -I 2>/dev/null)"',
+    `echo "ROUTE_IP=$(ip -4 route get ${shellQuote(apiHost(target.url))} 2>/dev/null | sed -n 's/.* src \\([0-9.]*\\).*/\\1/p' | head -1)"`,
     `echo "API_HTTP=$(curl -ks -m 5 -o /dev/null -w '%{http_code}' ${shellQuote(`${target.url}/ping`)} 2>/dev/null)"`,
     `echo "INTERNET_HTTP=$(curl -s -m 8 -o /dev/null -w '%{http_code}' https://get.k3s.io 2>/dev/null)"`,
     ...peers.map(
@@ -251,11 +289,12 @@ export const buildJoinConfig = (options: InstallOptions): string => {
     `token: ${yamlString(target.token)}`,
     `node-name: ${yamlString(options.name)}`,
     `node-ip: ${yamlString(options.nodeIp)}`,
-    'disable-kube-proxy: true',
   ];
 
   if (options.role === 'server') {
     lines.push(
+      // Server-only: the agent binary rejects the flag and exits at start-up.
+      'disable-kube-proxy: true',
       'write-kubeconfig-mode: "0600"',
       'flannel-backend: none',
       'disable-network-policy: true',
@@ -305,3 +344,17 @@ export const uninstallScript = (): string =>
     'elif [ -x /usr/local/bin/k3s-uninstall.sh ]; then /usr/local/bin/k3s-uninstall.sh',
     'else echo "k3s is not installed on this server"; fi',
   ].join('\n');
+
+/** Last lines of the k3s service journal, to explain a failed start. */
+export const diagnoseScript = (role: NodeJoinRole): string => {
+  const unit = role === 'server' ? 'k3s' : 'k3s-agent';
+
+  return [
+    'set +e',
+    `echo "--- systemctl status ${unit}"`,
+    `systemctl status ${unit} --no-pager -l 2>&1 | tail -n 15`,
+    `echo "--- journalctl ${unit}"`,
+    // k3s prints its whole flag list on a bad flag; keep the errors only.
+    `journalctl -u ${unit} --no-pager -n 200 2>&1 | grep -E 'level=(fatal|error)|" E[0-9]{4} |Failed|failed|refused|not found' | tail -n 15`,
+  ].join('\n');
+};

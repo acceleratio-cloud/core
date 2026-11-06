@@ -52,7 +52,9 @@ export const workloadsApi = {
     pod: string,
     size: { cols: number; rows: number },
   ) => {
-    const base = new URL(getApiBaseUrl() || window.location.origin);
+    // The API URL is a path ("/api") behind the control plane domain, so it
+    // must be resolved against the page origin; `new URL("/api")` throws.
+    const base = new URL(getApiBaseUrl() || "/", window.location.origin);
     base.protocol = base.protocol === 'https:' ? 'wss:' : 'ws:';
     const path = `${base.pathname.replace(/\/+$/, '')}/projects/${projectId}/workloads/${id}/instances/${encodeURIComponent(pod)}/terminal`;
     const url = new URL(path, base);

@@ -7,6 +7,7 @@ import {
   PRIVILEGED_SHELL,
   readJoinTarget,
   validateNodeName,
+  resolveNodeIp,
 } from '../node-join-script';
 import { NodeJoinService } from '../node-join.service';
 import { createRedactor, validateSshAccess } from '../node-ssh';
@@ -139,11 +140,13 @@ describe('install script', () => {
     const agent = buildJoinConfig(options);
 
     expect(agent).toContain('server: "https://10.0.0.1:6443"');
-    expect(agent).toContain('disable-kube-proxy: true');
+    // The agent binary rejects disable-kube-proxy and exits at start-up.
+    expect(agent).not.toContain('disable-kube-proxy');
     expect(agent).not.toContain('flannel-backend');
 
     const server = buildJoinConfig({ ...options, role: 'server' });
 
+    expect(server).toContain('disable-kube-proxy: true');
     expect(server).toContain('flannel-backend: none');
     expect(server).toContain('cluster-cidr: "10.42.0.0/16"');
     expect(server).toContain('- "10.0.0.9"');
@@ -225,6 +228,39 @@ describe('NodeJoinService', () => {
     expect(saved).not.toContain('QUJDREVGR0hJSktM');
   });
 
+  it('explains a failed install and rolls k3s back', async () => {
+    const { service, store, connector } = build();
+    const base = connector.outputFor!;
+
+    connector.outputFor = (stdin) =>
+      stdin.includes('journalctl') ? ['level=fatal msg="boom"'] : base(stdin);
+    // The installer (third script) fails; diagnose and rollback run after it.
+    const run = connector.connect.bind(connector);
+
+    connector.connect = async (access) => {
+      const session = await run(access);
+
+      return {
+        ...session,
+        run: async (command, options) => {
+          const code = await session.run(command, options);
+
+          return options?.stdin?.includes('k3s.io') ? 1 : code;
+        },
+      };
+    };
+
+    await service.add(payload, null);
+    const result = await store.settled('worker-1');
+
+    expect(result.status).toBe('failed');
+    expect(result.message).toContain('see the log above');
+    expect(connector.stdin.some((s) => s.includes('journalctl'))).toBe(true);
+    expect(connector.stdin.some((s) => s.includes('k3s-agent-uninstall'))).toBe(
+      true,
+    );
+  });
+
   it('stops before installing when requirements fail', async () => {
     const { service, store, connector } = build();
 
@@ -293,5 +329,21 @@ describe('NodeJoinService', () => {
     await expect(service.preflight(payload)).rejects.toThrow(
       'Cannot connect over SSH',
     );
+  });
+});
+
+describe('resolveNodeIp', () => {
+  const facts = 'HOST_IPS=192.168.0.88 10.42.1.23\nROUTE_IP=192.168.0.88';
+
+  it('uses the address the server reaches the cluster from', () => {
+    expect(resolveNodeIp(facts, null, '82.115.42.78')).toEqual({
+      ip: '192.168.0.88',
+    });
+  });
+
+  it('rejects an address that is not on the server (NAT or public IP)', () => {
+    expect(resolveNodeIp(facts, '82.115.42.78', '82.115.42.78')).toEqual({
+      error: expect.stringContaining('is not assigned to the server'),
+    });
   });
 });

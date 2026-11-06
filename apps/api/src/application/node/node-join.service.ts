@@ -2,6 +2,7 @@ import { isIP } from 'node:net';
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import type {
   AddNodePayload,
+  NodeJoinRole,
   NodeOperation,
   NodePreflightResult,
   PreflightNodePayload,
@@ -13,7 +14,10 @@ import {
   evaluatePreflight,
   installScript,
   PRIVILEGED_SHELL,
+  diagnoseScript,
   preflightScript,
+  uninstallScript,
+  resolveNodeIp,
   readJoinTarget,
   validateNodeIp,
   validateNodeName,
@@ -25,6 +29,8 @@ import type { SshSession, ValidSshAccess } from './node-ssh';
 const READY_TIMEOUT_MS = 5 * 60 * 1000;
 const READY_POLL_MS = 5000;
 const INSTALL_TIMEOUT_MS = 10 * 60 * 1000;
+const DIAGNOSE_TIMEOUT_MS = 30 * 1000;
+const ROLLBACK_TIMEOUT_MS = 3 * 60 * 1000;
 const PREFLIGHT_TIMEOUT_MS = 60 * 1000;
 
 @Injectable()
@@ -85,7 +91,9 @@ export class NodeJoinService {
       throw new BadRequestException('Role must be worker or server');
     }
 
-    const nodeIp = validateNodeIp(payload.node_ip?.trim() || access.host);
+    const nodeIp = payload.node_ip?.trim()
+      ? validateNodeIp(payload.node_ip.trim())
+      : null;
     const { target, peers } = await this.clusterFacts();
 
     if ((await this.nodes.list()).some((node) => node.name === name)) {
@@ -105,7 +113,7 @@ export class NodeJoinService {
     input: {
       access: ValidSshAccess;
       name: string;
-      nodeIp: string;
+      nodeIp: string | null;
       role: 'worker' | 'server';
       target: JoinTarget;
       peers: string[];
@@ -160,6 +168,25 @@ export class NodeJoinService {
         return;
       }
 
+      const factsText = facts.join('\n');
+      const resolved = resolveNodeIp(
+        factsText,
+        input.nodeIp,
+        input.access.host,
+      );
+
+      if ('error' in resolved) {
+        await log(`FAIL ${resolved.error}`);
+        await this.operations.update(id, {
+          status: 'failed',
+          message: resolved.error,
+        });
+        return;
+      }
+
+      const nodeIp = resolved.ip;
+      await log(`Node IP ${nodeIp}`);
+
       await this.operations.update(id, {
         step: 'install',
         message: 'Installing k3s',
@@ -169,18 +196,19 @@ export class NodeJoinService {
         stdin: installScript({
           target: input.target,
           name: input.name,
-          nodeIp: input.nodeIp,
+          nodeIp,
           role: input.role,
-          sans: [...new Set([input.access.host, input.nodeIp])],
+          sans: [...new Set([input.access.host, nodeIp])],
         }),
         onLine: (line) => void log(line),
         timeoutMs: INSTALL_TIMEOUT_MS,
       });
 
       if (code !== 0) {
+        await this.explainAndRollBack(id, session, input.role, log);
         await this.operations.update(id, {
           status: 'failed',
-          message: `The k3s installer failed (exit code ${code}); the server may need k3s uninstalled before a retry`,
+          message: `The k3s installer failed (exit code ${code}); see the log above for the reason. k3s was removed from the server, so you can retry`,
         });
         return;
       }
@@ -197,10 +225,11 @@ export class NodeJoinService {
           message: 'Server joined the cluster',
         });
       } else {
+        await this.explainAndRollBack(id, session, input.role, log);
         await this.operations.update(id, {
           status: 'failed',
           message:
-            'The node did not become Ready in time; check the log and the server',
+            'The node did not become Ready in time; see the log above for the reason. k3s was removed from the server, so you can retry',
         });
       }
     } catch (error) {
@@ -215,6 +244,34 @@ export class NodeJoinService {
         .catch(() => undefined);
     } finally {
       session?.close();
+    }
+  }
+
+  /**
+   * After a failed join: prints why the service failed, then removes the k3s
+   * this run installed (the preflight required a clean server), so a retry
+   * does not trip over leftovers. Never throws; the join result stands.
+   */
+  private async explainAndRollBack(
+    id: string,
+    session: SshSession,
+    role: NodeJoinRole,
+    log: (line: string) => Promise<unknown> | void,
+  ): Promise<void> {
+    try {
+      await session.run(PRIVILEGED_SHELL, {
+        stdin: diagnoseScript(role),
+        onLine: (line) => void log(line),
+        timeoutMs: DIAGNOSE_TIMEOUT_MS,
+      });
+      await log('Rolling back: removing k3s from the server');
+      await session.run(PRIVILEGED_SHELL, {
+        stdin: uninstallScript(),
+        onLine: (line) => void log(line),
+        timeoutMs: ROLLBACK_TIMEOUT_MS,
+      });
+    } catch (error) {
+      await log(`Rollback failed: ${(error as Error).message}`);
     }
   }
 
