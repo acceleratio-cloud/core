@@ -1,7 +1,11 @@
 import type {
   ControlPlaneDnsCheck,
   ControlPlaneSettings,
+  PlatformUpdate,
+  PlatformUpdateDetails,
+  PlatformVersionInfo,
   SetControlPlaneUrlPayload,
+  StartPlatformUpdatePayload,
 } from '@acceleratio/shared';
 
 import { api } from '@/api';
@@ -35,6 +39,35 @@ export const systemApi = {
   apply: async () => {
     const { data } = await api.post<ControlPlaneSettings>(
       '/system/control-plane/apply',
+    );
+    return data;
+  },
+  getPlatform: async () => {
+    const { data } = await api.get<PlatformVersionInfo>('/system/platform');
+    return data;
+  },
+  checkForUpdates: async () => {
+    const { data } = await api.post<PlatformVersionInfo>(
+      '/system/platform/check',
+    );
+    return data;
+  },
+  listUpdates: async () => {
+    const { data } = await api.get<PlatformUpdate[]>(
+      '/system/platform/updates',
+    );
+    return data;
+  },
+  startUpdate: async (payload: StartPlatformUpdatePayload) => {
+    const { data } = await api.post<PlatformUpdateDetails>(
+      '/system/platform/updates',
+      payload,
+    );
+    return data;
+  },
+  getUpdate: async (id: string) => {
+    const { data } = await api.get<PlatformUpdateDetails>(
+      `/system/platform/updates/${encodeURIComponent(id)}`,
     );
     return data;
   },

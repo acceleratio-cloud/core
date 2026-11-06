@@ -50,8 +50,14 @@ RUN --mount=type=cache,target=/root/.bun/install/cache \
 FROM node:${NODE_VERSION} AS runtime
 WORKDIR /app/apps/api
 
+# The release this image belongs to (set by the release workflow). The console
+# shows it and compares it with the published releases; empty for local
+# builds, which then report the tag of the running image instead.
+ARG ACCELERATIO_VERSION=""
+
 ENV NODE_ENV=production \
-    PORT=8080
+    PORT=8080 \
+    ACCELERATIO_VERSION=${ACCELERATIO_VERSION}
 
 # Keep the build layout: node_modules/@acceleratio/shared may be a relative
 # link to ../../packages/shared. Files stay root-owned: the API writes nothing

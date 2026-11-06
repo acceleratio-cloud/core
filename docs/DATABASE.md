@@ -147,6 +147,27 @@ erDiagram
         timestamp started_at
         timestamp finished_at
     }
+    platform_update {
+        uuid id PK
+        varchar from_version
+        varchar to_version
+        platform_update_status status
+        varchar stage
+        text message
+        text log
+        varchar external_name
+        varchar actor
+        timestamp started_at
+        timestamp reported_at
+        timestamp finished_at
+    }
+    platform_release_check {
+        smallint id PK
+        varchar latest_version
+        jsonb releases
+        timestamp checked_at
+        text error
+    }
     node_operation {
         uuid id PK
         varchar node_name
@@ -334,6 +355,29 @@ never saved: log lines are redacted first. The partial unique index `node_operat
 allows one `running` row per node. Operations run inside the API process, so rows still `running`
 at startup are marked `failed` ("Interrupted by an API restart").
 
+### `platform_update`
+
+One platform update started from the console (Settings → System → Platform version). It holds both
+the progress the console polls and the history. `from_version` and `to_version` are release versions
+without the leading v. `stage` is where the update stands: `launch`, `download`, `prepare`, `backup`,
+`install`, `verify`, `cleanup`, and `rollback` after a failure. It is `done` after a success.
+`message` is the outcome or the reason of a failure, and `log` keeps the last 128 KiB of the update
+log with terminal escapes removed. `external_name` names both the launcher Job and the status
+ConfigMap (`platform-update-<12 hex>`). `actor` is the email (or id) of the account that started the
+update. The update runs on the server as a systemd unit, not in the API. The server publishes
+progress to the ConfigMap, and every API process copies it into the row (`reported_at` is the
+server's last report). An update therefore survives the API being replaced: rows still `pending` or
+`running` at startup are polled again. The partial unique index `platform_update_active_unique`
+allows one `pending` or `running` row.
+
+### `platform_release_check`
+
+The last release check in a single row (`id` 1, kept there by the check
+`platform_release_check_singleton`). `releases` lists every stable release found on GitHub, newest
+first, with its name, notes, page and `checksums_url` (its `SHA256SUMS`); `latest_version` is the
+first one. `checked_at` is the last check, successful or not, and `error` why it failed. A failed
+check keeps the releases of the last successful one.
+
 ### `system_setting`
 
 Installation-wide settings in a single row: the primary key `id` defaults to `1`, and the check
@@ -364,6 +408,7 @@ library; do not repurpose them.
 | `storage_class_reclaim_policy` | `Delete`, `Retain` | `storage_class.reclaim_policy` |
 | `node_operation_type` | `add`, `drain`, `remove` | `node_operation.type` |
 | `node_operation_status` | `running`, `succeeded`, `failed` | `node_operation.status` |
+| `platform_update_status` | `pending`, `running`, `succeeded`, `failed`, `rolled_back` | `platform_update.status` |
 | `storage_benchmark_status` | `pending`, `running`, `succeeded`, `failed` | `storage_benchmark.status` |
 | `storage_class_volume_binding_mode` | `Immediate`, `WaitForFirstConsumer` | `storage_class.volume_binding_mode` |
 | `control_plane_change_status` | `awaiting_dns`, `provisioning`, `failed` | `system_setting.pending_status` |

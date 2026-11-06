@@ -557,6 +557,37 @@ SSH, with the scripts and requirement checks in `node-join-script.ts`. SSH goes 
   claims, and cluster capacity from node allocatable. VictoriaMetrics being unreachable is a 503
   that the console shows as "Metrics backend unavailable".
 
+## Platform updates
+
+- `application/platform-update/` serves `GET /system/platform` (installed version, components,
+  newer releases, the active and the last update), `POST /system/platform/check`,
+  `POST /system/platform/updates` (`{ version }`), `GET /system/platform/updates` and
+  `GET /system/platform/updates/:id` (with the log).
+- `platform-version.service.ts` reads the running release (`ACCELERATIO_VERSION` baked into the API
+  image by the release workflow, otherwise the tag of the API Deployment's image) and the
+  components: the console and PostgreSQL images, the kubelet version of the installation node and
+  every deployed Helm release (decoded from its `sh.helm.release.v1` Secret in
+  `platform-version.helm.ts`).
+- `platform-release.service.ts` lists GitHub Releases (`ACCELERATIO_RELEASE_REPOSITORY`, default
+  `acceleratio-cloud/core`) 30 s after start, then every `PLATFORM_UPDATE_CHECK_INTERVAL_MS`
+  (default 6 h, `0` disables), and on demand. It stores the result in `platform_release_check`.
+  `platform-release.parse.ts` keeps stable releases that ship `update.sh`, `install.sh` and
+  `SHA256SUMS`.
+- `platform-update.service.ts` starts an update: it checks that the target is a listed release
+  newer than the running one, reads the two hashes from `SHA256SUMS` and inserts a
+  `platform_update` row (one active row, enforced by a partial unique index). Then it creates the
+  launcher Job from `platform-update.manifests.ts`: privileged, `hostPID`, pinned to the node of
+  `postgres-0` and running the API's own image.
+- `scripts/launcher.sh` (in the Job) uses `nsenter` to start `scripts/runner.sh` on the host as
+  `acceleratio-update.service` through `systemd-run`. The runner verifies and runs the release's
+  `update.sh` and publishes `status` and `log` to the ConfigMap named after the update. Both
+  scripts are copied to `dist/` as Nest assets (`nest-cli.json`).
+- The service polls that ConfigMap every 3 s and copies stage, log and outcome into the row
+  (`platform-update.status.ts` parses the status). It resumes active rows on bootstrap and gives
+  up after 10 minutes without a start or 45 minutes without a report. Updates are refused for a
+  development build, for an API outside the cluster and when `PLATFORM_UPDATES_ENABLED=0`.
+- `deploy/update.sh` reports its stage through `ACCELERATIO_UPDATE_STAGE_FILE` when it is set.
+
 ## Controllers
 
 - Thin: routing, param parsing, status codes. No validation, no try/catch, no database calls.
@@ -654,6 +685,9 @@ SSH, with the scripts and requirement checks in `node-join-script.ts`. SSH goes 
   `WORKLOAD_OBSERVER_ENABLED` (`false` disables the observer) and
   `WORKLOAD_OBSERVER_RESYNC_MS` (full resync interval, default 60000) and `VICTORIAMETRICS_ADDRESS`
   (`service.namespace:port` of VictoriaMetrics, default `victoria-metrics.victoria-metrics:8428`).
+  Platform updates read `ACCELERATIO_VERSION`, `PLATFORM_UPDATES_ENABLED`,
+  `PLATFORM_UPDATE_CHECK_INTERVAL_MS`, `ACCELERATIO_RELEASE_REPOSITORY`, `ACCELERATIO_CONFIG_DIR`
+  (default `/etc/acceleratio`) and `PLATFORM_UPDATE_ROOT` (default `/var/lib/acceleratio/updates`).
 - Every new variable is listed in `apps/api/.env.example`.
 
 ## Auth and errors

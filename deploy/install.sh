@@ -1916,6 +1916,21 @@ install_acceleratio() {
   log_ok "Acceleratio is running in namespace ${ns}"
 }
 
+# save_config: keeps a copy of --config as ${CONFIG_DIR}/install.env, so an
+# update started from the console (which passes that file to update.sh) runs
+# with the settings of this installation.
+save_config() {
+  local target="${CONFIG_DIR}/install.env"
+  if [ -z "$CONFIG_FILE" ]; then
+    return 0
+  fi
+  if [ -e "$target" ] && [ "$CONFIG_FILE" -ef "$target" ]; then
+    return 0
+  fi
+  write_file "$target" 0600 <"$CONFIG_FILE"
+  log_info "Saved the installation settings to ${target}"
+}
+
 # ---------------------------------------------------------------------------
 # Summary.
 # ---------------------------------------------------------------------------
@@ -2035,6 +2050,7 @@ main() {
   resolve_acceleratio_urls
   configure_traefik
   install_acceleratio
+  save_config
   print_summary
 }
 

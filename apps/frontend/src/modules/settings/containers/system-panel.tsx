@@ -1,10 +1,10 @@
 import { ControlPlaneUrlSettings } from './control-plane-url-settings';
-import { SystemSettings } from './system-settings';
+import { PlatformVersionSettings } from './platform-version-settings';
 
-/** General system settings, with the control plane URL below them. */
+/** The platform version and updates, then the control plane URL. */
 export const SystemPanel = () => (
   <div className="flex flex-col gap-4">
-    <SystemSettings />
+    <PlatformVersionSettings />
     <ControlPlaneUrlSettings />
   </div>
 );

@@ -10,6 +10,10 @@ import { NodeDrainService } from '@/application/node/node-drain.service';
 import { NodeJoinService } from '@/application/node/node-join.service';
 import { NodeOperationStore } from '@/application/node/node-operation.store';
 import { Ssh2Connector, SshConnector } from '@/application/node/node-ssh';
+import { PlatformReleaseService } from '@/application/platform-update/platform-release.service';
+import { PlatformUpdateController } from '@/application/platform-update/platform-update.controller';
+import { PlatformUpdateService } from '@/application/platform-update/platform-update.service';
+import { PlatformVersionService } from '@/application/platform-update/platform-version.service';
 import { ProjectController } from '@/application/project/project.controller';
 import { ProjectIsolationService } from '@/application/project/project-isolation.service';
 import { ProjectService } from '@/application/project/project.service';
@@ -57,6 +61,7 @@ import { VictoriaMetricsClient } from '@/vendor/victoriametrics/victoriametrics.
     HealthController,
     MetricsController,
     NodeController,
+    PlatformUpdateController,
     ProjectController,
     StorageClassController,
     StorageBenchmarkController,
@@ -71,6 +76,9 @@ import { VictoriaMetricsClient } from '@/vendor/victoriametrics/victoriametrics.
     NodeJoinService,
     NodeOperationStore,
     { provide: SshConnector, useClass: Ssh2Connector },
+    PlatformReleaseService,
+    PlatformUpdateService,
+    PlatformVersionService,
     ProjectService,
     ProjectIsolationService,
     StorageClassService,

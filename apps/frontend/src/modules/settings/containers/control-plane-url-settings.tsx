@@ -230,9 +230,20 @@ export const ControlPlaneUrlSettings = () => {
             </Button>
           </div>
           <FieldDescription>
-            {settings.current_url
-              ? `Currently served at ${settings.current_url}.`
-              : 'The console is served on the server address.'}
+            {settings.current_url ? (
+              <>
+                Currently served at{' '}
+                <a
+                  href={settings.current_url}
+                  className="font-mono text-brand-fg underline-offset-4 hover:underline"
+                >
+                  {settings.current_url}
+                </a>
+                .
+              </>
+            ) : (
+              'The console is served on the server address.'
+            )}
             {settings.fallback_url
               ? ` ${settings.fallback_url} always keeps working.`
               : ''}
