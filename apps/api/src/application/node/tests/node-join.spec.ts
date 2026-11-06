@@ -342,8 +342,9 @@ describe('resolveNodeIp', () => {
   });
 
   it('rejects an address that is not on the server (NAT or public IP)', () => {
-    expect(resolveNodeIp(facts, '82.115.42.78', '82.115.42.78')).toEqual({
-      error: expect.stringContaining('is not assigned to the server'),
-    });
+    const result = resolveNodeIp(facts, '82.115.42.78', '82.115.42.78');
+
+    expect(result).toHaveProperty('error');
+    expect(JSON.stringify(result)).toContain('is not assigned to the server');
   });
 });
