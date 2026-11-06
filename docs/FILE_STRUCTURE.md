@@ -671,4 +671,14 @@ SSH, with the scripts and requirement checks in `node-join-script.ts`. SSH goes 
 - better-auth responses are camelCase with Date objects (`emailVerified`, `createdAt`, `userId`). The
   auth controller maps them with private `toAuthUser`/`toAuthSession` serializers before returning, so
   the API surface stays snake_case. Keep vendor fields the caller needs (`token`, `url`) untouched.
+- Account endpoints (all behind the session guard, a user changes only themselves): `PATCH /auth/profile`
+  (name), `POST /auth/change-password` (`current_password`, `new_password`, `revoke_other_sessions`,
+  default true), `GET /auth/sessions`, `DELETE /auth/sessions/:id` and `DELETE /auth/sessions/others`.
+  They forward to better-auth (`updateUser`, `changePassword`, `listSessions`, `revokeSession`,
+  `revokeOtherSessions`). Session lists never include the token; revoking by id resolves the token
+  from the caller's own sessions. better-auth rate limits only requests through its HTTP handler, so
+  `PasswordAttemptLimiter` caps wrong current passwords at 5 per 15 minutes per user (429). Passwords
+  are never logged or returned. The email is read-only until a mail server exists for confirmation.
+- The console's `/settings?tab=profile` holds three sections: Profile (name), Password and Sessions
+  (`modules/settings/containers/profile-details-form.tsx`, `password-form.tsx`, `sessions-list.tsx`).
 - Successful responses return the shared contract type directly, without an envelope.

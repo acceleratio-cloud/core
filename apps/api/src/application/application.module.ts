@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AuthController } from '@/application/auth/auth.controller';
+import { PasswordAttemptLimiter } from '@/application/auth/password-attempt-limiter';
 import { HealthController } from '@/application/health/health.controller';
 import { MetricsController } from '@/application/metrics/metrics.controller';
 import { MetricsService } from '@/application/metrics/metrics.service';
@@ -64,6 +65,7 @@ import { VictoriaMetricsClient } from '@/vendor/victoriametrics/victoriametrics.
     S3BucketObjectsController,
   ],
   providers: [
+    PasswordAttemptLimiter,
     NodeService,
     NodeDrainService,
     NodeJoinService,

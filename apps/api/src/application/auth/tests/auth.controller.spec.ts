@@ -17,11 +17,17 @@ jest.mock('better-auth/node', () => ({
 }));
 
 import type { Request, Response } from 'express';
-import { ForbiddenException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  HttpException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { AuthService, type UserSession } from '@thallesp/nestjs-better-auth';
 import { DATABASE } from '@/vendor/db/database.constants';
 import { AuthController } from '../auth.controller';
+import { PasswordAttemptLimiter } from '../password-attempt-limiter';
 
 const createRequest = (): Request => ({ headers: {} }) as unknown as Request;
 
@@ -90,6 +96,11 @@ const createFixture = async (usersCount: number) => {
       signUpEmail: jest.fn(),
       signInEmail: jest.fn(),
       signOut: jest.fn(),
+      updateUser: jest.fn(),
+      changePassword: jest.fn(),
+      listSessions: jest.fn(),
+      revokeSession: jest.fn(),
+      revokeOtherSessions: jest.fn(),
     },
   };
 
@@ -98,6 +109,7 @@ const createFixture = async (usersCount: number) => {
     providers: [
       { provide: DATABASE, useValue: db },
       { provide: AuthService, useValue: auth },
+      PasswordAttemptLimiter,
     ],
   }).compile();
 
@@ -240,6 +252,152 @@ describe('AuthController', () => {
       await expect(
         controller.signOut(createRequest(), response),
       ).resolves.toEqual({ success: true });
+    });
+  });
+
+  describe('profile and sessions', () => {
+    const userSession = {
+      user,
+      session: { ...session },
+    } as unknown as UserSession;
+
+    it('updates only the name, trimmed', async () => {
+      const { controller, auth } = await createFixture(1);
+
+      const result = await controller.updateProfile(
+        { name: '  Ada B  ' },
+        createRequest(),
+        userSession,
+      );
+
+      expect(auth.api.updateUser).toHaveBeenCalledWith(
+        expect.objectContaining({ body: { name: 'Ada B' } }),
+      );
+      expect(result.name).toBe('Ada B');
+      expect(result.email).toBe('ada@example.com');
+    });
+
+    it('rejects an empty name', async () => {
+      const { controller, auth } = await createFixture(1);
+
+      await expect(
+        controller.updateProfile({ name: ' ' }, createRequest(), userSession),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(auth.api.updateUser).not.toHaveBeenCalled();
+    });
+
+    it('changes the password, revokes other sessions by default and forwards cookies', async () => {
+      const { controller, auth } = await createFixture(1);
+      const { response, setHeader } = createResponse();
+      auth.api.changePassword.mockResolvedValue(authResult({}, ['a=b']));
+
+      await expect(
+        controller.changePassword(
+          { current_password: 'old-password', new_password: 'new-password' },
+          createRequest(),
+          response,
+          userSession,
+        ),
+      ).resolves.toEqual({ success: true });
+
+      expect(auth.api.changePassword).toHaveBeenCalledWith(
+        expect.objectContaining({
+          body: {
+            currentPassword: 'old-password',
+            newPassword: 'new-password',
+            revokeOtherSessions: true,
+          },
+        }),
+      );
+      expect(setHeader).toHaveBeenCalledWith('set-cookie', ['a=b']);
+    });
+
+    it('rejects an unchanged password without calling better-auth', async () => {
+      const { controller, auth } = await createFixture(1);
+      const { response } = createResponse();
+
+      await expect(
+        controller.changePassword(
+          { current_password: 'same-password', new_password: 'same-password' },
+          createRequest(),
+          response,
+          userSession,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(auth.api.changePassword).not.toHaveBeenCalled();
+    });
+
+    it('locks out after repeated wrong current passwords', async () => {
+      const { controller, auth } = await createFixture(1);
+      const { response } = createResponse();
+      auth.api.changePassword.mockRejectedValue({
+        body: { code: 'INVALID_PASSWORD' },
+      });
+      const attempt = () =>
+        controller.changePassword(
+          { current_password: 'wrong-pass', new_password: 'new-password' },
+          createRequest(),
+          response,
+          userSession,
+        );
+
+      for (let i = 0; i < 5; i += 1) {
+        await expect(attempt()).rejects.toMatchObject({
+          body: { code: 'INVALID_PASSWORD' },
+        });
+      }
+
+      await expect(attempt()).rejects.toBeInstanceOf(HttpException);
+      expect(auth.api.changePassword).toHaveBeenCalledTimes(5);
+    });
+
+    it('lists sessions without tokens and marks the current one', async () => {
+      const { controller, auth } = await createFixture(1);
+      auth.api.listSessions.mockResolvedValue([
+        session,
+        { ...session, id: 'session-2', token: 'token-2' },
+      ]);
+
+      const result = await controller.listSessions(createRequest(), userSession);
+
+      expect(result.sessions.map((s) => s.current)).toEqual([true, false]);
+      expect(JSON.stringify(result)).not.toContain('token');
+    });
+
+    it('revokes another session by id through its token', async () => {
+      const { controller, auth } = await createFixture(1);
+      auth.api.listSessions.mockResolvedValue([
+        session,
+        { ...session, id: 'session-2', token: 'token-2' },
+      ]);
+
+      await controller.revokeSession('session-2', createRequest(), userSession);
+
+      expect(auth.api.revokeSession).toHaveBeenCalledWith(
+        expect.objectContaining({ body: { token: 'token-2' } }),
+      );
+    });
+
+    it('does not revoke the current or a foreign session', async () => {
+      const { controller, auth } = await createFixture(1);
+      auth.api.listSessions.mockResolvedValue([session]);
+
+      await expect(
+        controller.revokeSession('session-1', createRequest(), userSession),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      await expect(
+        controller.revokeSession('other', createRequest(), userSession),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(auth.api.revokeSession).not.toHaveBeenCalled();
+    });
+
+    it('revokes every other session', async () => {
+      const { controller, auth } = await createFixture(1);
+
+      await expect(
+        controller.revokeOtherSessions(createRequest()),
+      ).resolves.toEqual({ success: true });
+      expect(auth.api.revokeOtherSessions).toHaveBeenCalled();
     });
   });
 });

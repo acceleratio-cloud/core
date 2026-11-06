@@ -71,7 +71,7 @@ export const UserMenu = () => {
           </>
         ) : null}
 
-        <DropdownMenuLinkItem href="/profile">
+        <DropdownMenuLinkItem href="/settings?tab=profile">
           <User aria-hidden="true" strokeWidth={1.75} className="size-3.5 text-muted-foreground" />
           Profile
         </DropdownMenuLinkItem>
