@@ -7,11 +7,14 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  type OnApplicationBootstrap,
+  type OnApplicationShutdown,
 } from '@nestjs/common';
 import type { V1Deployment } from '@kubernetes/client-node';
 import type {
   CreateWorkloadPayload,
   DockerWorkloadConfig,
+  DockerWorkloadVolume,
   EnvVar,
   WorkloadEnv,
   UpdateWorkloadPayload,
@@ -20,10 +23,11 @@ import type {
   WorkloadPosition,
   WorkloadStatus,
 } from '@acceleratio/shared';
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, inArray } from 'drizzle-orm';
 import type { WorkloadVersion as WorkloadVersionContract } from '@acceleratio/shared';
 import { ProjectIsolationService } from '@/application/project/project-isolation.service';
 import { ProjectService } from '@/application/project/project.service';
+import { StorageClassService } from '@/application/storage-class/storage-class.service';
 import {
   CONFLICT_ID_PREFIX_LENGTH,
   DEFAULT_SLUG_LENGTH,
@@ -60,15 +64,20 @@ import {
   newDockerConfig,
   normalizeDockerConfig,
   omitsEnv,
+  omitsVolumes,
   redactDockerConfig,
 } from './docker-workload.config';
 import { DockerWorkloadNetworkService } from './docker-workload-network.service';
 import {
   buildDeployment,
   buildEnvSecret,
+  buildVolumeClaim,
   envSecretNameOf,
+  MANAGED_BY_LABEL,
+  MANAGED_BY_VALUE,
   envSecretPrefix,
   RESTARTED_AT_ANNOTATION,
+  VOLUME_ID_LABEL,
   WORKLOAD_ID_LABEL,
   type WorkloadManifestInput,
 } from './docker-workload.manifests';
@@ -81,6 +90,19 @@ const ALREADY_ACTIVE_MESSAGE = 'Version is already active';
 const ONLY_DRAFT_MESSAGE =
   'Workload has never been deployed; its draft is its only config';
 const UNSUPPORTED_TYPE_MESSAGE = 'Unsupported workload type';
+const VOLUME_FIXED_MESSAGE =
+  'The size and storage profile of a volume cannot change after it is created';
+const UNKNOWN_VOLUME_MESSAGE = 'Unknown volume';
+/** How often a claim that pods still mount is checked again after a deploy. */
+export const VOLUME_PRUNE_RETRY_MS = 10_000;
+/** Retries cover the rollout deadline, then the sweep takes over. */
+export const VOLUME_PRUNE_MAX_ATTEMPTS = 36;
+/** First orphan sweep after start, then this often. */
+export const VOLUME_SWEEP_DELAY_MS = 30_000;
+export const VOLUME_SWEEP_INTERVAL_MS = 10 * 60_000;
+
+const sweepEnabled = (): boolean =>
+  process.env.VOLUME_SWEEP_ENABLED?.trim().toLowerCase() !== 'false';
 
 /** What one apply writes to the cluster and records afterwards. */
 interface ApplyPlan {
@@ -148,10 +170,18 @@ const describeError = (error: unknown): string =>
  * services and never pass through this one.
  */
 @Injectable()
-export class DockerWorkloadService implements WorkloadTypeService {
+export class DockerWorkloadService
+  implements WorkloadTypeService, OnApplicationBootstrap, OnApplicationShutdown
+{
   readonly type = 'docker' as const;
 
   private readonly logger = new Logger(DockerWorkloadService.name);
+
+  /** Tail of the cluster writes queued per workload; see `exclusive`. */
+  private readonly queues = new Map<string, Promise<unknown>>();
+
+  private sweepTimer?: ReturnType<typeof setTimeout>;
+  private sweepInterval?: ReturnType<typeof setInterval>;
 
   constructor(
     @Inject(DATABASE) private readonly db: Database,
@@ -162,7 +192,95 @@ export class DockerWorkloadService implements WorkloadTypeService {
     private readonly events: WorkloadEventsService,
     private readonly versions: WorkloadVersionService,
     private readonly network: DockerWorkloadNetworkService,
+    private readonly storageClasses: StorageClassService,
   ) {}
+
+  onApplicationBootstrap(): void {
+    if (!sweepEnabled()) {
+      return;
+    }
+
+    const run = () => {
+      void this.sweepVolumeClaims().catch((error: unknown) => {
+        this.logger.warn(
+          `Could not sweep volume claims: ${describeError(error)}`,
+        );
+      });
+    };
+
+    this.sweepTimer = setTimeout(run, VOLUME_SWEEP_DELAY_MS);
+    this.sweepTimer.unref?.();
+    this.sweepInterval = setInterval(run, VOLUME_SWEEP_INTERVAL_MS);
+    this.sweepInterval.unref?.();
+  }
+
+  onApplicationShutdown(): void {
+    clearTimeout(this.sweepTimer);
+    clearInterval(this.sweepInterval);
+  }
+
+  /**
+   * Deletes claims that no config needs any more: left by a deploy that
+   * failed after creating them and whose draft was then discarded, or kept
+   * for old pods while the API restarted. A claim stays while the active
+   * version or the draft lists its volume, or while pods mount it.
+   *
+   * Claims of services this database does not know are never touched: a
+   * second installation, or a development API pointed at a shared cluster,
+   * labels its claims the same way.
+   */
+  async sweepVolumeClaims(): Promise<void> {
+    const claims =
+      await this.kubernetes.coreV1.listPersistentVolumeClaimForAllNamespaces({
+        labelSelector: `${MANAGED_BY_LABEL}=${MANAGED_BY_VALUE},${VOLUME_ID_LABEL}`,
+      });
+    const workloadIds = [
+      ...new Set(
+        claims.items.flatMap((claim) => {
+          const id = claim.metadata?.labels?.[WORKLOAD_ID_LABEL];
+
+          return id ? [id] : [];
+        }),
+      ),
+    ];
+
+    if (workloadIds.length === 0) {
+      return;
+    }
+
+    const rows = await this.db
+      .select()
+      .from(workload)
+      .where(
+        and(inArray(workload.id, workloadIds), eq(workload.type, this.type)),
+      );
+
+    for (const row of rows) {
+      await this.exclusive(row.id, async () => {
+        const [fresh] = await this.db
+          .select()
+          .from(workload)
+          .where(eq(workload.id, row.id))
+          .limit(1);
+
+        if (!fresh) {
+          return;
+        }
+
+        const active = await this.activeVersion(fresh);
+        const keep = new Set(
+          [
+            ...((active?.config as DockerWorkloadConfig | undefined)?.volumes ??
+              []),
+            ...((fresh.draft_config as DockerWorkloadConfig | null)?.volumes ??
+              []),
+          ].map((volume) => volume.id!),
+        );
+
+        await this.pruneVolumeClaims(fresh, keep);
+      });
+    }
+  }
 
   async list(projectId: string): Promise<Workload[]> {
     const rows = await this.db
@@ -205,6 +323,9 @@ export class DockerWorkloadService implements WorkloadTypeService {
 
     const name = normalizeName(payload?.name);
     const config = newDockerConfig(payload?.config);
+
+    // A new service has no volumes yet, so every one it brings is new.
+    await this.reconcileVolumes(config, []);
     const position = await nextWorkloadPosition(this.db, projectId);
     // The id is generated here rather than by the database so external_name can
     // be computed before the single insert statement.
@@ -289,6 +410,21 @@ export class DockerWorkloadService implements WorkloadTypeService {
           config.env = kept;
         }
       }
+      if (omitsVolumes(payload.config)) {
+        const kept = this.effectiveVolumes(existing, active);
+
+        if (kept.length > 0) {
+          config.volumes = kept;
+        }
+      }
+
+      await this.reconcileVolumes(config, [
+        ...((active?.config as DockerWorkloadConfig | undefined)?.volumes ??
+          []),
+        ...((existing.draft_config as DockerWorkloadConfig | null)?.volumes ??
+          []),
+      ]);
+
       // Editing back to the applied config leaves nothing to deploy.
       const draft =
         active !== null && sameConfig(config, active.config) ? null : config;
@@ -340,36 +476,41 @@ export class DockerWorkloadService implements WorkloadTypeService {
    * there is no draft.
    */
   async deploy(projectId: string, id: string): Promise<Workload> {
-    const row = await this.findRow(projectId, id);
-    const active = await this.activeVersion(row);
-    const draft =
-      row.draft_config === null
-        ? null
-        : normalizeDockerConfig(row.draft_config);
+    const { id: workloadId } = await this.findRow(projectId, id);
 
-    if (draft === null && active === null) {
-      throw new ConflictException(NO_CONFIG_MESSAGE);
-    }
+    // Reads happen inside the queue, so they see what an earlier apply left.
+    return this.exclusive(workloadId, async () => {
+      const row = await this.findRow(projectId, id);
+      const active = await this.activeVersion(row);
+      const draft =
+        row.draft_config === null
+          ? null
+          : normalizeDockerConfig(row.draft_config);
 
-    if (
-      draft !== null &&
-      (active === null || !sameConfig(draft, active.config))
-    ) {
-      return this.apply(row, {
-        config: draft,
-        versionId: randomUUID(),
-        newVersion: true,
-        appliedDraft: draft,
+      if (draft === null && active === null) {
+        throw new ConflictException(NO_CONFIG_MESSAGE);
+      }
+
+      if (
+        draft !== null &&
+        (active === null || !sameConfig(draft, active.config))
+      ) {
+        return this.applyNow(row, {
+          config: draft,
+          versionId: randomUUID(),
+          newVersion: true,
+          appliedDraft: draft,
+        });
+      }
+
+      // Either no draft, or a draft that equals the applied config (left over
+      // after a rollback moved the active version under it).
+      return this.applyNow(row, {
+        config: normalizeDockerConfig(active!.config),
+        versionId: active!.id,
+        newVersion: false,
+        ...(draft !== null ? { appliedDraft: draft } : {}),
       });
-    }
-
-    // Either no draft, or a draft that equals the applied config (left over
-    // after a rollback moved the active version under it).
-    return this.apply(row, {
-      config: normalizeDockerConfig(active!.config),
-      versionId: active!.id,
-      newVersion: false,
-      ...(draft !== null ? { appliedDraft: draft } : {}),
     });
   }
 
@@ -378,17 +519,22 @@ export class DockerWorkloadService implements WorkloadTypeService {
    * changes are left for an explicit deploy.
    */
   async start(projectId: string, id: string): Promise<Workload> {
-    const row = await this.findRow(projectId, id);
-    const active = await this.activeVersion(row);
+    const { id: workloadId } = await this.findRow(projectId, id);
 
-    if (active === null) {
-      throw new ConflictException(NOT_DEPLOYED_MESSAGE);
-    }
+    // Reads happen inside the queue, so they see what an earlier apply left.
+    return this.exclusive(workloadId, async () => {
+      const row = await this.findRow(projectId, id);
+      const active = await this.activeVersion(row);
 
-    return this.apply(row, {
-      config: normalizeDockerConfig(active.config),
-      versionId: active.id,
-      newVersion: false,
+      if (active === null) {
+        throw new ConflictException(NOT_DEPLOYED_MESSAGE);
+      }
+
+      return this.applyNow(row, {
+        config: normalizeDockerConfig(active.config),
+        versionId: active.id,
+        newVersion: false,
+      });
     });
   }
 
@@ -401,18 +547,32 @@ export class DockerWorkloadService implements WorkloadTypeService {
     id: string,
     versionId: string,
   ): Promise<Workload> {
-    const row = await this.findRow(projectId, id);
-    const target = await this.versions.get(row.id, versionId);
+    const { id: workloadId } = await this.findRow(projectId, id);
 
-    if (target.id === row.active_version_id) {
-      throw new ConflictException(ALREADY_ACTIVE_MESSAGE);
-    }
+    return this.exclusive(workloadId, async () => {
+      const row = await this.findRow(projectId, id);
+      const target = await this.versions.get(row.id, versionId);
 
-    return this.apply(row, {
-      config: normalizeDockerConfig(target.config),
-      versionId: randomUUID(),
-      newVersion: true,
-      sourceVersionId: target.id,
+      if (target.id === row.active_version_id) {
+        throw new ConflictException(ALREADY_ACTIVE_MESSAGE);
+      }
+
+      // Rollback never touches volumes: the version it restores runs with the
+      // volumes the service has now, so no claim is created or deleted and no
+      // data comes back empty or goes away.
+      const active = await this.activeVersion(row);
+      const config = normalizeDockerConfig(target.config);
+
+      delete config.volumes;
+      const current = (active?.config as DockerWorkloadConfig | undefined)
+        ?.volumes;
+
+      return this.applyNow(row, {
+        config: current?.length ? { ...config, volumes: current } : config,
+        versionId: randomUUID(),
+        newVersion: true,
+        sourceVersionId: target.id,
+      });
     });
   }
 
@@ -557,6 +717,17 @@ export class DockerWorkloadService implements WorkloadTypeService {
 
   async remove(projectId: string, id: string): Promise<void> {
     const row = await this.findRow(projectId, id);
+
+    await this.exclusive(row.id, () => this.removeFromCluster(row));
+
+    this.guard.noteMutation(row.id);
+
+    await this.db
+      .delete(workload)
+      .where(and(eq(workload.id, id), eq(workload.project_id, projectId)));
+  }
+
+  private async removeFromCluster(row: WorkloadRow): Promise<void> {
     const namespace = projectNamespace(row.project_id);
 
     try {
@@ -570,18 +741,34 @@ export class DockerWorkloadService implements WorkloadTypeService {
       );
       // The Deployment is gone, so no ReplicaSet keeps any Secret.
       await this.pruneEnvSecrets(row);
+      // The service and its data go together, even while its pods exit.
+      await this.pruneVolumeClaims(row, new Set(), { force: true });
     } catch (error) {
       throw this.mapClusterError(error);
     }
-
-    this.guard.noteMutation(row.id);
-
-    await this.db
-      .delete(workload)
-      .where(and(eq(workload.id, id), eq(workload.project_id, projectId)));
   }
 
-  private async apply(row: WorkloadRow, plan: ApplyPlan): Promise<Workload> {
+  /**
+   * Runs cluster writes of one workload one after another. Two applies that
+   * overlap could otherwise delete each other's new claims. The queue lives
+   * in this process, which is the only API instance a cluster has.
+   */
+  private exclusive<T>(workloadId: string, run: () => Promise<T>): Promise<T> {
+    const previous = this.queues.get(workloadId) ?? Promise.resolve();
+    const next = previous.catch(() => undefined).then(run);
+    const tail = next.catch(() => undefined);
+
+    this.queues.set(workloadId, tail);
+    void tail.then(() => {
+      if (this.queues.get(workloadId) === tail) {
+        this.queues.delete(workloadId);
+      }
+    });
+
+    return next;
+  }
+
+  private async applyNow(row: WorkloadRow, plan: ApplyPlan): Promise<Workload> {
     await this.isolation.ensure(row.project_id);
 
     const input: WorkloadManifestInput = {
@@ -594,8 +781,10 @@ export class DockerWorkloadService implements WorkloadTypeService {
     };
 
     try {
-      // The Secret goes first, so new pods never start against a missing one.
+      // The Secret and the claims go first, so new pods never start against
+      // a missing one.
       await this.ensureEnvSecret(input);
+      await this.ensureVolumeClaims(input);
       await this.upsertDeployment(input);
     } catch (error) {
       throw this.mapClusterError(error);
@@ -609,6 +798,25 @@ export class DockerWorkloadService implements WorkloadTypeService {
     } catch (error) {
       this.logger.warn(
         `Could not clean up env Secrets of workload ${row.id}: ${describeError(error)}`,
+      );
+    }
+
+    // Claims of volumes this version dropped. A claim that pods of the
+    // previous version still mount stays until the rollout replaced them, so
+    // a failed rollout keeps the old pods and their data working.
+    const keep = new Set(
+      (plan.config.volumes ?? []).map((volume) => volume.id!),
+    );
+
+    try {
+      const pending = await this.pruneVolumeClaims(input, keep);
+
+      if (pending > 0) {
+        this.scheduleVolumePrune(input, plan.versionId, keep, 1);
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Could not clean up volumes of workload ${row.id}: ${describeError(error)}`,
       );
     }
 
@@ -652,6 +860,236 @@ export class DockerWorkloadService implements WorkloadTypeService {
         throw error;
       }
     }
+  }
+
+  /**
+   * Gives new volumes their ids and holds known ones to what they were
+   * created with: only the mount path of a volume can change. `known` are the
+   * volumes of the active version and the current draft. Storage profiles of
+   * new volumes must exist.
+   */
+  private async reconcileVolumes(
+    config: DockerWorkloadConfig,
+    known: DockerWorkloadVolume[],
+  ): Promise<void> {
+    if (!config.volumes?.length) {
+      return;
+    }
+
+    const byId = new Map(known.map((volume) => [volume.id, volume]));
+    const profiles = new Set<string | null>();
+
+    config.volumes = config.volumes.map((volume) => {
+      if (volume.id === undefined) {
+        profiles.add(volume.storage_class_id);
+
+        return { id: randomUUID(), ...volume };
+      }
+
+      const stored = byId.get(volume.id);
+
+      if (stored === undefined) {
+        throw new BadRequestException(UNKNOWN_VOLUME_MESSAGE);
+      }
+
+      if (
+        stored.size_gb !== volume.size_gb ||
+        stored.storage_class_id !== volume.storage_class_id
+      ) {
+        throw new BadRequestException(VOLUME_FIXED_MESSAGE);
+      }
+
+      return volume;
+    });
+
+    for (const id of profiles) {
+      await this.storageClasses.assertVolumeProfile(id);
+    }
+  }
+
+  /**
+   * Creates the claim of every volume of the applied config. A volume's size
+   * and storage class never change, so a claim that already exists is right.
+   */
+  private async ensureVolumeClaims(
+    input: WorkloadManifestInput,
+  ): Promise<void> {
+    const namespace = projectNamespace(input.project_id);
+    const classNames = new Map<string | null, string>();
+
+    for (const volume of input.config.volumes ?? []) {
+      let className = classNames.get(volume.storage_class_id);
+
+      if (className === undefined) {
+        try {
+          className = await this.storageClasses.kubernetesName(
+            volume.storage_class_id,
+          );
+        } catch (error) {
+          if (error instanceof NotFoundException) {
+            throw new ConflictException(
+              `The storage profile of the volume at ${volume.mount_path} no longer exists`,
+            );
+          }
+
+          throw error;
+        }
+
+        classNames.set(volume.storage_class_id, className);
+      }
+
+      const body = buildVolumeClaim(input, volume, className);
+
+      try {
+        await this.kubernetes.coreV1.createNamespacedPersistentVolumeClaim({
+          namespace,
+          body,
+        });
+      } catch (error) {
+        if (getKubernetesStatusCode(error) !== 409) {
+          throw error;
+        }
+
+        await this.checkExistingClaim(body.metadata!.name!, namespace, volume);
+      }
+    }
+  }
+
+  /**
+   * A claim that already exists is right only when it is this volume's and
+   * it is not on its way out: pods cannot mount a claim being deleted, so
+   * reusing one would leave them pending.
+   */
+  private async checkExistingClaim(
+    name: string,
+    namespace: string,
+    volume: DockerWorkloadVolume,
+  ): Promise<void> {
+    const claim =
+      await this.kubernetes.coreV1.readNamespacedPersistentVolumeClaim({
+        name,
+        namespace,
+      });
+
+    if (claim.metadata?.deletionTimestamp) {
+      throw new ConflictException(
+        `The volume at ${volume.mount_path} is still being deleted. Deploy again once it is gone.`,
+      );
+    }
+
+    if (claim.metadata?.labels?.[VOLUME_ID_LABEL] !== volume.id) {
+      throw new ConflictException(
+        `A volume claim named ${name} already exists and belongs to something else`,
+      );
+    }
+  }
+
+  /**
+   * Deletes the claims of this service whose volume is not in `keep`. Unless
+   * `force` is set, a claim that a ReplicaSet with pods still mounts stays;
+   * the count of those is returned so the caller can try again later.
+   */
+  private async pruneVolumeClaims(
+    row: Pick<WorkloadManifestInput, 'id' | 'project_id'>,
+    keep: Set<string>,
+    { force = false }: { force?: boolean } = {},
+  ): Promise<number> {
+    const namespace = projectNamespace(row.project_id);
+    const labelSelector = `${WORKLOAD_ID_LABEL}=${row.id}`;
+    const [claims, replicaSets] = await Promise.all([
+      this.kubernetes.coreV1.listNamespacedPersistentVolumeClaim({
+        namespace,
+        labelSelector,
+      }),
+      force
+        ? Promise.resolve({ items: [] })
+        : this.kubernetes.appsV1.listNamespacedReplicaSet({
+            namespace,
+            labelSelector,
+          }),
+    ]);
+    const inUse = new Set<string>();
+
+    for (const replicaSet of replicaSets.items) {
+      if (
+        (replicaSet.spec?.replicas ?? 0) === 0 &&
+        (replicaSet.status?.replicas ?? 0) === 0
+      ) {
+        continue;
+      }
+
+      for (const volume of replicaSet.spec?.template?.spec?.volumes ?? []) {
+        if (volume.persistentVolumeClaim?.claimName) {
+          inUse.add(volume.persistentVolumeClaim.claimName);
+        }
+      }
+    }
+
+    let pending = 0;
+
+    for (const claim of claims.items) {
+      const name = claim.metadata?.name;
+      const volumeId = claim.metadata?.labels?.[VOLUME_ID_LABEL];
+
+      if (name === undefined || volumeId === undefined || keep.has(volumeId)) {
+        continue;
+      }
+
+      if (inUse.has(name)) {
+        pending += 1;
+        continue;
+      }
+
+      await this.deleteIgnoringNotFound(() =>
+        this.kubernetes.coreV1.deleteNamespacedPersistentVolumeClaim({
+          name,
+          namespace,
+        }),
+      );
+    }
+
+    return pending;
+  }
+
+  /**
+   * Tries the prune again while the rollout replaces the pods that still
+   * mount a dropped volume. It stops once nothing is pending, when another
+   * version became active (that apply prunes for itself) or after the
+   * rollout deadline; an API restart leaves the rest for the next apply.
+   */
+  private scheduleVolumePrune(
+    input: WorkloadManifestInput,
+    versionId: string,
+    keep: Set<string>,
+    attempt: number,
+  ): void {
+    const timer = setTimeout(() => {
+      void this.exclusive(input.id, async () => {
+        const [row] = await this.db
+          .select({ active_version_id: workload.active_version_id })
+          .from(workload)
+          .where(eq(workload.id, input.id))
+          .limit(1);
+
+        if (row?.active_version_id !== versionId) {
+          return 0;
+        }
+
+        return this.pruneVolumeClaims(input, keep);
+      })
+        .then((pending) => {
+          if (pending > 0 && attempt < VOLUME_PRUNE_MAX_ATTEMPTS) {
+            this.scheduleVolumePrune(input, versionId, keep, attempt + 1);
+          }
+        })
+        .catch((error: unknown) => {
+          this.logger.warn(
+            `Could not clean up volumes of workload ${input.id}: ${describeError(error)}`,
+          );
+        });
+    }, VOLUME_PRUNE_RETRY_MS);
+
+    timer.unref?.();
   }
 
   /**
@@ -872,6 +1310,18 @@ export class DockerWorkloadService implements WorkloadTypeService {
     const found = await this.versions.findByIds([row.active_version_id]);
 
     return found.get(row.active_version_id) ?? null;
+  }
+
+  /** The volumes a service is heading to: the draft's, else the active ones. */
+  private effectiveVolumes(
+    row: WorkloadRow,
+    active: WorkloadVersionRow | null,
+  ): DockerWorkloadVolume[] {
+    const config = (row.draft_config ??
+      active?.config ??
+      null) as DockerWorkloadConfig | null;
+
+    return config?.volumes ?? [];
   }
 
   private effectiveEnv(

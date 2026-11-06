@@ -207,3 +207,82 @@ describe('normalizeDockerConfig env', () => {
     ).toEqual([{ key: 'A', value: '1' }]);
   });
 });
+
+describe('normalizeDockerConfig volumes', () => {
+  const volume = { mount_path: '/data', size_gb: 10, storage_class_id: null };
+
+  it('keeps volumes in order and trims trailing slashes', () => {
+    expect(
+      normalize({
+        docker_image: 'nginx',
+        volumes: [
+          { ...volume, mount_path: ' /data/ ' },
+          { mount_path: '/cache', size_gb: 1 },
+        ],
+      }).volumes,
+    ).toEqual([
+      volume,
+      { mount_path: '/cache', size_gb: 1, storage_class_id: null },
+    ]);
+  });
+
+  it('omits an empty list', () => {
+    expect(normalize({ docker_image: 'nginx', volumes: [] })).toEqual({
+      docker_image: 'nginx',
+    });
+  });
+
+  it.each([
+    ['relative', 'data'],
+    ['root', '/'],
+    ['dot segment', '/data/../etc'],
+    ['empty segment', '/data//x'],
+    ['colon', '/data:x'],
+  ])('rejects a %s mount path', (_, mountPath) => {
+    expect(() =>
+      normalize({
+        docker_image: 'nginx',
+        volumes: [{ ...volume, mount_path: mountPath }],
+      }),
+    ).toThrow(BadRequestException);
+  });
+
+  it.each([0, 101, 1.5, '10'])('rejects a size of %p', (size) => {
+    expect(() =>
+      normalize({
+        docker_image: 'nginx',
+        volumes: [{ ...volume, size_gb: size }],
+      }),
+    ).toThrow('between 1 and 100');
+  });
+
+  it('rejects two volumes at one path', () => {
+    expect(() =>
+      normalize({
+        docker_image: 'nginx',
+        volumes: [volume, { ...volume, mount_path: '/data/' }],
+      }),
+    ).toThrow('/data');
+  });
+
+  it('rejects a storage profile that is not an id', () => {
+    expect(() =>
+      normalize({
+        docker_image: 'nginx',
+        volumes: [{ ...volume, storage_class_id: 'fast' }],
+      }),
+    ).toThrow('storage profile');
+  });
+
+  it('rejects more than ten volumes', () => {
+    expect(() =>
+      normalize({
+        docker_image: 'nginx',
+        volumes: Array.from({ length: 11 }, (_, index) => ({
+          ...volume,
+          mount_path: `/v${index}`,
+        })),
+      }),
+    ).toThrow('at most 10');
+  });
+});

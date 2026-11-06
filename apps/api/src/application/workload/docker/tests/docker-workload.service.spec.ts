@@ -2,6 +2,7 @@ import type { V1Deployment } from '@kubernetes/client-node';
 import type { WorkloadType } from '@acceleratio/shared';
 import type { ProjectIsolationService } from '@/application/project/project-isolation.service';
 import type { ProjectService } from '@/application/project/project.service';
+import type { StorageClassService } from '@/application/storage-class/storage-class.service';
 import type { Database } from '@/vendor/db/database.constants';
 import type { KubernetesService } from '@/vendor/kubernetes/kubernetes.service';
 import type { WorkloadEventsService } from '../../observer/workload-events.service';
@@ -23,6 +24,9 @@ jest.mock('@/application/project/project.service', () => ({
 }));
 jest.mock('@/application/project/project-isolation.service', () => ({
   ProjectIsolationService: class ProjectIsolationService {},
+}));
+jest.mock('@/application/storage-class/storage-class.service', () => ({
+  StorageClassService: class StorageClassService {},
 }));
 
 const projectId = '2f1c9a3e-8b7d-4e6f-9a0b-1c2d3e4f5a6b';
@@ -162,6 +166,15 @@ const createService = () => {
     listNamespacedSecret: jest.fn().mockResolvedValue({ items: [] }),
     createNamespacedSecret: jest.fn(),
     deleteNamespacedSecret: jest.fn(),
+    listNamespacedPersistentVolumeClaim: jest
+      .fn()
+      .mockResolvedValue({ items: [] }),
+    listPersistentVolumeClaimForAllNamespaces: jest
+      .fn()
+      .mockResolvedValue({ items: [] }),
+    createNamespacedPersistentVolumeClaim: jest.fn(),
+    readNamespacedPersistentVolumeClaim: jest.fn(),
+    deleteNamespacedPersistentVolumeClaim: jest.fn(),
   };
   const kubernetes = { appsV1, coreV1 } as unknown as KubernetesService;
   const exists = jest.fn();
@@ -193,6 +206,12 @@ const createService = () => {
     clearAppliedDraft: jest.fn(),
   };
   const network = { removeAll: jest.fn() };
+  const storageClasses = {
+    kubernetesName: jest.fn((id: string | null) =>
+      Promise.resolve(id === null ? 'seaweedfs-storage' : `sc-${id}`),
+    ),
+    assertVolumeProfile: jest.fn(() => Promise.resolve()),
+  };
   const service = new DockerWorkloadService(
     database.db,
     projectService,
@@ -202,6 +221,7 @@ const createService = () => {
     events,
     versionsFake as unknown as WorkloadVersionService,
     network as unknown as DockerWorkloadNetworkService,
+    storageClasses as unknown as StorageClassService,
   );
 
   return {
@@ -214,6 +234,7 @@ const createService = () => {
     exists,
     noteMutation,
     publish,
+    storageClasses,
     versions: versionsFake,
   };
 };
@@ -1333,5 +1354,617 @@ describe('DockerWorkloadService environment values', () => {
     expect(set).toHaveBeenCalledWith({
       draft_config: { docker_image: 'nginx:1.25' },
     });
+  });
+});
+
+describe('DockerWorkloadService volumes', () => {
+  const volumeId = '7c8d9e0f-1a2b-4c3d-8e4f-5a6b7c8d9e0f';
+  const profileId = '8d9e0f1a-2b3c-4d4e-9f5a-6b7c8d9e0f1a';
+  const storedVolume = {
+    id: volumeId,
+    mount_path: '/data',
+    size_gb: 10,
+    storage_class_id: null,
+  };
+  const withVolumeDraft = (): WorkloadRow => ({
+    ...baseRow,
+    draft_config: { docker_image: 'nginx:1.25', volumes: [storedVolume] },
+  });
+
+  it('assigns an id to a new volume and checks its profile', async () => {
+    const { service, limit, set, returning, storageClasses } = createService();
+
+    limit.mockResolvedValue([baseRow]);
+    returning.mockResolvedValue([baseRow]);
+
+    await service.update(projectId, workloadId, {
+      config: {
+        docker_image: 'nginx:1.25',
+        volumes: [
+          { mount_path: '/data/', size_gb: 5, storage_class_id: profileId },
+        ],
+      },
+    });
+
+    const draft = (set.mock.calls[0] as [{ draft_config: unknown }])[0]
+      .draft_config as { volumes: { id: string }[] };
+
+    expect(draft.volumes).toEqual([
+      {
+        id: expect.stringMatching(/^[0-9a-f-]{36}$/) as unknown,
+        mount_path: '/data',
+        size_gb: 5,
+        storage_class_id: profileId,
+      },
+    ]);
+    expect(storageClasses.assertVolumeProfile).toHaveBeenCalledWith(profileId);
+  });
+
+  it('lets a known volume change its mount path', async () => {
+    const { service, limit, set, returning } = createService();
+
+    limit.mockResolvedValue([withVolumeDraft()]);
+    returning.mockResolvedValue([baseRow]);
+
+    await service.update(projectId, workloadId, {
+      config: {
+        docker_image: 'nginx:1.25',
+        volumes: [{ ...storedVolume, mount_path: '/var/lib/data' }],
+      },
+    });
+
+    expect(set).toHaveBeenCalledWith({
+      draft_config: {
+        docker_image: 'nginx:1.25',
+        volumes: [{ ...storedVolume, mount_path: '/var/lib/data' }],
+      },
+    });
+  });
+
+  it('rejects a size or profile change of a known volume', async () => {
+    const { service, limit } = createService();
+
+    limit.mockResolvedValue([withVolumeDraft()]);
+
+    await expect(
+      service.update(projectId, workloadId, {
+        config: {
+          docker_image: 'nginx:1.25',
+          volumes: [{ ...storedVolume, size_gb: 20 }],
+        },
+      }),
+    ).rejects.toThrow('cannot change');
+    await expect(
+      service.update(projectId, workloadId, {
+        config: {
+          docker_image: 'nginx:1.25',
+          volumes: [{ ...storedVolume, storage_class_id: profileId }],
+        },
+      }),
+    ).rejects.toThrow('cannot change');
+  });
+
+  it('rejects an id the service never had', async () => {
+    const { service, limit } = createService();
+
+    limit.mockResolvedValue([baseRow]);
+
+    await expect(
+      service.update(projectId, workloadId, {
+        config: { docker_image: 'nginx:1.25', volumes: [storedVolume] },
+      }),
+    ).rejects.toThrow('Unknown volume');
+  });
+
+  it('creates claims before the Deployment and mounts them', async () => {
+    const { service, limit, returning, appsV1, coreV1 } = createService();
+    const order: string[] = [];
+
+    limit.mockResolvedValue([withVolumeDraft()]);
+    coreV1.createNamespacedPersistentVolumeClaim.mockImplementation(() => {
+      order.push('claim');
+      return Promise.resolve({});
+    });
+    appsV1.readNamespacedDeployment.mockResolvedValue(undefined);
+    appsV1.createNamespacedDeployment.mockImplementation(() => {
+      order.push('deployment');
+      return Promise.resolve({});
+    });
+    returning.mockResolvedValue([baseRow]);
+
+    await service.deploy(projectId, workloadId);
+
+    expect(order).toEqual(['claim', 'deployment']);
+    expect(
+      firstArgument(coreV1.createNamespacedPersistentVolumeClaim),
+    ).toMatchObject({
+      namespace,
+      body: {
+        metadata: {
+          name: `${externalName}-vol-7c8d9e0f1a2b4c3d8e4f5a6b7c8d9e0f`,
+        },
+        spec: {
+          storageClassName: 'seaweedfs-storage',
+          resources: { requests: { storage: '10Gi' } },
+        },
+      },
+    });
+
+    const deployment = (
+      firstArgument(appsV1.createNamespacedDeployment) as { body: V1Deployment }
+    ).body;
+
+    expect(deployment.spec?.template.spec?.volumes).toEqual([
+      {
+        name: 'vol-7c8d9e0f1a2b4c3d8e4f5a6b7c8d9e0f',
+        persistentVolumeClaim: {
+          claimName: `${externalName}-vol-7c8d9e0f1a2b4c3d8e4f5a6b7c8d9e0f`,
+        },
+      },
+    ]);
+    expect(deployment.spec?.template.spec?.containers[0].volumeMounts).toEqual([
+      { name: 'vol-7c8d9e0f1a2b4c3d8e4f5a6b7c8d9e0f', mountPath: '/data' },
+    ]);
+  });
+
+  it('accepts a claim that already exists', async () => {
+    const { service, limit, returning, appsV1, coreV1 } = createService();
+
+    limit.mockResolvedValue([withVolumeDraft()]);
+    coreV1.createNamespacedPersistentVolumeClaim.mockRejectedValue({
+      code: 409,
+    });
+    coreV1.readNamespacedPersistentVolumeClaim.mockResolvedValue({
+      metadata: { labels: { 'acceleratio.io/volume-id': volumeId } },
+    });
+    appsV1.readNamespacedDeployment.mockResolvedValue(undefined);
+    appsV1.createNamespacedDeployment.mockResolvedValue({});
+    returning.mockResolvedValue([baseRow]);
+
+    await expect(service.deploy(projectId, workloadId)).resolves.toBeDefined();
+  });
+
+  it('deletes claims of volumes the deployed config dropped', async () => {
+    const { service, limit, returning, appsV1, coreV1 } = createService();
+
+    limit.mockResolvedValue([withVolumeDraft()]);
+    coreV1.listNamespacedPersistentVolumeClaim.mockResolvedValue({
+      items: [
+        {
+          metadata: {
+            name: `${externalName}-vol-7c8d9e0f1a2b4c3d8e4f5a6b7c8d9e0f`,
+            labels: { 'acceleratio.io/volume-id': volumeId },
+          },
+        },
+        {
+          metadata: {
+            name: `${externalName}-vol-dropped`,
+            labels: { 'acceleratio.io/volume-id': 'dropped' },
+          },
+        },
+      ],
+    });
+    appsV1.readNamespacedDeployment.mockResolvedValue(undefined);
+    appsV1.createNamespacedDeployment.mockResolvedValue({});
+    returning.mockResolvedValue([baseRow]);
+
+    await service.deploy(projectId, workloadId);
+
+    expect(coreV1.listNamespacedPersistentVolumeClaim).toHaveBeenCalledWith({
+      namespace,
+      labelSelector: `acceleratio.io/workload-id=${workloadId}`,
+    });
+    expect(
+      coreV1.deleteNamespacedPersistentVolumeClaim.mock.calls.map(
+        ([arg]: unknown[]) => arg,
+      ),
+    ).toEqual([{ name: `${externalName}-vol-dropped`, namespace }]);
+  });
+
+  it('deletes every claim with the service', async () => {
+    const { service, limit, deleteWhere, appsV1, coreV1 } = createService();
+
+    limit.mockResolvedValue([baseRow]);
+    appsV1.deleteNamespacedDeployment.mockResolvedValue({});
+    coreV1.listNamespacedPersistentVolumeClaim.mockResolvedValue({
+      items: [
+        {
+          metadata: {
+            name: `${externalName}-vol-7c8d9e0f1a2b4c3d8e4f5a6b7c8d9e0f`,
+            labels: { 'acceleratio.io/volume-id': volumeId },
+          },
+        },
+      ],
+    });
+    deleteWhere.mockResolvedValue(undefined);
+
+    await service.remove(projectId, workloadId);
+
+    expect(coreV1.deleteNamespacedPersistentVolumeClaim).toHaveBeenCalledWith({
+      name: `${externalName}-vol-7c8d9e0f1a2b4c3d8e4f5a6b7c8d9e0f`,
+      namespace,
+    });
+  });
+});
+
+describe('DockerWorkloadService volume safety', () => {
+  const volumeId = '7c8d9e0f-1a2b-4c3d-8e4f-5a6b7c8d9e0f';
+  const claimName = `${externalName}-vol-7c8d9e0f1a2b4c3d8e4f5a6b7c8d9e0f`;
+  const storedVolume = {
+    id: volumeId,
+    mount_path: '/data',
+    size_gb: 10,
+    storage_class_id: null,
+  };
+  const withActiveVolume = (service: ReturnType<typeof createService>) => {
+    service.versions.findByIds.mockResolvedValue(
+      new Map([
+        [
+          activeVersionId,
+          {
+            ...activeVersion,
+            config: { docker_image: 'nginx:1.25', volumes: [storedVolume] },
+          },
+        ],
+      ]),
+    );
+
+    return service;
+  };
+  const claim = (name: string, id: string, deleting = false) => ({
+    metadata: {
+      name,
+      labels: { 'acceleratio.io/volume-id': id },
+      ...(deleting ? { deletionTimestamp: new Date() } : {}),
+    },
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('keeps the stored volumes when an update leaves volumes out', async () => {
+    const { service, limit, set, returning } =
+      withActiveVolume(createService());
+
+    limit.mockResolvedValue([baseRow]);
+    returning.mockResolvedValue([baseRow]);
+
+    await service.update(projectId, workloadId, {
+      config: { docker_image: 'nginx:1.26' },
+    });
+
+    expect(set).toHaveBeenCalledWith({
+      draft_config: { docker_image: 'nginx:1.26', volumes: [storedVolume] },
+    });
+  });
+
+  it('removes every volume only when an update sends an empty list', async () => {
+    const { service, limit, set, returning } =
+      withActiveVolume(createService());
+
+    limit.mockResolvedValue([baseRow]);
+    returning.mockResolvedValue([baseRow]);
+
+    await service.update(projectId, workloadId, {
+      config: { docker_image: 'nginx:1.25', volumes: [] },
+    });
+
+    expect(set).toHaveBeenCalledWith({
+      draft_config: { docker_image: 'nginx:1.25' },
+    });
+  });
+
+  it('rolls back the rest of the config but keeps the current volumes', async () => {
+    const { service, limit, returning, appsV1, coreV1, versions } =
+      withActiveVolume(createService());
+
+    versions.get.mockResolvedValue({
+      ...olderVersion,
+      config: {
+        docker_image: 'nginx:1.24',
+        volumes: [
+          { ...storedVolume, id: 'a1b2c3d4-0000-4000-8000-000000000000' },
+        ],
+      },
+    });
+    limit.mockResolvedValue([baseRow]);
+    coreV1.createNamespacedPersistentVolumeClaim.mockResolvedValue({});
+    coreV1.listNamespacedPersistentVolumeClaim.mockResolvedValue({
+      items: [claim(claimName, volumeId)],
+    });
+    appsV1.readNamespacedDeployment.mockResolvedValue(undefined);
+    appsV1.createNamespacedDeployment.mockResolvedValue({});
+    returning.mockResolvedValue([baseRow]);
+
+    await service.rollback(projectId, workloadId, olderVersionId);
+
+    expect(versions.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: { docker_image: 'nginx:1.24', volumes: [storedVolume] },
+      }),
+    );
+    expect(coreV1.deleteNamespacedPersistentVolumeClaim).not.toHaveBeenCalled();
+  });
+
+  it('rolls back to a version without volumes and still keeps them', async () => {
+    const { service, limit, returning, appsV1, coreV1, versions } =
+      withActiveVolume(createService());
+
+    versions.get.mockResolvedValue(olderVersion);
+    limit.mockResolvedValue([baseRow]);
+    coreV1.listNamespacedPersistentVolumeClaim.mockResolvedValue({
+      items: [claim(claimName, volumeId)],
+    });
+    appsV1.readNamespacedDeployment.mockResolvedValue(undefined);
+    appsV1.createNamespacedDeployment.mockResolvedValue({});
+    returning.mockResolvedValue([baseRow]);
+
+    await service.rollback(projectId, workloadId, olderVersionId);
+
+    const deployment = (
+      firstArgument(appsV1.createNamespacedDeployment) as { body: V1Deployment }
+    ).body;
+
+    expect(deployment.spec?.template.spec?.containers[0].volumeMounts).toEqual([
+      { name: `vol-${volumeId.replace(/-/g, '')}`, mountPath: '/data' },
+    ]);
+    expect(coreV1.deleteNamespacedPersistentVolumeClaim).not.toHaveBeenCalled();
+  });
+
+  it('refuses to reuse a claim that is being deleted', async () => {
+    const { service, limit, appsV1, coreV1 } = createService();
+
+    limit.mockResolvedValue([
+      {
+        ...baseRow,
+        draft_config: { docker_image: 'nginx:1.25', volumes: [storedVolume] },
+      },
+    ]);
+    coreV1.createNamespacedPersistentVolumeClaim.mockRejectedValue({
+      code: 409,
+    });
+    coreV1.readNamespacedPersistentVolumeClaim.mockResolvedValue(
+      claim(claimName, volumeId, true),
+    );
+
+    await expect(service.deploy(projectId, workloadId)).rejects.toThrow(
+      'still being deleted',
+    );
+    expect(appsV1.createNamespacedDeployment).not.toHaveBeenCalled();
+  });
+
+  it('refuses a claim of the same name that is not this volume', async () => {
+    const { service, limit, coreV1 } = createService();
+
+    limit.mockResolvedValue([
+      {
+        ...baseRow,
+        draft_config: { docker_image: 'nginx:1.25', volumes: [storedVolume] },
+      },
+    ]);
+    coreV1.createNamespacedPersistentVolumeClaim.mockRejectedValue({
+      code: 409,
+    });
+    coreV1.readNamespacedPersistentVolumeClaim.mockResolvedValue(
+      claim(claimName, 'someone-else'),
+    );
+
+    await expect(service.deploy(projectId, workloadId)).rejects.toThrow(
+      'belongs to something else',
+    );
+  });
+
+  it('keeps a dropped claim while old pods mount it, then deletes it', async () => {
+    jest.useFakeTimers();
+    const service = withActiveVolume(createService());
+    const { limit, returning, appsV1, coreV1 } = service;
+    const draftRow = {
+      ...baseRow,
+      draft_config: { docker_image: 'nginx:1.25' },
+    };
+    const oldReplicaSet = {
+      spec: {
+        replicas: 1,
+        template: {
+          spec: {
+            containers: [],
+            volumes: [{ name: 'v', persistentVolumeClaim: { claimName } }],
+          },
+        },
+      },
+      status: { replicas: 1 },
+    };
+
+    limit.mockResolvedValue([draftRow]);
+    coreV1.listNamespacedPersistentVolumeClaim.mockResolvedValue({
+      items: [claim(claimName, volumeId)],
+    });
+    appsV1.listNamespacedReplicaSet.mockResolvedValue({
+      items: [oldReplicaSet],
+    });
+    appsV1.readNamespacedDeployment.mockResolvedValue(undefined);
+    appsV1.createNamespacedDeployment.mockResolvedValue({});
+    returning.mockResolvedValue([baseRow]);
+
+    await service.service.deploy(projectId, workloadId);
+
+    expect(coreV1.deleteNamespacedPersistentVolumeClaim).not.toHaveBeenCalled();
+
+    // The rollout finished: the old ReplicaSet has no pods, and the version
+    // just recorded is active.
+    const recorded = (
+      service.versions.record.mock.calls[0] as [{ id: string }]
+    )[0].id;
+
+    appsV1.listNamespacedReplicaSet.mockResolvedValue({ items: [] });
+    limit.mockResolvedValue([{ active_version_id: recorded }]);
+
+    await jest.advanceTimersByTimeAsync(10_000);
+
+    expect(coreV1.deleteNamespacedPersistentVolumeClaim).toHaveBeenCalledWith({
+      name: claimName,
+      namespace,
+    });
+  });
+
+  it('stops retrying once another version is active', async () => {
+    jest.useFakeTimers();
+    const service = withActiveVolume(createService());
+    const { limit, returning, appsV1, coreV1 } = service;
+
+    limit.mockResolvedValue([
+      { ...baseRow, draft_config: { docker_image: 'nginx:1.25' } },
+    ]);
+    coreV1.listNamespacedPersistentVolumeClaim.mockResolvedValue({
+      items: [claim(claimName, volumeId)],
+    });
+    appsV1.listNamespacedReplicaSet.mockResolvedValue({
+      items: [
+        {
+          spec: {
+            replicas: 1,
+            template: {
+              spec: {
+                containers: [],
+                volumes: [{ name: 'v', persistentVolumeClaim: { claimName } }],
+              },
+            },
+          },
+        },
+      ],
+    });
+    appsV1.readNamespacedDeployment.mockResolvedValue(undefined);
+    appsV1.createNamespacedDeployment.mockResolvedValue({});
+    returning.mockResolvedValue([baseRow]);
+
+    await service.service.deploy(projectId, workloadId);
+
+    appsV1.listNamespacedReplicaSet.mockResolvedValue({ items: [] });
+    limit.mockResolvedValue([{ active_version_id: 'another-version' }]);
+    coreV1.listNamespacedPersistentVolumeClaim.mockClear();
+
+    await jest.advanceTimersByTimeAsync(10_000);
+
+    expect(coreV1.listNamespacedPersistentVolumeClaim).not.toHaveBeenCalled();
+    expect(coreV1.deleteNamespacedPersistentVolumeClaim).not.toHaveBeenCalled();
+  });
+
+  it('runs two deploys of one service one after another', async () => {
+    const { service, limit, returning, appsV1 } = createService();
+    const events: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    limit.mockResolvedValue([baseRow]);
+    appsV1.readNamespacedDeployment.mockResolvedValue({
+      ...createDeployment(),
+      metadata: { name: externalName, resourceVersion: '1' },
+    });
+    appsV1.replaceNamespacedDeployment
+      .mockImplementationOnce(async () => {
+        events.push('first:start');
+        await gate;
+        events.push('first:end');
+        return {};
+      })
+      .mockImplementationOnce(() => {
+        events.push('second');
+        return Promise.resolve({});
+      });
+    returning.mockResolvedValue([baseRow]);
+
+    const first = service.deploy(projectId, workloadId);
+    const second = service.deploy(projectId, workloadId);
+
+    await new Promise((resolve) => setImmediate(resolve));
+    release();
+    await Promise.all([first, second]);
+
+    expect(events).toEqual(['first:start', 'first:end', 'second']);
+  });
+});
+
+describe('DockerWorkloadService volume sweep', () => {
+  const keptId = '7c8d9e0f-1a2b-4c3d-8e4f-5a6b7c8d9e0f';
+  const draftId = '8d9e0f1a-2b3c-4d4e-9f5a-6b7c8d9e0f1a';
+  const orphanId = '9e0f1a2b-3c4d-4e5f-8a6b-7c8d9e0f1a2b';
+  const unknownWorkload = '0f1a2b3c-4d5e-4f6a-8b7c-8d9e0f1a2b3c';
+  const claim = (volumeId: string, workload = workloadId) => ({
+    metadata: {
+      name: `claim-${volumeId}`,
+      namespace,
+      labels: {
+        'acceleratio.io/workload-id': workload,
+        'acceleratio.io/volume-id': volumeId,
+      },
+    },
+  });
+
+  it('deletes only claims of known services that no config lists', async () => {
+    const { service, selectWhere, limit, coreV1, versions } = createService();
+    const volume = (id: string) => ({
+      id,
+      mount_path: `/${id.slice(0, 4)}`,
+      size_gb: 1,
+      storage_class_id: null,
+    });
+    const row = {
+      ...baseRow,
+      draft_config: { docker_image: 'nginx:1.25', volumes: [volume(draftId)] },
+    };
+
+    versions.findByIds.mockResolvedValue(
+      new Map([
+        [
+          activeVersionId,
+          {
+            ...activeVersion,
+            config: { docker_image: 'nginx:1.25', volumes: [volume(keptId)] },
+          },
+        ],
+      ]),
+    );
+    coreV1.listPersistentVolumeClaimForAllNamespaces.mockResolvedValue({
+      items: [
+        claim(keptId),
+        claim(draftId),
+        claim(orphanId),
+        claim(orphanId, unknownWorkload),
+      ],
+    });
+    // The batch lookup resolves from `where`; the per-row read uses `limit`.
+    selectWhere.mockImplementationOnce(() =>
+      Object.assign(Promise.resolve([row]), { limit }),
+    );
+    limit.mockResolvedValue([row]);
+    coreV1.listNamespacedPersistentVolumeClaim.mockResolvedValue({
+      items: [claim(keptId), claim(draftId), claim(orphanId)],
+    });
+
+    await service.sweepVolumeClaims();
+
+    expect(
+      coreV1.listPersistentVolumeClaimForAllNamespaces,
+    ).toHaveBeenCalledWith({
+      labelSelector:
+        'app.kubernetes.io/managed-by=acceleratio,acceleratio.io/volume-id',
+    });
+    expect(
+      coreV1.deleteNamespacedPersistentVolumeClaim.mock.calls.map(
+        ([arg]: unknown[]) => arg,
+      ),
+    ).toEqual([{ name: `claim-${orphanId}`, namespace }]);
+  });
+
+  it('does nothing without managed claims', async () => {
+    const { service, select, coreV1 } = createService();
+
+    await service.sweepVolumeClaims();
+
+    expect(select).not.toHaveBeenCalled();
+    expect(coreV1.deleteNamespacedPersistentVolumeClaim).not.toHaveBeenCalled();
   });
 });

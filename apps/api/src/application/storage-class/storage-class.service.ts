@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Inject,
@@ -29,6 +30,7 @@ import {
 } from '@/vendor/kubernetes/kubernetes-error';
 import { KubernetesService } from '@/vendor/kubernetes/kubernetes.service';
 import { workload } from '@/application/workload/schemas/workload.schema';
+import { workloadVersion } from '@/application/workload/schemas/workload-version.schema';
 import { toStorageBenchmark } from './benchmark/storage-benchmark.results';
 import { storageBenchmark } from './schemas/storage-benchmark.schema';
 import {
@@ -209,6 +211,39 @@ export class StorageClassService {
     };
   }
 
+  /**
+   * The Kubernetes StorageClass name a volume claim uses: the given profile's,
+   * or the platform class when none is chosen. Database only, so a save or
+   * deploy does not wait on the cluster.
+   */
+  async kubernetesName(id: string | null): Promise<string> {
+    if (id === null) {
+      return this.platformName;
+    }
+
+    return (await this.findRow(id)).external_name;
+  }
+
+  /**
+   * Checks a profile a new volume is created on. A `Retain` profile keeps
+   * the data after its claim is deleted, as a released volume nobody can
+   * reach from the console, so deleting a Docker volume would not delete its
+   * data. The platform profile is the installer's and deletes.
+   */
+  async assertVolumeProfile(id: string | null): Promise<void> {
+    if (id === null) {
+      return;
+    }
+
+    const row = await this.findRow(id);
+
+    if (row.reclaim_policy === 'Retain') {
+      throw new BadRequestException(
+        `Storage profile ${row.name} keeps data after a volume is deleted; choose a profile that deletes it`,
+      );
+    }
+  }
+
   async create(payload: CreateStorageClassPayload): Promise<StorageClass> {
     const input = normalizeCreatePayload(payload);
     // Generated here so external_name is known before the single insert.
@@ -302,6 +337,14 @@ export class StorageClassService {
     if (buckets > 0) {
       throw new ConflictException(
         `Storage class is used by ${plural(buckets, 'S3 bucket')}. Delete them first.`,
+      );
+    }
+
+    const services = await this.countVolumeServices(row.id);
+
+    if (services > 0) {
+      throw new ConflictException(
+        `Storage class is used by volumes of ${plural(services, 'Docker service')}. Delete those volumes first.`,
       );
     }
 
@@ -524,6 +567,30 @@ export class StorageClassService {
       .from(workload)
       .where(
         and(eq(workload.storage_class_id, id), eq(workload.type, 's3_bucket')),
+      );
+
+    return result?.value ?? 0;
+  }
+
+  /**
+   * Docker services whose pending or running config has a volume on this
+   * profile. Claims are only created on deploy, so the cluster alone would
+   * miss volumes that are saved but not deployed yet.
+   */
+  private async countVolumeServices(id: string): Promise<number> {
+    const reference = JSON.stringify([{ storage_class_id: id }]);
+    const [result] = await this.db
+      .select({ value: countRows() })
+      .from(workload)
+      .leftJoin(
+        workloadVersion,
+        eq(workloadVersion.id, workload.active_version_id),
+      )
+      .where(
+        and(
+          eq(workload.type, 'docker'),
+          sql`(${workload.draft_config} -> 'volumes' @> ${reference}::jsonb or ${workloadVersion.config} -> 'volumes' @> ${reference}::jsonb)`,
+        ),
       );
 
     return result?.value ?? 0;

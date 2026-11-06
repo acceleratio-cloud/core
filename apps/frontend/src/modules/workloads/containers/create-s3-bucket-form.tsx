@@ -1,17 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { ArrowLeft, ChevronRight } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 
-import type {
-  CreateWorkloadPayload,
-  StorageClass,
-  Workload,
-} from '@acceleratio/shared';
+import type { CreateWorkloadPayload, Workload } from '@acceleratio/shared';
 import { getApiErrorMessage } from '@/api';
-import { storageClassesApi } from '@/api/storage-classes';
 import { workloadsApi } from '@/api/workloads';
+import { useStorageProfiles } from '@/modules/workloads/hooks/use-storage-profiles';
 import { Button } from '@/shared/components/ui/button';
 import {
   DialogDescription,
@@ -43,39 +39,6 @@ import {
 interface S3BucketForm {
   name: string;
 }
-
-type ProfilesState =
-  | { status: 'loading' }
-  | { status: 'error'; message: string }
-  | { status: 'ready'; profiles: StorageClass[] };
-
-/** Storage profiles, platform first, as the settings page lists them. */
-const useStorageProfiles = () => {
-  const [state, setState] = useState<ProfilesState>({ status: 'loading' });
-
-  useEffect(() => {
-    let active = true;
-
-    storageClassesApi
-      .list()
-      .then((profiles) => {
-        if (active) {
-          setState({ status: 'ready', profiles });
-        }
-      })
-      .catch((error) => {
-        if (active) {
-          setState({ status: 'error', message: getApiErrorMessage(error) });
-        }
-      });
-
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  return state;
-};
 
 export const CreateS3BucketForm = ({
   projectId,

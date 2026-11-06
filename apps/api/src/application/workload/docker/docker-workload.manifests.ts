@@ -1,10 +1,14 @@
 import type {
   V1Container,
   V1Deployment,
+  V1PersistentVolumeClaim,
   V1ResourceRequirements,
   V1Secret,
 } from '@kubernetes/client-node';
-import type { DockerWorkloadConfig } from '@acceleratio/shared';
+import type {
+  DockerWorkloadConfig,
+  DockerWorkloadVolume,
+} from '@acceleratio/shared';
 import { projectNamespace } from '@/common/naming';
 import {
   DEFAULT_CPU_MAX,
@@ -35,6 +39,41 @@ export const LATEST_TAG = 'latest';
 export const ALWAYS_PULL_POLICY = 'Always';
 export const IF_NOT_PRESENT_PULL_POLICY = 'IfNotPresent';
 export const ENV_SECRET_INFIX = '-env-';
+export const VOLUME_ID_LABEL = 'acceleratio.io/volume-id';
+export const VOLUME_CLAIM_INFIX = '-vol-';
+/** SeaweedFS mounts can be shared, so every replica and rollout can attach. */
+export const VOLUME_ACCESS_MODE = 'ReadWriteMany';
+
+/**
+ * The whole id as 32 hex characters. A shorter prefix could repeat between
+ * two volumes of one service and make them share a claim.
+ */
+const volumeIdHex = (volumeId: string): string =>
+  volumeId.toLowerCase().replace(/-/g, '');
+
+/**
+ * Claim of one volume: `<external name>-vol-<id>`, at most 63 + 5 + 32
+ * characters, well within the 253 a claim name may have. It follows the
+ * volume, not the version, so every version that keeps the volume mounts the
+ * same data.
+ */
+export const volumeClaimName = (
+  externalName: string,
+  volumeId: string,
+): string => `${externalName}${VOLUME_CLAIM_INFIX}${volumeIdHex(volumeId)}`;
+
+/** Name of the volume inside the pod spec: a 36-character DNS-1123 label. */
+export const podVolumeName = (volumeId: string): string =>
+  `vol-${volumeIdHex(volumeId)}`;
+
+/** Volumes reach manifests only after the service assigned their ids. */
+const volumeIdOf = (volume: DockerWorkloadVolume): string => {
+  if (volume.id === undefined) {
+    throw new Error('Volume has no id');
+  }
+
+  return volume.id;
+};
 
 /**
  * Prefix shared by every env Secret of a service, so they can be told apart
@@ -194,6 +233,17 @@ export const buildDeployment = (
     container.envFrom = [{ secretRef: { name: envSecretNameOf(input) } }];
   }
 
+  // Without volumes the template stays as it was, so existing services do
+  // not roll when this field ships.
+  const volumes = input.config.volumes ?? [];
+
+  if (volumes.length > 0) {
+    container.volumeMounts = volumes.map((volume) => ({
+      name: podVolumeName(volumeIdOf(volume)),
+      mountPath: volume.mount_path,
+    }));
+  }
+
   const annotations: Record<string, string> = {
     [WORKLOAD_NAME_ANNOTATION]: input.name,
   };
@@ -233,6 +283,19 @@ export const buildDeployment = (
         spec: {
           terminationGracePeriodSeconds: TERMINATION_GRACE_PERIOD_SECONDS,
           containers: [container],
+          ...(volumes.length > 0
+            ? {
+                volumes: volumes.map((volume) => ({
+                  name: podVolumeName(volumeIdOf(volume)),
+                  persistentVolumeClaim: {
+                    claimName: volumeClaimName(
+                      input.external_name,
+                      volumeIdOf(volume),
+                    ),
+                  },
+                })),
+              }
+            : {}),
           ...(input.config.node_selector
             ? { nodeSelector: input.config.node_selector }
             : {}),
@@ -260,3 +323,39 @@ export const buildEnvSecret = (input: WorkloadManifestInput): V1Secret => ({
     (input.config.env ?? []).map(({ key, value }) => [key, value]),
   ),
 });
+
+/**
+ * The claim behind one volume. Size and storage class never change after the
+ * volume is created, so a claim that already exists is already right.
+ */
+export const buildVolumeClaim = (
+  input: Pick<
+    WorkloadManifestInput,
+    'id' | 'project_id' | 'name' | 'external_name'
+  >,
+  volume: DockerWorkloadVolume,
+  storageClassName: string,
+): V1PersistentVolumeClaim => {
+  const volumeId = volumeIdOf(volume);
+
+  return {
+    apiVersion: 'v1',
+    kind: 'PersistentVolumeClaim',
+    metadata: {
+      name: volumeClaimName(input.external_name, volumeId),
+      namespace: projectNamespace(input.project_id),
+      labels: {
+        [MANAGED_BY_LABEL]: MANAGED_BY_VALUE,
+        [PROJECT_ID_LABEL]: input.project_id,
+        [WORKLOAD_ID_LABEL]: input.id,
+        [VOLUME_ID_LABEL]: volumeId,
+      },
+      annotations: { [WORKLOAD_NAME_ANNOTATION]: input.name },
+    },
+    spec: {
+      accessModes: [VOLUME_ACCESS_MODE],
+      storageClassName,
+      resources: { requests: { storage: `${volume.size_gb}Gi` } },
+    },
+  };
+};

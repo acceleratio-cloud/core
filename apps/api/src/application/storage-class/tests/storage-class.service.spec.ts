@@ -103,7 +103,13 @@ const createDatabase = (rows: StorageClassRow[]) => {
   const where = jest.fn(() =>
     Object.assign(Promise.resolve([bucketCount]), { limit }),
   );
-  const from = jest.fn().mockReturnValue({ orderBy, where });
+  // Docker services with volumes on a profile:
+  // `select({ value: count() }).from().leftJoin().where()`.
+  const volumeServiceCount = { value: 0 };
+  const leftJoin = jest.fn().mockReturnValue({
+    where: jest.fn(() => Promise.resolve([volumeServiceCount])),
+  });
+  const from = jest.fn().mockReturnValue({ orderBy, where, leftJoin });
   const select = jest.fn().mockReturnValue({ from });
 
   // Latest benchmark per profile: `selectDistinctOn().from()[.where()].orderBy()`.
@@ -150,6 +156,7 @@ const createDatabase = (rows: StorageClassRow[]) => {
     transaction,
     benchmarkOrderBy,
     bucketCount,
+    volumeServiceCount,
   };
 };
 
@@ -508,6 +515,19 @@ describe('StorageClassService.remove', () => {
     expect(transaction).not.toHaveBeenCalled();
   });
 
+  it('is blocked while a Docker service config has a volume on the class', async () => {
+    const { service, storageV1, transaction, volumeServiceCount } =
+      createService([customRow]);
+
+    volumeServiceCount.value = 2;
+
+    await expect(service.remove(customId)).rejects.toThrow(
+      'Storage class is used by volumes of 2 Docker services. Delete those volumes first.',
+    );
+    expect(storageV1.deleteStorageClass).not.toHaveBeenCalled();
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
   it('deletes the row and the managed object', async () => {
     const { service, storageV1, txDelete } = createService([customRow]);
 
@@ -605,5 +625,33 @@ describe('StorageClassService.environment', () => {
     await expect(service.environment()).resolves.toMatchObject({
       csi_driver_installed: null,
     });
+  });
+});
+
+describe('StorageClassService.assertVolumeProfile', () => {
+  it('accepts the platform profile without a lookup', async () => {
+    const { service } = createService([]);
+
+    await expect(service.assertVolumeProfile(null)).resolves.toBeUndefined();
+  });
+
+  it('accepts a profile that deletes data with its volume', async () => {
+    const { service } = createService([
+      { ...customRow, reclaim_policy: 'Delete' },
+    ]);
+
+    await expect(
+      service.assertVolumeProfile(customId),
+    ).resolves.toBeUndefined();
+  });
+
+  it('rejects a profile that retains data', async () => {
+    const { service } = createService([
+      { ...customRow, reclaim_policy: 'Retain' },
+    ]);
+
+    await expect(service.assertVolumeProfile(customId)).rejects.toThrow(
+      'keeps data after a volume is deleted',
+    );
   });
 });

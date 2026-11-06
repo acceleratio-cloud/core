@@ -13,5 +13,8 @@ export interface WorkloadStatusSnapshot {
  */
 export interface WorkloadStatusDeriver {
   readonly type: WorkloadType;
-  derive(snapshot: WorkloadStatusSnapshot): DerivedWorkloadStatus;
+  /** May look up more of the cluster, such as events, before it decides. */
+  derive(
+    snapshot: WorkloadStatusSnapshot,
+  ): DerivedWorkloadStatus | Promise<DerivedWorkloadStatus>;
 }

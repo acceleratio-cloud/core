@@ -173,3 +173,55 @@ export const deriveStatus = (
 
   return { status: 'deploying', status_message: null };
 };
+
+/** Kubelet events that mean a volume of the pod cannot be mounted. */
+export const MOUNT_FAILURE_REASONS = new Set([
+  'FailedMount',
+  'FailedAttachVolume',
+]);
+/**
+ * How long a scheduled pod may sit in ContainerCreating before its events
+ * are read. Mounts can fail once and then succeed, so only a lasting failure
+ * counts.
+ */
+export const MOUNT_GRACE_MS = 60_000;
+const CONTAINER_CREATING = 'ContainerCreating';
+
+/**
+ * Pods with a volume claim that were scheduled more than the grace period
+ * ago and still have no container running. A mount failure only shows in
+ * their events, which the caller reads.
+ */
+export const podsStuckMounting = (pods: V1Pod[], now: number): V1Pod[] =>
+  pods.filter((pod) => {
+    if (
+      pod.metadata?.deletionTimestamp ||
+      !(pod.spec?.volumes ?? []).some((volume) => volume.persistentVolumeClaim)
+    ) {
+      return false;
+    }
+
+    const scheduled = (pod.status?.conditions ?? []).find(
+      (condition) => condition.type === POD_SCHEDULED,
+    );
+    const scheduledAt = scheduled?.lastTransitionTime
+      ? new Date(scheduled.lastTransitionTime).getTime()
+      : Number.NaN;
+
+    if (
+      scheduled?.status !== 'True' ||
+      !Number.isFinite(scheduledAt) ||
+      now - scheduledAt < MOUNT_GRACE_MS
+    ) {
+      return false;
+    }
+
+    const statuses = pod.status?.containerStatuses ?? [];
+
+    return (
+      statuses.length === 0 ||
+      statuses.every(
+        (status) => status.state?.waiting?.reason === CONTAINER_CREATING,
+      )
+    );
+  });

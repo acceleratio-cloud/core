@@ -273,7 +273,7 @@ export class WorkloadStatusWriter {
 
     return deployment === undefined
       ? await this.deriveMissing(row)
-      : deriver.derive({ deployment, pods: snapshot?.pods ?? [] });
+      : await deriver.derive({ deployment, pods: snapshot?.pods ?? [] });
   }
 
   /**

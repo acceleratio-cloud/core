@@ -43,6 +43,9 @@ const configSummary = (config: DockerWorkloadConfig) =>
       ? formatReplicas(config.replicas)
       : null,
     config.entrypoint || config.command ? 'custom command' : null,
+    config.volumes?.length
+      ? `${config.volumes.length} ${config.volumes.length === 1 ? 'volume' : 'volumes'}`
+      : null,
     config.env_keys?.length
       ? `${config.env_keys.length} env ${config.env_keys.length === 1 ? 'variable' : 'variables'}`
       : null,
@@ -87,6 +90,7 @@ export const getDockerDetailView = (
       icon: History,
       content: (
         <WorkloadVersions
+          description="Roll back restores the image, command, resources and environment. Volumes and their data stay as they are."
           renderConfig={(versionConfig) => {
             // Versions of a Docker service hold Docker configs.
             const config = versionConfig as DockerWorkloadConfig;
