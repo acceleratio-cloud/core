@@ -22,7 +22,7 @@ type Direction = 'forward' | 'backward' | null;
 
 /**
  * The project page: one route, three tabs. The selected tab is local state,
- * mirrored into `?tab=` (Overview omits it) with `history.replaceState` so a
+ * mirrored into `?tab=` (Architecture omits it) with `history.replaceState` so a
  * reload or a shared link opens the same tab without a server round trip.
  * The URL is storage, not the source of truth: with Cache Components on,
  * `replaceState` does not re-render `useSearchParams` consumers. A real
@@ -94,7 +94,7 @@ export const ProjectView = () => {
       </div>
 
       <TabPanel
-        tab="overview"
+        tab="architecture"
         activeTab={activeTab}
         visited={visited}
         direction={direction}

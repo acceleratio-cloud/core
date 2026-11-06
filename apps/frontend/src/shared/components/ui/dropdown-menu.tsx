@@ -4,6 +4,26 @@ import * as React from "react"
 import { Menu as MenuPrimitive } from "@base-ui/react/menu"
 import { cn } from "cn"
 
+/**
+ * Base UI reads a ref container while it mounts the portal and, when
+ * `current` is still null (a hook that fills it in an effect runs after the
+ * portal's layout effect), silently falls back to the parent portal. That put
+ * dialogs inside the pointer-events-none drawer, under the project header.
+ * Treat an unfilled ref as "mount on the body".
+ */
+const resolveContainer = <T,>(container: T): T | HTMLElement => {
+  if (
+    container &&
+    typeof container === "object" &&
+    "current" in container &&
+    (container as { current: unknown }).current === null &&
+    typeof document !== "undefined"
+  ) {
+    return document.body
+  }
+  return container
+}
+
 function DropdownMenu(props: React.ComponentProps<typeof MenuPrimitive.Root>) {
   return <MenuPrimitive.Root data-slot="dropdown-menu" {...props} />
 }
@@ -35,12 +55,12 @@ function DropdownMenuContent({
   container?: React.ComponentProps<typeof MenuPrimitive.Portal>["container"]
 }) {
   return (
-    <MenuPrimitive.Portal container={container}>
+    <MenuPrimitive.Portal container={resolveContainer(container)}>
       <MenuPrimitive.Positioner
         side="bottom"
         align={align}
         sideOffset={sideOffset}
-        className="z-50 outline-none"
+        className="pointer-events-auto z-50 outline-none"
       >
         <MenuPrimitive.Popup
           data-slot="dropdown-menu-content"
