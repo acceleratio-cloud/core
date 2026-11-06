@@ -475,6 +475,77 @@ If you installed with `--config` or environment overrides, pass the same ones
 to `update.sh`, as with `uninstall.sh`. Updating k3s or Cilium on the single
 node briefly interrupts the cluster network, so plan a short downtime window.
 
+### Update from the console
+
+Settings → System → **Platform version** shows the installed release, the
+version of every component (API, console, Kubernetes, the Helm charts and
+PostgreSQL) and the latest stable release on
+[GitHub Releases](https://github.com/acceleratio-cloud/core/releases) with its
+release notes. The API checks for releases 30 seconds after it starts and then
+every 6 hours; **Check for updates** checks at once. Pre-releases and drafts are
+never offered.
+
+**Update to vX.Y.Z** runs the same `update.sh` as above, on the server, without
+SSH:
+
+1. The API downloads the release's `SHA256SUMS` and creates a short-lived,
+   privileged Job (`platform-update-<id>` in the `acceleratio` namespace) on
+   the node that runs PostgreSQL, which is the node `install.sh` ran on.
+2. The Job enters the host's namespaces with `nsenter`, writes a runner script
+   to `/var/lib/acceleratio/updates/<id>/` and starts it as the transient
+   systemd unit `acceleratio-update.service`. The update therefore keeps
+   running while the API, the console and k3s restart. The unit name also
+   prevents a second update from starting on the server. The database prevents
+   a second update in the console.
+3. The runner downloads `update.sh` and `install.sh` of the release and
+   refuses to run them unless both match `SHA256SUMS`. It then runs
+   `update.sh --yes --sha256 <install.sh hash>`, adding
+   `--config /etc/acceleratio/install.env` when that file exists. `update.sh`
+   backs up, updates, verifies and rolls back exactly as described above.
+4. Every few seconds the runner publishes the stage and the last 128 KiB of
+   the log to the ConfigMap `platform-update-<id>`. The API copies them into
+   the `platform_update` table, so the console shows the steps, the live log
+   and the outcome. It reconnects on its own while the API restarts, and
+   offers to reload the console once the update succeeds.
+
+`install.sh --config FILE` keeps a copy of `FILE` as
+`/etc/acceleratio/install.env`, so a console update runs with the same
+settings. An installation made with environment variables only has no such
+file. If its settings differ from the defaults, the configuration check in
+`update.sh` stops the update before changing anything. Write the settings to
+`/etc/acceleratio/install.env` (shell syntax, as for `--config`) to fix that.
+
+The outcome is one of:
+
+- **Updated**: every component runs the release and is healthy.
+- **Failed** before the install step: nothing was changed (for example a
+  checksum mismatch, no access to github.com, or a configuration difference).
+- **Rolled back**: the install failed. The Helm releases and the Acceleratio
+  manifests were restored to the previous version. The database and the k3s
+  binary were not. The backup location and the restore commands are at the end
+  of the log.
+- **Failed** after the install started with an incomplete rollback: follow the
+  recovery steps at the end of the log.
+
+The full log stays on the server in `/var/log/acceleratio/update.log` and
+`/var/lib/acceleratio/updates/<id>/update.log` (work directories are kept for
+30 days); `journalctl -u acceleratio-update` shows the runner itself. If the
+server stops reporting for 45 minutes, the console marks the update failed;
+check those logs on the server.
+
+The server needs outbound HTTPS to `api.github.com`, `github.com` and the
+container registry. Without internet access the check reports that GitHub
+cannot be reached. Update such installations over SSH with `update.sh` and an
+`install.sh` you copied to the server. Set `PLATFORM_UPDATES_ENABLED=0` in the
+API environment to turn updates from the console off. Use
+`PLATFORM_UPDATE_CHECK_INTERVAL_MS` to change the check interval (`0` turns
+the background check off) and `ACCELERATIO_RELEASE_REPOSITORY` (`owner/repo`)
+to follow a fork. A development build (an API image without a release
+version) and an API that runs outside the cluster never offer updates.
+
+The console does not downgrade. To go back to an older release after a
+successful update, restore the backup over SSH as described above.
+
 ## Re-run and reset
 
 Re-running the installer is safe for configuration and Helm changes (to move

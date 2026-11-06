@@ -114,6 +114,16 @@ die() {
   exit 1
 }
 
+# report_stage NAME: tells a supervising process (the console's update runner)
+# where the update stands. It sets ACCELERATIO_UPDATE_STAGE_FILE; without it
+# this does nothing. Stages: prepare, backup, install, verify, cleanup,
+# rollback, and the outcomes up_to_date, rolled_back and rollback_failed.
+report_stage() {
+  if [ -n "${ACCELERATIO_UPDATE_STAGE_FILE:-}" ]; then
+    printf '%s\n' "$1" >"$ACCELERATIO_UPDATE_STAGE_FILE" 2>/dev/null || true
+  fi
+}
+
 cleanup() {
   if [ -n "$WORK_DIR" ] && [ -d "$WORK_DIR" ]; then
     rm -rf "$WORK_DIR"
@@ -866,6 +876,7 @@ rollback() {
   local failed=0
 
   ROLLED_BACK=1
+  report_stage rollback
   log_warn "Rolling back the Helm releases and the Acceleratio manifests"
 
   for entry in ${HELM_REVISIONS[@]+"${HELM_REVISIONS[@]}"}; do
@@ -909,7 +920,10 @@ rollback() {
 
   print_recovery_help
   if (( failed )); then
+    report_stage rollback_failed
     log_error "The rollback did not fully succeed. Inspect: k3s kubectl -n ${ns} get pods"
+  else
+    report_stage rolled_back
   fi
 }
 
@@ -987,6 +1001,7 @@ main() {
   acquire_lock
   log_info "Acceleratio updater ${SCRIPT_NAME} starting"
 
+  report_stage prepare
   fetch_target_install
   NAMESPACE="$(target_of ACCELERATIO_NAMESPACE)"
   preflight
@@ -994,6 +1009,7 @@ main() {
   print_plan
 
   if (( PLAN_CHANGES == 0 )); then
+    report_stage up_to_date
     log_ok "Everything is already at the target versions. Nothing to do."
     exit 0
   fi
@@ -1009,12 +1025,16 @@ main() {
   fi
 
   confirm
+  report_stage backup
   take_snapshot
   backup_data
 
+  report_stage install
   run_install
+  report_stage verify
   verify_update
 
+  report_stage cleanup
   prune_backups
   log_ok "Update complete. Backup kept in ${BACKUP_DIR}"
 }

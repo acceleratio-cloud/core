@@ -127,6 +127,13 @@
       "when": 1793927603492,
       "tag": "0017_node_operations",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1793992221093,
+      "tag": "0018_platform_update",
+      "breakpoints": true
     }
   ]
 }
