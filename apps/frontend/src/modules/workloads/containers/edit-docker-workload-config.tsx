@@ -30,6 +30,11 @@ import { FieldError } from '@/shared/components/ui/field';
 import { Input } from '@/shared/components/ui/input';
 import { Slider } from '@/shared/components/ui/slider';
 import { Switch } from '@/shared/components/ui/switch';
+import { Textarea } from '@/shared/components/ui/textarea';
+import {
+  formatSelector,
+  parseLabels,
+} from '@/modules/servers/utils/node-metadata';
 import { useWorkloadActions } from './workload-actions';
 
 /** Slider ranges. A stored value outside them widens the range to fit. */
@@ -45,6 +50,7 @@ interface DockerConfigForm {
   ramLimited: boolean;
   ramMax: number;
   replicas: number;
+  nodeSelector: string;
 }
 
 /** Absent limits show the default; null limits show the switch off. */
@@ -57,6 +63,7 @@ const toForm = (config: DockerWorkloadConfig): DockerConfigForm => ({
   ramLimited: config.ram_max !== null,
   ramMax: config.ram_max ?? DEFAULT_RAM_MAX,
   replicas: config.replicas ?? DEFAULT_REPLICAS,
+  nodeSelector: formatSelector(config.node_selector ?? {}),
 });
 
 /**
@@ -101,6 +108,12 @@ const toConfig = (
   // One replica is the default and stays absent, as the API stores it.
   if (form.replicas !== DEFAULT_REPLICAS) {
     config.replicas = form.replicas;
+  }
+
+  const nodeSelector = parseLabels(form.nodeSelector);
+
+  if (Object.keys(nodeSelector).length > 0) {
+    config.node_selector = nodeSelector;
   }
 
   if (entrypoint.length > 0) {
@@ -458,6 +471,30 @@ export const EditDockerWorkloadConfig = () => {
               disabled={isLocked}
             />
             <ReplicasField control={control} disabled={isLocked} />
+          </div>
+        </DetailSection>
+
+        <DetailSection
+          title="Placement"
+          description="Run the service only on servers with these labels. Set labels on the Servers page."
+        >
+          <div className="divide-y divide-edge-subtle">
+            <SettingRow
+              label="Node selector"
+              htmlFor="workload-config-node-selector"
+              hint="One key=value per line."
+            >
+              <Textarea
+                id="workload-config-node-selector"
+                rows={3}
+                autoComplete="off"
+                spellCheck={false}
+                placeholder="Any server"
+                disabled={isLocked}
+                className="font-mono text-xs"
+                {...register('nodeSelector')}
+              />
+            </SettingRow>
           </div>
         </DetailSection>
       </DetailStack>

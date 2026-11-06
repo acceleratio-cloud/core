@@ -4,6 +4,7 @@ import type {
   EnvVar,
   WorkloadConfig,
 } from '@acceleratio/shared';
+import { normalizeNodeSelector } from '@/application/node/node-metadata';
 
 /** Limits applied when a config leaves `cpu_max` / `ram_max` unset. */
 export const DEFAULT_CPU_MAX = 1;
@@ -217,6 +218,7 @@ export const normalizeDockerConfig = (
   const entrypoint = normalizeArgs('entrypoint', candidate?.entrypoint);
   const command = normalizeArgs('command', candidate?.command);
   const env = normalizeEnv(candidate?.env);
+  const nodeSelector = normalizeNodeSelector(candidate?.node_selector);
 
   if (cpuMax !== undefined) {
     normalized.cpu_max = cpuMax;
@@ -240,6 +242,10 @@ export const normalizeDockerConfig = (
 
   if (env !== undefined) {
     normalized.env = env;
+  }
+
+  if (nodeSelector !== undefined) {
+    normalized.node_selector = nodeSelector;
   }
 
   return normalized;

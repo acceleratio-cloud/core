@@ -1470,6 +1470,13 @@ write_acceleratio_manifest() {
   local ns="$ACCELERATIO_NAMESPACE"
   local db_url="postgresql://acceleratio:${POSTGRES_PASSWORD}@postgres.${ns}.svc.cluster.local:5432/acceleratio"
   local api_internal="http://api.${ns}.svc.cluster.local:8080"
+  # Lets the console join more servers: it needs the address other nodes reach
+  # the API server on and the cluster join token.
+  local join_url="${K3S_JOIN_URL:-https://${K3S_NODE_IP}:6443}"
+  local join_token=""
+  if [ -r /var/lib/rancher/k3s/server/node-token ]; then
+    join_token="$(tr -d '\n' </var/lib/rancher/k3s/server/node-token)"
+  fi
 
   ACCELERATIO_MANIFEST="${CONFIG_DIR}/manifests/acceleratio.yaml"
   write_file "$ACCELERATIO_MANIFEST" 0600 <<EOF
@@ -1501,6 +1508,10 @@ type: Opaque
 stringData:
   DATABASE_URL: "${db_url}"
   BETTER_AUTH_SECRET: "${BETTER_AUTH_SECRET}"
+  K3S_JOIN_URL: "${join_url}"
+  K3S_JOIN_TOKEN: "${join_token}"
+  K3S_CLUSTER_CIDR: "${K3S_CLUSTER_CIDR}"
+  K3S_SERVICE_CIDR: "${K3S_SERVICE_CIDR}"
 ---
 apiVersion: v1
 kind: Service

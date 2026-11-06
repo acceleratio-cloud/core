@@ -154,6 +154,7 @@ Every variable can be set in the environment or in a file passed to
 | `K3S_PUBLIC_IP` | auto-detected | TLS SAN and external kubeconfig |
 | `K3S_CLUSTER_CIDR` | `10.42.0.0/16` | must match Cilium IPAM |
 | `K3S_SERVICE_CIDR` | `10.43.0.0/16` | Kubernetes service CIDR |
+| `K3S_JOIN_URL` | `https://<K3S_NODE_IP>:6443` | API server address given to servers added from the console |
 | `K3S_ETCD_SNAPSHOT_CRON` | `0 3 * * *` | empty disables etcd snapshots |
 | `CILIUM_VERSION` | `1.20.4` | Cilium chart version |
 | `CILIUM_CNI_CONF_PATH` | `/etc/cni/net.d` | CNI config directory used by the container runtime |
@@ -234,6 +235,65 @@ sudo k3s kubectl get pvc smoke -w
 ```
 
 The claim should bind to `seaweedfs-storage`.
+
+## Cluster servers
+
+The console's **Servers** page lists the cluster's servers and manages them.
+The installer stores the join URL, the cluster join token and the CIDRs in the
+API's `api` secret (`K3S_JOIN_URL`, `K3S_JOIN_TOKEN`, `K3S_CLUSTER_CIDR`,
+`K3S_SERVICE_CIDR`); without them, adding a server reports that it is not
+configured. Installations made before this feature need the variables added to
+that secret and the API restarted.
+
+**Add a server.** The wizard asks for a name, a role, the server's address and
+an SSH user and private key. The key is sent once, kept in memory for the
+operation and never stored. The check shows the server's SSH host key
+fingerprint; compare it with `ssh-keygen -lf` on the server. Adding pins that
+key, so the join token is only sent to the server you checked. A check runs first and must pass: Linux with
+systemd, root or passwordless sudo, curl, CPU, memory and free disk, no k3s on
+the server, port 10250 free, a route to the API server (`:6443`) and to
+`get.k3s.io`, and the kubelet port of the other nodes (a warning only). The
+API then installs k3s at the cluster's version as a worker (agent) or, for
+high availability, as a control-plane server that joins etcd, and waits for the
+node to be Ready. Open ports on the new server: 10250 and 8472/udp and 4240
+(Cilium) from the other nodes; 6443 and 2379-2380 for control-plane servers.
+The server needs outbound internet access to install k3s.
+
+**Cordon and uncordon** stop and resume scheduling of new pods on a node.
+
+**Drain** shows what moves before it starts: pods to evict, pods that stay
+(DaemonSet, static and finished pods), pods protected by a PodDisruptionBudget
+and pods that would lose data (no controller, emptyDir or hostPath). Eviction
+goes through the eviction API one pod at a time and retries while a budget
+refuses; pods still on the node after the timeout (5 minutes by default) are
+listed and the operation fails. Services with several replicas keep serving
+during a drain; a service with one replica restarts on another server.
+
+**Remove** drains the server and deletes the Node from the cluster; with SSH
+access it also runs the k3s uninstall script (as root directly, otherwise
+through passwordless sudo). For a worker k3s is uninstalled first, since a
+running kubelet registers a deleted Node again: if the uninstall fails the Node
+stays, drained and cordoned, and without SSH access you have to stop k3s on the
+server yourself. For a control-plane server the Node is deleted first, so k3s
+removes its etcd member while quorum holds, and k3s is uninstalled afterwards.
+A server that is not Ready (for example a dead machine) can still be removed:
+its pods are deleted without waiting for the unreachable kubelet and disappear
+with the Node; leave SSH access off for it. You type the server name
+to confirm. Removal is refused for the only server in the cluster, for the last control-plane server, and while data
+exists only on that server: a PersistentVolume pinned to it (local or hostPath
+volumes) or the only SeaweedFS volume server, whose data is on a hostPath of
+that node. The default install runs SeaweedFS with one volume server, so the
+server it runs on cannot be removed until you add volume servers and move the
+data. Removing a control-plane server relies on k3s removing its etcd member
+when the Node is deleted; check `k3s etcd` health afterwards.
+
+**Labels and taints** are edited per server. A service can pin itself to
+servers with a **Node selector** (service settings, Placement).
+
+Every operation is saved with the account that started it, its steps and log
+(secrets removed), and only one operation runs per server at a time. An
+operation interrupted by an API restart is marked failed; check the server and
+start it again.
 
 ## Kubeconfig
 
@@ -533,8 +593,12 @@ sudo k3s kubectl -n seaweedfs get ds
 
 ## Limitations
 
-- Single-node design. Embedded etcd has no quorum redundancy; this is not an
-  HA control plane.
+- The installer creates a single-node cluster. Embedded etcd has no quorum
+  redundancy until you add control-plane servers (three for quorum) from the
+  console.
+- Servers added from the console join over the address in `K3S_JOIN_URL`. SSH
+  host keys are not verified; compare the logged fingerprint.
+- SeaweedFS does not rebalance onto added servers.
 - SeaweedFS state is on hostPath and is not replicated or backed up. A
   production deployment needs real disks, backups and probably multiple
   volume servers.

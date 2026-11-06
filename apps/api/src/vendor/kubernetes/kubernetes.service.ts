@@ -10,6 +10,7 @@ import {
   Exec,
   KubeConfig,
   NetworkingV1Api,
+  PolicyV1Api,
   StorageV1Api,
 } from '@kubernetes/client-node';
 import type { V1Status } from '@kubernetes/client-node';
@@ -50,6 +51,7 @@ export class KubernetesService {
   private networkingV1Api?: NetworkingV1Api;
   private customObjectsApi?: CustomObjectsApi;
   private storageV1Api?: StorageV1Api;
+  private policyV1Api?: PolicyV1Api;
 
   get config(): KubeConfig {
     if (!this.kubeConfig) {
@@ -126,6 +128,10 @@ export class KubernetesService {
   get customObjects(): CustomObjectsApi {
     return (this.customObjectsApi ??=
       this.config.makeApiClient(CustomObjectsApi));
+  }
+
+  get policyV1(): PolicyV1Api {
+    return (this.policyV1Api ??= this.config.makeApiClient(PolicyV1Api));
   }
 
   get storageV1(): StorageV1Api {

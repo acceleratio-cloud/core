@@ -233,6 +233,9 @@ export const buildDeployment = (
         spec: {
           terminationGracePeriodSeconds: TERMINATION_GRACE_PERIOD_SECONDS,
           containers: [container],
+          ...(input.config.node_selector
+            ? { nodeSelector: input.config.node_selector }
+            : {}),
         },
       },
     },
