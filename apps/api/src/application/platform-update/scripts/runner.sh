@@ -171,7 +171,7 @@ read_stage
 exit_code=$rc
 
 if ((rc == 0)); then
-  stage=done
+  stage="done"
   if [ "$outcome" = "up_to_date" ]; then
     finish succeeded "Every component already runs the versions of ${TARGET_VERSION}."
   fi
