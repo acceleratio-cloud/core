@@ -188,7 +188,7 @@ export const DockerWorkloadVolumes = () => {
     <>
       <DetailSection
         title="Volumes"
-        description="Persistent storage mounted into every replica. A full volume rejects every write, so leave headroom. Changes apply on the next deploy."
+        description="Persistent storage mounted into every replica. A full volume rejects every write, so leave headroom. With volumes, deploys and restarts stop the old pods before new ones start, so the service pauses briefly. Changes apply on the next deploy."
         action={
           <Button
             type="button"

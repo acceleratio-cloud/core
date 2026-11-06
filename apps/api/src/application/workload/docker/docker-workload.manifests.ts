@@ -38,6 +38,13 @@ export const MEMORY_LIMIT = '1Gi';
 export const LATEST_TAG = 'latest';
 export const ALWAYS_PULL_POLICY = 'Always';
 export const IF_NOT_PRESENT_PULL_POLICY = 'IfNotPresent';
+/**
+ * Services with volumes stop their old pods before new ones start. A rolling
+ * update would briefly run two copies on the same data, which a database or
+ * any other single-writer process can corrupt. The price is a short gap in
+ * service on each deploy and restart.
+ */
+export const VOLUME_DEPLOYMENT_STRATEGY = 'Recreate';
 export const ENV_SECRET_INFIX = '-env-';
 export const VOLUME_ID_LABEL = 'acceleratio.io/volume-id';
 export const VOLUME_CLAIM_INFIX = '-vol-';
@@ -269,6 +276,11 @@ export const buildDeployment = (
       replicas: options.replicas ?? input.config.replicas ?? DEFAULT_REPLICAS,
       progressDeadlineSeconds: PROGRESS_DEADLINE_SECONDS,
       revisionHistoryLimit: REVISION_HISTORY_LIMIT,
+      // Without volumes the strategy stays unset, which Kubernetes defaults
+      // to a rolling update, so services without volumes deploy as before.
+      ...(volumes.length > 0
+        ? { strategy: { type: VOLUME_DEPLOYMENT_STRATEGY } }
+        : {}),
       selector: {
         matchLabels: { [WORKLOAD_ID_LABEL]: input.id },
       },
