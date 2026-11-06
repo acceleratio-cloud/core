@@ -52,3 +52,33 @@ export interface ApiErrorResponse {
   message: string;
   code?: string;
 }
+
+export interface UpdateProfilePayload {
+  name: string;
+}
+
+export interface ChangePasswordPayload {
+  current_password: string;
+  new_password: string;
+  /** Sign out every other session after the change. Defaults to true. */
+  revoke_other_sessions?: boolean;
+}
+
+export interface ChangePasswordResponse {
+  success: boolean;
+}
+
+/** A session in the user's list. Never carries the bearer token. */
+export interface AuthSessionSummary {
+  id: string;
+  created_at: string;
+  updated_at: string;
+  expires_at: string;
+  ip_address: string | null;
+  user_agent: string | null;
+  current: boolean;
+}
+
+export interface SessionListResponse {
+  sessions: AuthSessionSummary[];
+}
