@@ -26,7 +26,7 @@ Open-source, self-hosted PaaS — the deploy-and-operate experience of a managed
 
 ## Operating Context
 
-- Installation targets a self-managed Kubernetes (k3s) cluster the operator controls. The verified reference deployment is a single Ubuntu 22.04, Ubuntu 24.04 or Debian 12 node that is both control plane and worker, provisioned by `deploy/install.sh` over SSH.
+- Installation targets a self-managed Kubernetes (k3s) cluster the operator controls. The verified reference deployment is a single Ubuntu 22.04, Ubuntu 24.04 or Debian 12 node that is both control plane and worker, provisioned by `deploy/install.sh` over SSH. More servers can be added, cordoned, drained and removed from the console's Servers page; that flow is not yet verified on a multi-node cluster.
 - Docker services are published through k3s's bundled Traefik with Let's Encrypt certificates: one generated sslip.io domain per service and custom domains that go live once their A record points to the server. Ports 80 and 443 must be reachable from the internet. The local k3d cluster runs without Traefik, so domains cannot be served in local development.
 - Local development runs the console and API from source, with Postgres in Docker Compose.
 - The console is a browser application; the API ("core") is a separate NestJS service; a shared package defines the typed contract between them.

@@ -456,7 +456,9 @@ calls.
 - Project isolation adds `get`, `create` and `delete` on `namespaces` (core), `get` on
   `customresourcedefinitions` (`apiextensions.k8s.io`) and `get`, `create` and `update` on
   `ciliumnetworkpolicies` (`cilium.io/v2`).
-- The cluster inventory needs `list` on `nodes` (core).
+- The cluster inventory needs `list` on `nodes` (core). Server management adds `get`, `patch` and
+  `delete` on `nodes`, `create` on `pods/eviction`, `list` on `pods` (cluster-wide) and `list` on
+  `poddisruptionbudgets` (`policy`) and `persistentvolumes` (core).
 - Service domains add `get`, `create`, `patch` and `delete` on `services` (core) and `get`, `create`,
   `update` and `delete` on `ingressroutes` and `middlewares` (`traefik.io/v1alpha1`) in project
   namespaces, and `get` on `services` and `helmchartconfigs` (`helm.cattle.io`) in `kube-system`.
@@ -474,6 +476,28 @@ calls.
 
 The writer assumes one API process. Multiple replicas each observe and write, so they can publish
 duplicate status events; a leader lock is future work.
+
+## Cluster servers
+
+`application/node/` manages the cluster's servers. `NodeService` reads nodes and patches
+scheduling, labels and taints; keys owned by Kubernetes, k3s or Cilium (`node-metadata.ts`) are never
+edited and always survive an update. `NodeDrainService` builds the drain plan (`node-drain-plan.ts`,
+pure functions), evicts pods and removes nodes. `NodeJoinService` runs the preflight and the join over
+SSH, with the scripts and requirement checks in `node-join-script.ts`. SSH goes through the
+`SshConnector` abstraction (`node-ssh.ts`, `ssh2` underneath), so tests replace it with a fake.
+
+- Long operations run in the API process and report through `node_operation` (see `DATABASE.md`),
+  which `NodeOperationStore` reads and writes; the console polls `GET /nodes/:name/operation`. The
+  table's unique index allows one running operation per node, which is the concurrency guard.
+- SSH keys, passphrases and the join token live only in the closure of a running operation and pass
+  through `createRedactor` before reaching a log line or an error message. Secrets reach remote
+  commands on stdin, never on a command line.
+- Destructive endpoints (`DELETE /nodes/:name`) need `confirm_name` equal to the node name and
+  refuse while the drain plan lists `delete_blockers` (last control plane, data only on this node).
+- A service's `node_selector` (`DockerWorkloadConfig`) is validated by `normalizeNodeSelector` and
+  rendered as the pod `nodeSelector`.
+- Frontend: `modules/servers/` has the server list (`ServersView`), the row actions
+  (`ServerActions`) and one dialog per action. `useNodeOperation` polls an operation until it ends.
 
 ## Storage classes
 

@@ -26,6 +26,11 @@ export interface DockerWorkloadConfig {
   ram_max?: number | null;
   /** Pods the service runs, 1 to 10. Absent means 1. */
   replicas?: number;
+  /**
+   * Node labels the pods must run on (Kubernetes `nodeSelector`). Absent or
+   * empty lets the scheduler use any schedulable node.
+   */
+  node_selector?: Record<string, string>;
   /** Replaces the image ENTRYPOINT. Absent keeps the image's own. */
   entrypoint?: string[];
   /** Replaces the image CMD. Absent keeps the image's own. */

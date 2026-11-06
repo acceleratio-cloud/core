@@ -120,6 +120,13 @@
       "when": 1793871197653,
       "tag": "0016_workload_domain_certificates",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1793927603492,
+      "tag": "0017_node_operations",
+      "breakpoints": true
     }
   ]
 }

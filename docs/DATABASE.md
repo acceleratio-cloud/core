@@ -147,6 +147,21 @@ erDiagram
         timestamp started_at
         timestamp finished_at
     }
+    node_operation {
+        uuid id PK
+        varchar node_name
+        node_operation_type type
+        node_operation_status status
+        varchar step
+        text message
+        integer evicted
+        integer remaining
+        jsonb stuck
+        jsonb log
+        varchar actor
+        timestamp started_at
+        timestamp finished_at
+    }
 ```
 
 ## Tables
@@ -305,6 +320,20 @@ index `storage_benchmark_active_unique` allows only one `pending` or
 `running` row, so one benchmark runs across the cluster at a time. The newest 200 finished runs are
 kept; older ones are pruned when a run finishes.
 
+### `node_operation`
+
+One change to a cluster server (`add`, `drain` or `remove`), so it is both the progress the console
+polls and the audit trail. `node_name` is the Kubernetes Node name; it has no foreign key because the
+Node lives in the cluster and a removed node's history must stay. `actor` is the email (or id) of the
+account that started the operation. `step` is the phase now running (`connect`, `preflight`,
+`install`, `wait_ready`, `cordon`, `evict`, `delete`, `uninstall`), `message` the current or final
+status text, `evicted`/`remaining` count pods during a drain, and `stuck` lists the
+`namespace/name` of pods that did not leave in time. `log` keeps the last 200 lines of progress and
+command output, each cut to 500 characters. SSH keys, passphrases and the cluster join token are
+never saved: log lines are redacted first. The partial unique index `node_operation_running_unique`
+allows one `running` row per node. Operations run inside the API process, so rows still `running`
+at startup are marked `failed` ("Interrupted by an API restart").
+
 ### `system_setting`
 
 Installation-wide settings in a single row: the primary key `id` defaults to `1`, and the check
@@ -333,6 +362,8 @@ library; do not repurpose them.
 | `workload_status` | `draft`, `deploying`, `running`, `stopped`, `failed` | `workload.status` |
 | `storage_class_kind` | `platform`, `custom` | `storage_class.kind` |
 | `storage_class_reclaim_policy` | `Delete`, `Retain` | `storage_class.reclaim_policy` |
+| `node_operation_type` | `add`, `drain`, `remove` | `node_operation.type` |
+| `node_operation_status` | `running`, `succeeded`, `failed` | `node_operation.status` |
 | `storage_benchmark_status` | `pending`, `running`, `succeeded`, `failed` | `storage_benchmark.status` |
 | `storage_class_volume_binding_mode` | `Immediate`, `WaitForFirstConsumer` | `storage_class.volume_binding_mode` |
 | `control_plane_change_status` | `awaiting_dns`, `provisioning`, `failed` | `system_setting.pending_status` |

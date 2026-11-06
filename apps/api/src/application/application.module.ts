@@ -5,6 +5,10 @@ import { MetricsController } from '@/application/metrics/metrics.controller';
 import { MetricsService } from '@/application/metrics/metrics.service';
 import { NodeController } from '@/application/node/node.controller';
 import { NodeService } from '@/application/node/node.service';
+import { NodeDrainService } from '@/application/node/node-drain.service';
+import { NodeJoinService } from '@/application/node/node-join.service';
+import { NodeOperationStore } from '@/application/node/node-operation.store';
+import { Ssh2Connector, SshConnector } from '@/application/node/node-ssh';
 import { ProjectController } from '@/application/project/project.controller';
 import { ProjectIsolationService } from '@/application/project/project-isolation.service';
 import { ProjectService } from '@/application/project/project.service';
@@ -61,6 +65,10 @@ import { VictoriaMetricsClient } from '@/vendor/victoriametrics/victoriametrics.
   ],
   providers: [
     NodeService,
+    NodeDrainService,
+    NodeJoinService,
+    NodeOperationStore,
+    { provide: SshConnector, useClass: Ssh2Connector },
     ProjectService,
     ProjectIsolationService,
     StorageClassService,
