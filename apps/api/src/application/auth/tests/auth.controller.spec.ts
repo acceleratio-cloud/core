@@ -358,7 +358,10 @@ describe('AuthController', () => {
         { ...session, id: 'session-2', token: 'token-2' },
       ]);
 
-      const result = await controller.listSessions(createRequest(), userSession);
+      const result = await controller.listSessions(
+        createRequest(),
+        userSession,
+      );
 
       expect(result.sessions.map((s) => s.current)).toEqual([true, false]);
       expect(JSON.stringify(result)).not.toContain('token');

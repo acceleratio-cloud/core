@@ -216,7 +216,10 @@ export class AuthController {
         returnHeaders: true,
       });
     } catch (error) {
-      if ((error as { body?: { code?: string } }).body?.code === 'INVALID_PASSWORD') {
+      if (
+        (error as { body?: { code?: string } }).body?.code ===
+        'INVALID_PASSWORD'
+      ) {
         this.passwordLimiter.recordFailure(session.user.id);
       }
       throw error;
