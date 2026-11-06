@@ -49,6 +49,31 @@ export interface DockerWorkloadConfig {
    * can describe a config without exposing values. Ignored in requests.
    */
   env_keys?: string[];
+  /**
+   * Persistent volumes mounted into every replica, in the order the user
+   * added them. In an update, an absent `volumes` keeps the current volumes
+   * and `[]` removes them all; on create, absent means none.
+   *
+   * Claims are created on deploy. A claim the applied config no longer lists
+   * is deleted once no pod of an earlier version mounts it. A rollback keeps
+   * the volumes the service has, whatever the restored version had.
+   */
+  volumes?: DockerWorkloadVolume[];
+}
+
+/**
+ * A persistent volume of a Docker service (a Kubernetes PersistentVolumeClaim).
+ * Only the mount path can change after creation.
+ */
+export interface DockerWorkloadVolume {
+  /** Stable id. Absent on a new volume in a request; the API assigns it. */
+  id?: string;
+  /** Absolute path inside the container, such as `/data`. */
+  mount_path: string;
+  /** Maximum size in GiB, 1 to 100. Fixed after creation. */
+  size_gb: number;
+  /** Storage profile; null uses the platform profile. Fixed after creation. */
+  storage_class_id: string | null;
 }
 
 /** The variables a Docker service is heading to: the draft's, else the active version's. */

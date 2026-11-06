@@ -274,3 +274,31 @@ describe('environment variables', () => {
     });
   });
 });
+
+describe('deployment strategy', () => {
+  const volumeId = '7c8d9e0f-1a2b-4c3d-8e4f-5a6b7c8d9e0f';
+  const withVolume: WorkloadManifestInput = {
+    ...input,
+    config: {
+      ...input.config,
+      volumes: [
+        {
+          id: volumeId,
+          mount_path: '/data',
+          size_gb: 1,
+          storage_class_id: null,
+        },
+      ],
+    },
+  };
+
+  it('keeps the default rolling update for a service without volumes', () => {
+    expect(buildDeployment(input).spec?.strategy).toBeUndefined();
+  });
+
+  it('recreates pods of a service with volumes, so two never share its data', () => {
+    expect(buildDeployment(withVolume).spec?.strategy).toEqual({
+      type: 'Recreate',
+    });
+  });
+});

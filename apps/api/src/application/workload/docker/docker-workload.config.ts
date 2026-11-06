@@ -1,6 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import type {
   DockerWorkloadConfig,
+  DockerWorkloadVolume,
   EnvVar,
   WorkloadConfig,
 } from '@acceleratio/shared';
@@ -26,6 +27,16 @@ export const ENV_KEY_MAX_LENGTH = 256;
 export const ENV_MAX_BYTES = 512 * 1024;
 /** POSIX shell variable names; Kubernetes skips anything else in envFrom. */
 export const ENV_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+export const VOLUMES_MAX = 10;
+/** GiB. */
+export const VOLUME_SIZE_MIN = 1;
+export const VOLUME_SIZE_MAX = 100;
+export const MOUNT_PATH_MAX_LENGTH = 255;
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/;
 
 type ArgsField = 'entrypoint' | 'command';
 
@@ -195,6 +206,148 @@ const normalizeEnv = (value: unknown): EnvVar[] | undefined => {
 };
 
 /**
+ * An absolute container path without a trailing slash. Kubernetes rejects `:`
+ * in mount paths, and `.`/`..` segments would let one mount escape another.
+ */
+export const normalizeMountPath = (value: unknown): string => {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new BadRequestException('Volume mount path is required');
+  }
+
+  const trimmed = value.trim();
+
+  if (!trimmed.startsWith('/')) {
+    throw new BadRequestException(
+      `Volume mount path "${trimmed.slice(0, 64)}" must start with /`,
+    );
+  }
+
+  const path = trimmed.replace(/\/+$/, '');
+
+  if (!path) {
+    throw new BadRequestException('A volume cannot be mounted at /');
+  }
+
+  if (path.length > MOUNT_PATH_MAX_LENGTH) {
+    throw new BadRequestException(
+      `Volume mount path must be at most ${MOUNT_PATH_MAX_LENGTH} characters`,
+    );
+  }
+
+  const segments = path.slice(1).split('/');
+
+  if (
+    segments.some((segment) => !segment || segment === '.' || segment === '..')
+  ) {
+    throw new BadRequestException(
+      `Volume mount path ${path} cannot contain empty, . or .. segments`,
+    );
+  }
+
+  if (path.includes(':') || CONTROL_CHARACTERS.test(path)) {
+    throw new BadRequestException(
+      `Volume mount path ${path} cannot contain : or control characters`,
+    );
+  }
+
+  return path;
+};
+
+/**
+ * Volumes keep the user's order. Ids are optional here: the service assigns
+ * them to new volumes and checks known ones against what is stored.
+ */
+const normalizeVolumes = (
+  value: unknown,
+): DockerWorkloadVolume[] | undefined => {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  if (!Array.isArray(value)) {
+    throw new BadRequestException('volumes must be a list of volumes');
+  }
+
+  if (value.length > VOLUMES_MAX) {
+    throw new BadRequestException(
+      `A service can have at most ${VOLUMES_MAX} volumes`,
+    );
+  }
+
+  const paths = new Set<string>();
+  const ids = new Set<string>();
+  const volumes = value.map((item: unknown): DockerWorkloadVolume => {
+    if (typeof item !== 'object' || item === null || Array.isArray(item)) {
+      throw new BadRequestException('Each volume must be an object');
+    }
+
+    const candidate = item as Record<string, unknown>;
+    const mountPath = normalizeMountPath(candidate.mount_path);
+    const size = candidate.size_gb;
+    const storageClassId = candidate.storage_class_id;
+    const id = candidate.id;
+
+    if (
+      typeof size !== 'number' ||
+      !Number.isInteger(size) ||
+      size < VOLUME_SIZE_MIN ||
+      size > VOLUME_SIZE_MAX
+    ) {
+      throw new BadRequestException(
+        `Volume size must be a whole number of GiB between ${VOLUME_SIZE_MIN} and ${VOLUME_SIZE_MAX}`,
+      );
+    }
+
+    if (
+      storageClassId !== undefined &&
+      storageClassId !== null &&
+      (typeof storageClassId !== 'string' || !UUID.test(storageClassId))
+    ) {
+      throw new BadRequestException(
+        'storage_class_id must be a storage profile id',
+      );
+    }
+
+    if (id !== undefined && (typeof id !== 'string' || !UUID.test(id))) {
+      throw new BadRequestException('Volume id must be a UUID');
+    }
+
+    if (paths.has(mountPath)) {
+      throw new BadRequestException(
+        `Two volumes cannot be mounted at ${mountPath}`,
+      );
+    }
+
+    paths.add(mountPath);
+
+    const volume: DockerWorkloadVolume = {
+      mount_path: mountPath,
+      size_gb: size,
+      storage_class_id:
+        typeof storageClassId === 'string'
+          ? storageClassId.toLowerCase()
+          : null,
+    };
+
+    if (typeof id === 'string') {
+      const normalizedId = id.toLowerCase();
+
+      if (ids.has(normalizedId)) {
+        throw new BadRequestException(`Duplicate volume id ${normalizedId}`);
+      }
+
+      ids.add(normalizedId);
+
+      return { id: normalizedId, ...volume };
+    }
+
+    return volume;
+  });
+
+  return volumes.length === 0 ? undefined : volumes;
+};
+
+/**
  * Validates a Docker config and keeps only the known keys. An absent limit
  * means the default and stays absent; a null limit means "no limit" and is
  * kept. Empty entrypoint/command/env lists are omitted, so a config that never
@@ -219,6 +372,7 @@ export const normalizeDockerConfig = (
   const command = normalizeArgs('command', candidate?.command);
   const env = normalizeEnv(candidate?.env);
   const nodeSelector = normalizeNodeSelector(candidate?.node_selector);
+  const volumes = normalizeVolumes(candidate?.volumes);
 
   if (cpuMax !== undefined) {
     normalized.cpu_max = cpuMax;
@@ -246,6 +400,10 @@ export const normalizeDockerConfig = (
 
   if (nodeSelector !== undefined) {
     normalized.node_selector = nodeSelector;
+  }
+
+  if (volumes !== undefined) {
+    normalized.volumes = volumes;
   }
 
   return normalized;
@@ -280,6 +438,14 @@ export const redactDockerConfig = (
 
   return env?.length ? { ...rest, env_keys: env.map(({ key }) => key) } : rest;
 };
+
+/**
+ * True when an update leaves `volumes` out, which keeps the current volumes.
+ * Only an explicit `[]` removes them, so a client that rebuilds the config
+ * without knowing about volumes cannot delete their data by accident.
+ */
+export const omitsVolumes = (config: WorkloadConfig | undefined): boolean =>
+  (config as Record<string, unknown> | null | undefined)?.volumes == null;
 
 /** True when an update leaves `env` out, which keeps the current variables. */
 export const omitsEnv = (config: WorkloadConfig | undefined): boolean =>

@@ -10,6 +10,7 @@ import {
 } from '@/modules/workloads/components/workload-details/detail-primitives';
 import { UnsavedChangesBanner } from '@/modules/workloads/components/workload-details/unsaved-changes-banner';
 import { DockerWorkloadNetwork } from './docker-workload-network';
+import { DockerWorkloadVolumes } from './docker-workload-volumes';
 import {
   formatShellArgs,
   parseShellArgs,
@@ -130,6 +131,12 @@ const toConfig = (
 
   if (ramMax !== undefined) {
     config.ram_max = ramMax;
+  }
+
+  // Volumes are edited in their own section and saved on their own; the
+  // form carries them through unchanged.
+  if (stored.volumes?.length) {
+    config.volumes = stored.volumes;
   }
 
   // `env` is left out on purpose: the API then keeps the stored variables,
@@ -473,6 +480,8 @@ export const EditDockerWorkloadConfig = () => {
             <ReplicasField control={control} disabled={isLocked} />
           </div>
         </DetailSection>
+
+        <DockerWorkloadVolumes />
 
         <DetailSection
           title="Placement"

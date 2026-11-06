@@ -33,8 +33,11 @@ type VersionsState =
  */
 export const WorkloadVersions = ({
   renderConfig,
+  description,
 }: {
   renderConfig: (config: WorkloadConfig) => ReactNode;
+  /** What a rollback does for this type, under the section title. */
+  description?: ReactNode;
 }) => {
   const { project } = useProject();
   const {
@@ -101,7 +104,7 @@ export const WorkloadVersions = ({
         </DetailSection>
       ) : null}
 
-      <DetailSection title="Versions">
+      <DetailSection title="Versions" description={description}>
         {state.kind === 'loading' ? (
           <div className="flex flex-col gap-2 px-3 py-3" aria-busy="true">
             <Skeleton className="h-5 w-2/3" />

@@ -82,14 +82,14 @@ const PortField = ({
   </Field>
 );
 
-const SubmitError = ({ error }: { error: string | null }) =>
+export const SubmitError = ({ error }: { error: string | null }) =>
   error ? (
     <p role="alert" className="mt-4 text-xs leading-relaxed text-destructive">
       {error}
     </p>
   ) : null;
 
-const DialogShell = ({
+export const DialogShell = ({
   open,
   busy,
   onOpenChange,
