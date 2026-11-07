@@ -1,6 +1,7 @@
 import type {
   CreateWorkloadPayload,
   S3BucketCredentials,
+  UpdateInternalHostnamePayload,
   UpdateWorkloadPayload,
   Workload,
   WorkloadEnv,
@@ -54,7 +55,7 @@ export const workloadsApi = {
   ) => {
     // The API URL is a path ("/api") behind the control plane domain, so it
     // must be resolved against the page origin; `new URL("/api")` throws.
-    const base = new URL(getApiBaseUrl() || "/", window.location.origin);
+    const base = new URL(getApiBaseUrl() || '/', window.location.origin);
     base.protocol = base.protocol === 'https:' ? 'wss:' : 'ws:';
     const path = `${base.pathname.replace(/\/+$/, '')}/projects/${projectId}/workloads/${id}/instances/${encodeURIComponent(pod)}/terminal`;
     const url = new URL(path, base);
@@ -118,6 +119,18 @@ export const workloadsApi = {
   getCredentials: async (projectId: string, id: string) => {
     const { data } = await api.get<S3BucketCredentials>(
       `/projects/${projectId}/workloads/${id}/credentials`,
+    );
+    return data;
+  },
+  /** Renames the private `<hostname>.internal` name; applies at once. */
+  updateInternalHostname: async (
+    projectId: string,
+    id: string,
+    payload: UpdateInternalHostnamePayload,
+  ) => {
+    const { data } = await api.patch<Workload>(
+      `/projects/${projectId}/workloads/${id}/internal-hostname`,
+      payload,
     );
     return data;
   },

@@ -53,6 +53,8 @@ type WorkloadActionsContextValue = {
   saveConfig: (config: WorkloadConfig) => Promise<void>;
   /** Renames the service in place. Rejects with the API message. */
   renameWorkload: (name: string) => Promise<void>;
+  /** Changes the private hostname. Rejects with the API message. */
+  updateInternalHostname: (hostname: string) => Promise<void>;
   clearDeleteError: () => void;
   deleteWorkload: () => Promise<void>;
 };
@@ -165,6 +167,18 @@ export const WorkloadActionsProvider = ({
       }
     };
 
+    const updateInternalHostname = async (hostname: string) => {
+      try {
+        replaceWorkload(
+          await workloadsApi.updateInternalHostname(project.id, workload.id, {
+            internal_hostname: hostname,
+          }),
+        );
+      } catch (actionError) {
+        throw new Error(getApiErrorMessage(actionError));
+      }
+    };
+
     const deleteWorkload = async () => {
       setPendingAction('delete');
       setDeleteError(null);
@@ -191,6 +205,7 @@ export const WorkloadActionsProvider = ({
       discardDraft,
       saveConfig,
       renameWorkload,
+      updateInternalHostname,
       clearDeleteError: () => setDeleteError(null),
       deleteWorkload,
     };

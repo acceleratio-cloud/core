@@ -166,6 +166,16 @@ export interface Workload {
   external_name: string;
   /** Kubernetes namespace that holds the workload: `project-<project_id>`. */
   namespace: string;
+  /**
+   * Private DNS label of a Docker service, unique in its project. Defaults to
+   * the slug of the name, does not follow a rename. Null for other types.
+   */
+  internal_hostname?: string | null;
+  /**
+   * `<internal_hostname>.internal`: reaches the service on any port from every
+   * service of the same project, never from another project. Always on.
+   */
+  internal_domain?: string | null;
   last_deployed_at: string | null;
   /** Set for `s3_bucket` workloads once their keys exist. */
   s3?: S3BucketAccess | null;
@@ -240,6 +250,11 @@ export interface CreateWorkloadPayload {
   type: WorkloadType;
   /** Required for `docker`; an `s3_bucket` without one uses the platform profile. */
   config?: WorkloadConfig;
+}
+
+export interface UpdateInternalHostnamePayload {
+  /** A DNS label (`postgres`); a trailing `.internal` is accepted. */
+  internal_hostname: string;
 }
 
 export interface UpdateWorkloadPayload {

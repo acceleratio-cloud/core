@@ -54,6 +54,10 @@ export const workload = pgTable(
       .default({ x: 0, y: 0 }),
     // Deployment name in the cluster. Generated once on create.
     external_name: varchar('external_name', { length: 63 }).notNull(),
+    // Private DNS label of a `docker` workload: `<label>.internal` inside its
+    // project. Defaults to the slug of the name on create, does not follow a
+    // rename and can be changed on its own. Null for other types.
+    internal_hostname: varchar('internal_hostname', { length: 63 }),
     // Storage profile of an `s3_bucket` workload; null for other types. A
     // profile cannot be deleted while a bucket uses it.
     storage_class_id: uuid('storage_class_id').references(
@@ -82,6 +86,12 @@ export const workload = pgTable(
     unique('workload_project_id_external_name_unique').on(
       table.project_id,
       table.external_name,
+    ),
+    // Names the headless Service of the workload, so it is unique per
+    // project. Rows of other types leave it null, which never conflicts.
+    unique('workload_project_id_internal_hostname_unique').on(
+      table.project_id,
+      table.internal_hostname,
     ),
     // SeaweedFS has one bucket namespace for the whole cluster, so a bucket
     // name is unique across projects, not only within one. Only buckets set

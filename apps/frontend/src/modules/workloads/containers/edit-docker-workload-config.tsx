@@ -10,6 +10,7 @@ import {
 } from '@/modules/workloads/components/workload-details/detail-primitives';
 import { UnsavedChangesBanner } from '@/modules/workloads/components/workload-details/unsaved-changes-banner';
 import { DockerWorkloadNetwork } from './docker-workload-network';
+import { DockerWorkloadPrivateNetwork } from './docker-workload-private-network';
 import { DockerWorkloadVolumes } from './docker-workload-volumes';
 import {
   formatShellArgs,
@@ -449,6 +450,8 @@ export const EditDockerWorkloadConfig = () => {
             </SettingRow>
           </div>
         </DetailSection>
+
+        <DockerWorkloadPrivateNetwork />
 
         <DockerWorkloadNetwork />
 

@@ -17,6 +17,7 @@ import type {
   DockerWorkloadVolume,
   EnvVar,
   WorkloadEnv,
+  UpdateInternalHostnamePayload,
   UpdateWorkloadPayload,
   Workload,
   WorkloadConfig,
@@ -31,6 +32,7 @@ import { StorageClassService } from '@/application/storage-class/storage-class.s
 import {
   CONFLICT_ID_PREFIX_LENGTH,
   DEFAULT_SLUG_LENGTH,
+  internalDomain,
   projectNamespace,
   workloadExternalName,
 } from '@/common/naming';
@@ -68,6 +70,10 @@ import {
   redactDockerConfig,
 } from './docker-workload.config';
 import { DockerWorkloadNetworkService } from './docker-workload-network.service';
+import {
+  INTERNAL_HOSTNAME_CONSTRAINT,
+  pickInternalHostname,
+} from './docker-workload-network.internal';
 import {
   buildDeployment,
   buildEnvSecret,
@@ -126,7 +132,7 @@ interface WorkloadState {
  * Drizzle wraps driver failures, so the PostgreSQL error code and constraint
  * name can sit on the error or on one of its causes.
  */
-const isExternalNameConflict = (error: unknown): boolean => {
+const uniqueConstraintOf = (error: unknown): string | undefined | null => {
   const seen = new Set<unknown>();
   let current: unknown = error;
 
@@ -142,18 +148,30 @@ const isExternalNameConflict = (error: unknown): boolean => {
       cause?: unknown;
     };
 
-    if (
-      candidate.code === UNIQUE_VIOLATION &&
-      (candidate.constraint === undefined ||
-        candidate.constraint === EXTERNAL_NAME_CONSTRAINT)
-    ) {
-      return true;
+    if (candidate.code === UNIQUE_VIOLATION) {
+      return typeof candidate.constraint === 'string'
+        ? candidate.constraint
+        : undefined;
     }
 
     current = candidate.cause;
   }
 
-  return false;
+  return null;
+};
+
+const isInternalHostnameConflict = (error: unknown): boolean =>
+  uniqueConstraintOf(error) === INTERNAL_HOSTNAME_CONSTRAINT;
+
+const isExternalNameConflict = (error: unknown): boolean => {
+  const constraint = uniqueConstraintOf(error);
+
+  // Without a constraint name the conflict is taken to be the external name,
+  // the only unique key a create could hit before private names existed.
+  return (
+    constraint !== null &&
+    (constraint === undefined || constraint === EXTERNAL_NAME_CONSTRAINT)
+  );
 };
 
 const describeError = (error: unknown): string =>
@@ -196,6 +214,10 @@ export class DockerWorkloadService
   ) {}
 
   onApplicationBootstrap(): void {
+    if (process.env.WORKLOAD_INTERNAL_BACKFILL !== '0') {
+      void this.backfillPrivateNetwork();
+    }
+
     if (!sweepEnabled()) {
       return;
     }
@@ -212,6 +234,80 @@ export class DockerWorkloadService
     this.sweepTimer.unref?.();
     this.sweepInterval = setInterval(run, VOLUME_SWEEP_INTERVAL_MS);
     this.sweepInterval.unref?.();
+  }
+
+  /**
+   * Services created before private names existed get a hostname, and the
+   * deployed ones their headless Service, without a redeploy. Each row runs
+   * in its write queue, like a deploy. Runs in the background: the cluster
+   * may be unreachable at startup, and the next deploy writes it anyway.
+   */
+  async backfillPrivateNetwork(): Promise<void> {
+    let rows: WorkloadRow[];
+
+    try {
+      rows = await this.db
+        .select()
+        .from(workload)
+        .where(eq(workload.type, this.type));
+    } catch (error) {
+      // The API starts before migrations in local development.
+      this.logger.warn(
+        `Could not list services for private names: ${describeError(error)}`,
+      );
+      return;
+    }
+
+    let dnsReady = false;
+
+    for (const { id, project_id: projectId } of rows) {
+      try {
+        await this.exclusive(id, async () => {
+          const row = await this.network.assignInternalHostname(
+            await this.findRow(projectId, id),
+          );
+
+          if (row.last_deployed_at === null) {
+            return;
+          }
+
+          if (!dnsReady) {
+            await this.network.ensureDnsRule();
+            dnsReady = true;
+          }
+
+          await this.network.ensureInternalService(row);
+        });
+      } catch (error) {
+        // A missing row or namespace means it is gone or being deleted.
+        if (
+          !(error instanceof NotFoundException) &&
+          getKubernetesStatusCode(error) !== 404
+        ) {
+          this.logger.warn(
+            `Could not set up the private name of workload ${id}: ${describeError(error)}`,
+          );
+        }
+      }
+    }
+  }
+
+  /** Renames the private hostname at once, in the workload's write queue. */
+  async updateInternalHostname(
+    projectId: string,
+    id: string,
+    payload: UpdateInternalHostnamePayload,
+  ): Promise<Workload> {
+    const { id: workloadId } = await this.findRow(projectId, id);
+
+    return this.exclusive(workloadId, async () => {
+      const row = await this.network.renameInternalHostname(
+        await this.findRow(projectId, id),
+        payload,
+      );
+
+      return this.present(row);
+    });
   }
 
   onApplicationShutdown(): void {
@@ -341,6 +437,31 @@ export class DockerWorkloadService
       external_name: workloadExternalName(name, id),
     };
 
+    // Two services created at once can pick the same private hostname; the
+    // unique constraint catches it and the loser picks again.
+    for (let attempt = 1; ; attempt += 1) {
+      const taken = await this.network.takenServiceNames(projectId);
+      const internal = {
+        ...values,
+        internal_hostname: pickInternalHostname(name, taken),
+      };
+
+      try {
+        return await this.insertNew(internal, name, id);
+      } catch (error) {
+        if (attempt >= 3 || !isInternalHostnameConflict(error)) {
+          throw error;
+        }
+      }
+    }
+  }
+
+  /** Inserts a new row, retrying once with a longer external name suffix. */
+  private async insertNew(
+    values: typeof workload.$inferInsert,
+    name: string,
+    id: string,
+  ): Promise<Workload> {
     try {
       const [row] = await this.db.insert(workload).values(values).returning();
 
@@ -768,6 +889,27 @@ export class DockerWorkloadService
     return next;
   }
 
+  /**
+   * The private name answers as soon as the first pod is ready. A name held
+   * by an object this workload does not own must not block the deploy: the
+   * service runs, only its private name is missing until it is renamed.
+   */
+  private async ensurePrivateName(row: WorkloadRow): Promise<void> {
+    const named = await this.network.assignInternalHostname(row);
+
+    try {
+      await this.network.ensureInternalService(named);
+    } catch (error) {
+      if (!(error instanceof ConflictException)) {
+        throw error;
+      }
+
+      this.logger.warn(
+        `Private hostname ${named.internal_hostname} of workload ${row.id} is held by another Service; deploying without it`,
+      );
+    }
+  }
+
   private async applyNow(row: WorkloadRow, plan: ApplyPlan): Promise<Workload> {
     await this.isolation.ensure(row.project_id);
 
@@ -785,6 +927,7 @@ export class DockerWorkloadService
       // a missing one.
       await this.ensureEnvSecret(input);
       await this.ensureVolumeClaims(input);
+      await this.ensurePrivateName(row);
       await this.upsertDeployment(input);
     } catch (error) {
       throw this.mapClusterError(error);
@@ -1363,6 +1506,11 @@ export class DockerWorkloadService
       status_observed_at: row.status_observed_at?.toISOString() ?? null,
       external_name: row.external_name,
       namespace: projectNamespace(row.project_id),
+      internal_hostname: row.internal_hostname,
+      internal_domain:
+        row.internal_hostname === null
+          ? null
+          : internalDomain(row.internal_hostname),
       last_deployed_at: row.last_deployed_at?.toISOString() ?? null,
       created_at: row.created_at.toISOString(),
       updated_at: row.updated_at.toISOString(),

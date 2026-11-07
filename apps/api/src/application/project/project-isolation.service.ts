@@ -10,6 +10,7 @@ import {
   toNestException,
 } from '@/vendor/kubernetes/kubernetes-error';
 import { KubernetesService } from '@/vendor/kubernetes/kubernetes.service';
+import { ProjectDnsService } from './project-dns.service';
 
 export const ISOLATION_POLICY_NAME = 'acceleratio-project-isolation';
 
@@ -68,7 +69,9 @@ interface PolicyMetadata {
  * Owns the per-project Kubernetes boundary: a namespace and the
  * CiliumNetworkPolicy that keeps project pods away from other namespaces while
  * allowing DNS, kubelet probes, Traefik (for service domains) and outbound
- * internet access.
+ * internet access. Every pod of the project reaches every other one on any
+ * port: that is the project's private network. `world` covers only addresses
+ * outside the cluster, so pods of other projects stay unreachable both ways.
  *
  * `ensure` is idempotent and updates an existing policy, so rule changes apply
  * on the next deploy. Missing Cilium CRD is a hard failure: silently skipping
@@ -78,7 +81,10 @@ interface PolicyMetadata {
 export class ProjectIsolationService {
   private readonly logger = new Logger(ProjectIsolationService.name);
 
-  constructor(private readonly kubernetes: KubernetesService) {}
+  constructor(
+    private readonly kubernetes: KubernetesService,
+    private readonly dns: ProjectDnsService,
+  ) {}
 
   async ensure(projectId: string): Promise<void> {
     const namespace = projectNamespace(projectId);
@@ -86,6 +92,9 @@ export class ProjectIsolationService {
     await this.ensureCrd();
     await this.ensureNamespace(namespace, projectId);
     await this.ensurePolicy(namespace);
+    // Private service names (`<service>.internal`) rely on one cluster-wide
+    // CoreDNS rule; the policy above is what keeps them inside the project.
+    await this.dns.ensure();
   }
 
   async remove(projectId: string): Promise<void> {

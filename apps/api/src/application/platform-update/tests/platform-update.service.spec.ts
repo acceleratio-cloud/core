@@ -131,7 +131,18 @@ describe('PlatformUpdateService.poll', () => {
       },
     });
 
-    await expect(service.poll(id)).resolves.toBe(false);
+    // A report a minute old, whatever day the suite runs: an older one would
+    // trip the silence timeout and end the update.
+    const now = jest
+      .spyOn(Date, 'now')
+      .mockReturnValue(new Date('2026-11-07T10:01:00Z').getTime());
+
+    try {
+      await expect(service.poll(id)).resolves.toBe(false);
+    } finally {
+      now.mockRestore();
+    }
+
     expect(updates).toEqual([
       {
         stage: 'backup',

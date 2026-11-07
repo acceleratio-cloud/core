@@ -12,7 +12,9 @@ Create the first account at <http://localhost:3000/auth/installation>. Use
 `make db-up` / `make db-down` to manage PostgreSQL. The manual sequence is in
 [README.md](./README.md).
 
-API unit tests run with `cd apps/api && bun run test`.
+API unit tests run with `cd apps/api && bun run test`. The private-network
+checks against a real cluster run with `KUBECONFIG=$(./scripts/cluster.sh kubeconfig)`
+and `cd apps/api && bun run test:cluster` (needs `make cluster-up`).
 
 The API targets the Kubernetes cluster from `KUBECONFIG` (the shell value wins
 over `apps/api/.env`; a path or inline YAML), otherwise the k3d cluster created

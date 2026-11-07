@@ -3,6 +3,7 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import type { KubernetesService } from '@/vendor/kubernetes/kubernetes.service';
+import type { ProjectDnsService } from '../project-dns.service';
 import {
   ISOLATION_POLICY_NAME,
   ProjectIsolationService,
@@ -49,10 +50,16 @@ const createService = () => {
     customObjects,
   } as unknown as KubernetesService;
 
+  const dns = { ensure: jest.fn().mockResolvedValue(undefined) };
+
   return {
-    service: new ProjectIsolationService(kubernetes),
+    service: new ProjectIsolationService(
+      kubernetes,
+      dns as unknown as ProjectDnsService,
+    ),
     coreV1,
     customObjects,
+    dns,
   };
 };
 
@@ -304,5 +311,78 @@ describe('ProjectIsolationService.remove', () => {
     await expect(service.remove(projectId)).rejects.toBeInstanceOf(
       ForbiddenException,
     );
+  });
+});
+
+describe('ProjectIsolationService private network', () => {
+  const ensurePolicy = async () => {
+    const { service, coreV1, customObjects, dns } = createService();
+
+    customObjects.getClusterCustomObject.mockResolvedValue({});
+    coreV1.readNamespace.mockResolvedValue({});
+    customObjects.getNamespacedCustomObject.mockRejectedValue(notFound());
+    customObjects.createNamespacedCustomObject.mockResolvedValue({});
+
+    await service.ensure(projectId);
+
+    const { spec } = customObjects.createNamespacedCustomObject.mock.calls[0][0]
+      .body as {
+      spec: {
+        ingress: Array<Record<string, unknown>>;
+        egress: Array<Record<string, unknown>>;
+      };
+    };
+
+    return { spec, dns };
+  };
+  const ownNamespace = { 'k8s:io.kubernetes.pod.namespace': namespace };
+  const namespaceOf = (rule: Record<string, unknown>, key: string) =>
+    (
+      rule[key] as Array<{ matchLabels: Record<string, string> }> | undefined
+    )?.map(
+      ({ matchLabels }) => matchLabels['k8s:io.kubernetes.pod.namespace'],
+    ) ?? [];
+
+  it('lets project pods reach each other on any port', async () => {
+    const { spec } = await ensurePolicy();
+
+    expect(spec.ingress).toContainEqual({
+      fromEndpoints: [{ matchLabels: ownNamespace }],
+    });
+    expect(spec.egress).toContainEqual({
+      toEndpoints: [{ matchLabels: ownNamespace }],
+    });
+  });
+
+  it('opens nothing to pods of other projects', async () => {
+    const { spec } = await ensurePolicy();
+    const entities = [
+      ...spec.ingress.flatMap(
+        (rule) => (rule.fromEntities as string[] | undefined) ?? [],
+      ),
+      ...spec.egress.flatMap(
+        (rule) => (rule.toEntities as string[] | undefined) ?? [],
+      ),
+    ];
+    const namespaces = [
+      ...spec.ingress.flatMap((rule) => namespaceOf(rule, 'fromEndpoints')),
+      ...spec.egress.flatMap((rule) => namespaceOf(rule, 'toEndpoints')),
+    ];
+
+    // `world` is outside the cluster; `cluster` and `all` would include pods
+    // of every other project.
+    expect(entities).not.toContain('cluster');
+    expect(entities).not.toContain('all');
+    expect(namespaces.every((value) => value !== undefined)).toBe(true);
+    expect(namespaces.filter((value) => value.startsWith('project-'))).toEqual([
+      namespace,
+      namespace,
+    ]);
+  });
+
+  it('writes the private DNS rule', async () => {
+    const { dns } = await ensurePolicy();
+
+    expect(dns.ensure).toHaveBeenCalledTimes(1);
   });
 });

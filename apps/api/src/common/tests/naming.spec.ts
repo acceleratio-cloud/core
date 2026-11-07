@@ -2,6 +2,10 @@ import {
   CONFLICT_ID_PREFIX_LENGTH,
   DEFAULT_SLUG_LENGTH,
   DNS1123_LABEL_MAX_LENGTH,
+  INTERNAL_HOSTNAME_MAX_LENGTH,
+  internalDomain,
+  internalHostname,
+  isInternalHostname,
   projectNamespace,
   slugify,
   storageClassExternalName,
@@ -185,5 +189,36 @@ describe('storageClassExternalName', () => {
 
   it('falls back to a generic slug', () => {
     expect(storageClassExternalName('!!!', id)).toBe('sc-workload-7c1d2e3f');
+  });
+});
+
+describe('internalHostname', () => {
+  it('uses the slug of the name, then numbered alternatives', () => {
+    expect(internalHostname('Postgres')).toBe('postgres');
+    expect(internalHostname('My API', 2)).toBe('my-api-2');
+    expect(internalHostname('База данных')).toBe('baza-dannykh');
+  });
+
+  it('keeps DNS-1035 shape and leaves room for a suffix', () => {
+    expect(internalHostname('2048')).toBe('w-2048');
+    expect(internalHostname('!!!')).toBe('workload');
+
+    const long = internalHostname('a'.repeat(80), 999);
+    expectValidDNS1035Name(long);
+    expect(long.length).toBeLessThanOrEqual(INTERNAL_HOSTNAME_MAX_LENGTH + 4);
+    expect(isInternalHostname(internalHostname('9'.repeat(80)))).toBe(true);
+  });
+
+  it('validates labels the way the API accepts them', () => {
+    expect(isInternalHostname('db')).toBe(true);
+    expect(isInternalHostname('db-2')).toBe(true);
+    expect(isInternalHostname('2db')).toBe(false);
+    expect(isInternalHostname('db-')).toBe(false);
+    expect(isInternalHostname('Db')).toBe(false);
+    expect(isInternalHostname('a'.repeat(51))).toBe(false);
+  });
+
+  it('builds the private domain', () => {
+    expect(internalDomain('postgres')).toBe('postgres.internal');
   });
 });

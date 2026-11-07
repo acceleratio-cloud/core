@@ -51,6 +51,7 @@ const row = (overrides: Partial<WorkloadRow> = {}): WorkloadRow => ({
   draft_config: null,
   position: { x: 0, y: 0 },
   external_name: 'demo-assets',
+  internal_hostname: null,
   storage_class_id: profileId,
   status: 'deploying',
   status_message: null,

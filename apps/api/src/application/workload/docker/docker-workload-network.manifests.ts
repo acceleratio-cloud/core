@@ -14,6 +14,9 @@ import {
 } from './docker-workload.manifests';
 
 export const DOMAIN_ID_LABEL = 'acceleratio.io/domain-id';
+/** Tells the private-network Service apart from the domain Service. */
+export const SERVICE_ROLE_LABEL = 'acceleratio.io/service-role';
+export const INTERNAL_SERVICE_ROLE = 'internal';
 /** Shared by every domain in a project namespace. */
 export const HTTPS_REDIRECT_MIDDLEWARE = 'acceleratio-https-redirect';
 
@@ -75,6 +78,33 @@ export const buildNetworkService = (
       targetPort: port,
       protocol: 'TCP',
     })),
+  },
+});
+
+/**
+ * Headless Service named by the service's private hostname. With no cluster
+ * IP, DNS answers with the ready pod IPs themselves, so every port the
+ * container listens on is reachable and no port has to be declared. Only
+ * pods of the same project can connect: the isolation policy allows the
+ * project namespace and nothing else inside the cluster.
+ */
+export const buildInternalService = (
+  workload: NetworkWorkloadInput,
+  hostname: string,
+): V1Service => ({
+  apiVersion: 'v1',
+  kind: 'Service',
+  metadata: {
+    name: hostname,
+    namespace: projectNamespace(workload.project_id),
+    labels: {
+      ...labels(workload),
+      [SERVICE_ROLE_LABEL]: INTERNAL_SERVICE_ROLE,
+    },
+  },
+  spec: {
+    clusterIP: 'None',
+    selector: { [WORKLOAD_ID_LABEL]: workload.id },
   },
 });
 
