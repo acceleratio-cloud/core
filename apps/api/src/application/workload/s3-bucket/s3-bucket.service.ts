@@ -21,6 +21,7 @@ import type {
   Workload,
   WorkloadStatus,
   WorkloadVersion as WorkloadVersionContract,
+  WorkloadVersionDiff,
 } from '@acceleratio/shared';
 import { and, asc, eq } from 'drizzle-orm';
 import { ProjectIsolationService } from '@/application/project/project-isolation.service';
@@ -54,7 +55,9 @@ import {
   MANAGED_BY_LABEL,
   MANAGED_BY_VALUE,
 } from '../docker/docker-workload.manifests';
+import { buildDiff } from '@/application/workload/workload-version.diff';
 import { normalizeBucketConfig, normalizeBucketName } from './s3-bucket.config';
+import { diffBucketConfigs } from './s3-bucket.diff';
 import {
   ACTIVE_DEADLINE_SECONDS,
   BUCKET_ERROR_PREFIX,
@@ -643,6 +646,53 @@ export class S3BucketWorkloadService
     const row = await this.findRow(projectId, id);
 
     return toWorkloadVersion(await this.versions.get(row.id, versionId));
+  }
+
+  async diffVersions(
+    projectId: string,
+    id: string,
+    base: string,
+    target: string,
+  ): Promise<WorkloadVersionDiff> {
+    const row = await this.findRow(projectId, id);
+    const [left, right] = await Promise.all([
+      this.versions.resolveSide(row, base),
+      this.versions.resolveSide(row, target),
+    ]);
+    const leftConfig = left.config as S3BucketConfig | null;
+    const rightConfig = right.config as S3BucketConfig | null;
+    const names = new Map<string, string>();
+
+    for (const profileId of new Set(
+      [leftConfig?.storage_class_id, rightConfig?.storage_class_id].filter(
+        (value): value is string => typeof value === 'string',
+      ),
+    )) {
+      // A deleted profile still reads, by its id.
+      names.set(
+        profileId,
+        await this.storageClasses
+          .get(profileId)
+          .then((profile) => profile.name)
+          .catch(() => profileId),
+      );
+    }
+
+    return buildDiff({
+      workloadId: row.id,
+      type: this.type,
+      base: left.side,
+      target: right.side,
+      sections: diffBucketConfigs(
+        leftConfig,
+        rightConfig,
+        (profileId) => names.get(profileId) ?? profileId,
+      ),
+    });
+  }
+
+  previewRollback(): Promise<WorkloadVersionDiff> {
+    return this.unsupported();
   }
 
   deploy(): Promise<Workload> {

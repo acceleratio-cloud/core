@@ -5,10 +5,12 @@ import {
   integer,
   jsonb,
   pgTable,
+  text,
   timestamp,
   unique,
   uuid,
 } from 'drizzle-orm/pg-core';
+import { user } from '@/vendor/db/schema';
 import { workload } from './workload.schema';
 
 /**
@@ -31,6 +33,16 @@ export const workloadVersion = pgTable(
       (): AnyPgColumn => workloadVersion.id,
       { onDelete: 'set null' },
     ),
+    // Who applied it. The name and email are copied at write time, so the
+    // history still reads after the account is renamed or deleted.
+    created_by_id: text('created_by_id').references(
+      (): AnyPgColumn => user.id,
+      {
+        onDelete: 'set null',
+      },
+    ),
+    created_by_name: text('created_by_name'),
+    created_by_email: text('created_by_email'),
     // When this version was applied to the cluster.
     created_at: timestamp('created_at').defaultNow().notNull(),
   },

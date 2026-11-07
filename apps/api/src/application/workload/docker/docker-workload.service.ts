@@ -23,6 +23,7 @@ import type {
   WorkloadConfig,
   WorkloadPosition,
   WorkloadStatus,
+  WorkloadVersionDiff,
 } from '@acceleratio/shared';
 import { and, asc, eq, inArray } from 'drizzle-orm';
 import type { WorkloadVersion as WorkloadVersionContract } from '@acceleratio/shared';
@@ -59,8 +60,11 @@ import {
 import {
   sameConfig,
   toWorkloadVersion,
+  type VersionAuthorInput,
   WorkloadVersionService,
 } from '@/application/workload/workload-version.service';
+import { buildDiff } from '@/application/workload/workload-version.diff';
+import { diffDockerConfigs } from './docker-workload.diff';
 import {
   DEFAULT_REPLICAS,
   newDockerConfig,
@@ -118,6 +122,8 @@ interface ApplyPlan {
   /** True when the apply creates a version instead of reapplying one. */
   newVersion: boolean;
   sourceVersionId?: string | null;
+  /** Recorded on the new version. */
+  author?: VersionAuthorInput | null;
   /** Draft the apply consumes; cleared afterwards if nobody edited it. */
   appliedDraft?: DockerWorkloadConfig;
 }
@@ -596,7 +602,11 @@ export class DockerWorkloadService
    * Applies the draft as a new version, or reapplies the active version when
    * there is no draft.
    */
-  async deploy(projectId: string, id: string): Promise<Workload> {
+  async deploy(
+    projectId: string,
+    id: string,
+    author?: VersionAuthorInput | null,
+  ): Promise<Workload> {
     const { id: workloadId } = await this.findRow(projectId, id);
 
     // Reads happen inside the queue, so they see what an earlier apply left.
@@ -621,6 +631,7 @@ export class DockerWorkloadService
           versionId: randomUUID(),
           newVersion: true,
           appliedDraft: draft,
+          author,
         });
       }
 
@@ -667,6 +678,7 @@ export class DockerWorkloadService
     projectId: string,
     id: string,
     versionId: string,
+    author?: VersionAuthorInput | null,
   ): Promise<Workload> {
     const { id: workloadId } = await this.findRow(projectId, id);
 
@@ -678,23 +690,107 @@ export class DockerWorkloadService
         throw new ConflictException(ALREADY_ACTIVE_MESSAGE);
       }
 
-      // Rollback never touches volumes: the version it restores runs with the
-      // volumes the service has now, so no claim is created or deleted and no
-      // data comes back empty or goes away.
       const active = await this.activeVersion(row);
-      const config = normalizeDockerConfig(target.config);
-
-      delete config.volumes;
-      const current = (active?.config as DockerWorkloadConfig | undefined)
-        ?.volumes;
 
       return this.applyNow(row, {
-        config: current?.length ? { ...config, volumes: current } : config,
+        config: this.rollbackConfig(target, active),
         versionId: randomUUID(),
         newVersion: true,
         sourceVersionId: target.id,
+        author,
       });
     });
+  }
+
+  /**
+   * What the two sides differ in: a version, the draft or the active version
+   * against another. Variable values are compared here and never returned.
+   */
+  async diffVersions(
+    projectId: string,
+    id: string,
+    base: string,
+    target: string,
+  ): Promise<WorkloadVersionDiff> {
+    const row = await this.findRow(projectId, id);
+    const [left, right] = await Promise.all([
+      this.versions.resolveSide(row, base),
+      this.versions.resolveSide(row, target),
+    ]);
+
+    return buildDiff({
+      workloadId: row.id,
+      type: this.type,
+      base: left.side,
+      target: right.side,
+      sections: diffDockerConfigs(
+        left.config && normalizeDockerConfig(left.config),
+        right.config && normalizeDockerConfig(right.config),
+      ),
+    });
+  }
+
+  /**
+   * What a rollback to the version would change on the running service: the
+   * config it really applies (with the current volumes) against the active
+   * version.
+   */
+  async previewRollback(
+    projectId: string,
+    id: string,
+    versionId: string,
+  ): Promise<WorkloadVersionDiff> {
+    const row = await this.findRow(projectId, id);
+    const target = await this.versions.get(row.id, versionId);
+
+    if (target.id === row.active_version_id) {
+      throw new ConflictException(ALREADY_ACTIVE_MESSAGE);
+    }
+
+    const active = await this.activeVersion(row);
+    const restored = normalizeDockerConfig(target.config);
+    const applied = this.rollbackConfig(target, active);
+    const keepsVolumes = !sameConfig(
+      { volumes: restored.volumes ?? [] } as DockerWorkloadConfig,
+      { volumes: applied.volumes ?? [] } as DockerWorkloadConfig,
+    );
+
+    return buildDiff({
+      workloadId: row.id,
+      type: this.type,
+      base:
+        active === null
+          ? { kind: 'none' }
+          : { kind: 'version', version_id: active.id, number: active.number },
+      target: { kind: 'version', version_id: target.id, number: target.number },
+      sections: diffDockerConfigs(
+        active && normalizeDockerConfig(active.config),
+        applied,
+      ),
+      notes: keepsVolumes
+        ? [
+            `v${target.number} had different volumes. A rollback keeps the volumes the service has now and their data.`,
+          ]
+        : [],
+    });
+  }
+
+  /**
+   * Rollback never touches volumes: the version it restores runs with the
+   * volumes the service has now, so no claim is created or deleted and no
+   * data comes back empty or goes away.
+   */
+  private rollbackConfig(
+    target: WorkloadVersionRow,
+    active: WorkloadVersionRow | null,
+  ): DockerWorkloadConfig {
+    const config = normalizeDockerConfig(target.config);
+
+    delete config.volumes;
+    const current = (active?.config as DockerWorkloadConfig | undefined)
+      ?.volumes;
+
+    return current?.length ? { ...config, volumes: current } : config;
   }
 
   async listVersions(
@@ -970,6 +1066,7 @@ export class DockerWorkloadService
         workloadId: row.id,
         config: plan.config,
         sourceVersionId: plan.sourceVersionId,
+        author: plan.author,
         appliedDraft: plan.appliedDraft,
       });
     } else if (plan.appliedDraft !== undefined) {

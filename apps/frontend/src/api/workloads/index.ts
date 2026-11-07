@@ -7,6 +7,8 @@ import type {
   WorkloadEnv,
   WorkloadInstancesSnapshot,
   WorkloadVersion,
+  WorkloadVersionDiff,
+  WorkloadVersionDiffQuery,
 } from '@acceleratio/shared';
 
 import { api, getApiBaseUrl } from '@/api';
@@ -99,6 +101,41 @@ export const workloadsApi = {
   listVersions: async (projectId: string, id: string) => {
     const { data } = await api.get<WorkloadVersion[]>(
       `/projects/${projectId}/workloads/${id}/versions`,
+    );
+    return data;
+  },
+  getVersion: async (projectId: string, id: string, versionId: string) => {
+    const { data } = await api.get<WorkloadVersion>(
+      `/projects/${projectId}/workloads/${id}/versions/${versionId}`,
+    );
+    return data;
+  },
+  /**
+   * What differs between two sides: `active`, `draft` or a version id. The
+   * server compares variable values and returns only that they changed.
+   */
+  diffVersions: async (
+    projectId: string,
+    id: string,
+    query: WorkloadVersionDiffQuery,
+    signal?: AbortSignal,
+  ) => {
+    const { data } = await api.get<WorkloadVersionDiff>(
+      `/projects/${projectId}/workloads/${id}/versions/diff`,
+      { params: query, signal },
+    );
+    return data;
+  },
+  /** What a rollback to the version would change, before it runs. */
+  previewRollback: async (
+    projectId: string,
+    id: string,
+    versionId: string,
+    signal?: AbortSignal,
+  ) => {
+    const { data } = await api.get<WorkloadVersionDiff>(
+      `/projects/${projectId}/workloads/${id}/versions/${versionId}/rollback/preview`,
+      { signal },
     );
     return data;
   },

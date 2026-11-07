@@ -24,7 +24,9 @@ import { workloadsApi } from '@/api/workloads';
 import { useProject } from '@/modules/projects/providers/project-provider';
 import { DetailSection } from '@/modules/workloads/components/workload-details/detail-primitives';
 import { deployAction } from '@/modules/workloads/utils/workload-capabilities';
+import { hasPendingChanges } from '@/modules/workloads/utils/workload-config';
 import { Button } from '@/shared/components/ui/button';
+import { VersionChangeConfirmDialog } from './version-change-confirm-dialog';
 import {
   Dialog,
   DialogContent,
@@ -46,8 +48,10 @@ type WorkloadActionsContextValue = {
   versionError: string | null;
   /** Version id of the rollback in flight. */
   rollbackTarget: string | null;
-  runLifecycle: (key: LifecycleKey) => Promise<void>;
-  rollbackTo: (versionId: string) => Promise<void>;
+  /** Resolves true when the action succeeded. */
+  runLifecycle: (key: LifecycleKey) => Promise<boolean>;
+  /** Resolves true when the rollback succeeded. */
+  rollbackTo: (versionId: string) => Promise<boolean>;
   discardDraft: () => Promise<void>;
   /** Stores config edits as the draft. Rejects with the API message. */
   saveConfig: (config: WorkloadConfig) => Promise<void>;
@@ -100,8 +104,10 @@ export const WorkloadActionsProvider = ({
 
       try {
         replaceWorkload(await workloadsApi[key](project.id, workload.id));
+        return true;
       } catch (actionError) {
         setLifecycleError(getApiErrorMessage(actionError));
+        return false;
       } finally {
         setPendingAction(null);
       }
@@ -116,8 +122,10 @@ export const WorkloadActionsProvider = ({
         replaceWorkload(
           await workloadsApi.rollback(project.id, workload.id, versionId),
         );
+        return true;
       } catch (actionError) {
         setVersionError(getApiErrorMessage(actionError));
+        return false;
       } finally {
         setPendingAction(null);
         setRollbackTarget(null);
@@ -243,6 +251,7 @@ type LifecycleAction = {
  * Deploy, Start, Restart and Stop at the top right of the panel header. Only
  * the actions the current status allows are shown. The deploy action (Deploy,
  * Apply changes or Redeploy, see `deployAction`) is the one solid button; the rest are outline buttons whose icon color hints at the action.
+ * Applying pending changes first shows what they change and asks to confirm.
  * Renders as a fragment so the header can place the buttons and their error.
  * `leading` goes first in the button row, for links such as "Logs".
  */
@@ -252,6 +261,23 @@ export const WorkloadLifecycleActions = ({
   const { workload, pendingAction, lifecycleError, runLifecycle } =
     useWorkloadActions();
   const deploy = deployAction(workload);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const reviewsChanges = hasPendingChanges(workload);
+
+  const handleAction = (key: LifecycleKey) => {
+    if (key === 'deploy' && reviewsChanges) {
+      setReviewOpen(true);
+      return;
+    }
+
+    void runLifecycle(key);
+  };
+
+  const handleApply = async () => {
+    if (await runLifecycle('deploy')) {
+      setReviewOpen(false);
+    }
+  };
 
   const actions: LifecycleAction[] = [
     {
@@ -310,7 +336,7 @@ export const WorkloadLifecycleActions = ({
               variant={primary ? 'default' : 'outline'}
               loading={pendingAction === key}
               disabled={pendingAction !== null}
-              onClick={() => void runLifecycle(key)}
+              onClick={() => handleAction(key)}
             >
               <Icon
                 data-icon="inline-start"
@@ -324,13 +350,36 @@ export const WorkloadLifecycleActions = ({
         )}
       </div>
 
-      {lifecycleError ? (
+      {lifecycleError && !reviewOpen ? (
         <p
           role="alert"
           className="text-right text-xs leading-relaxed text-destructive"
         >
           {lifecycleError}
         </p>
+      ) : null}
+
+      {reviewsChanges || reviewOpen ? (
+        <VersionChangeConfirmDialog
+          open={reviewOpen}
+          onOpenChange={setReviewOpen}
+          workloadId={workload.id}
+          request={{ kind: 'compare', base: 'active', target: 'draft' }}
+          revision={workload.updated_at}
+          title="Apply changes"
+          description={
+            <>
+              Review what the next version of {workload.name} changes against v
+              {workload.active_version?.number}, then apply it.
+            </>
+          }
+          icon={Rocket}
+          confirmLabel="Apply changes"
+          pendingLabel="Applying"
+          pending={pendingAction === 'deploy'}
+          error={reviewOpen ? lifecycleError : null}
+          onConfirm={() => void handleApply()}
+        />
       ) : null}
     </>
   );

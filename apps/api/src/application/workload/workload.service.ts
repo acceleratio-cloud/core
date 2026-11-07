@@ -11,11 +11,13 @@ import type {
   Workload,
   WorkloadEnv,
   WorkloadVersion,
+  WorkloadVersionDiff,
 } from '@acceleratio/shared';
 import { ProjectService } from '@/application/project/project.service';
 import { DockerWorkloadService } from './docker/docker-workload.service';
 import { S3BucketWorkloadService } from './s3-bucket/s3-bucket.service';
 import type { WorkloadTypeService } from './workload-type-service';
+import type { VersionAuthorInput } from './workload-version.service';
 import { WorkloadTypeRegistry } from './workload-type.registry';
 import { WorkloadTypeResolver } from './workload-type.resolver';
 
@@ -139,10 +141,14 @@ export class WorkloadService {
     return service.update(projectId, id, payload);
   }
 
-  async deploy(projectId: string, id: string): Promise<Workload> {
+  async deploy(
+    projectId: string,
+    id: string,
+    author?: VersionAuthorInput | null,
+  ): Promise<Workload> {
     const service = await this.serviceForRow(projectId, id);
 
-    return service.deploy(projectId, id);
+    return service.deploy(projectId, id, author);
   }
 
   async start(projectId: string, id: string): Promise<Workload> {
@@ -173,10 +179,32 @@ export class WorkloadService {
     projectId: string,
     id: string,
     versionId: string,
+    author?: VersionAuthorInput | null,
   ): Promise<Workload> {
     const service = await this.serviceForRow(projectId, id);
 
-    return service.rollback(projectId, id, versionId);
+    return service.rollback(projectId, id, versionId, author);
+  }
+
+  async diffVersions(
+    projectId: string,
+    id: string,
+    base: string,
+    target: string,
+  ): Promise<WorkloadVersionDiff> {
+    const service = await this.serviceForRow(projectId, id);
+
+    return service.diffVersions(projectId, id, base, target);
+  }
+
+  async previewRollback(
+    projectId: string,
+    id: string,
+    versionId: string,
+  ): Promise<WorkloadVersionDiff> {
+    const service = await this.serviceForRow(projectId, id);
+
+    return service.previewRollback(projectId, id, versionId);
   }
 
   async listVersions(
