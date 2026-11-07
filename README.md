@@ -183,7 +183,10 @@ restart `make dev` starts the machine again.
 
 The kubeconfig is written to `~/.kube/acceleratio-orbstack.yaml` with the
 context `orbstack-acceleratio` (`./scripts/cluster.sh kubeconfig` prints the
-path), and your default `~/.kube/config` is not touched. `make dev` also reads
+path), and your default `~/.kube/config` is not touched. The API server address
+in it is `https://127.0.0.1:6443`: OrbStack forwards the machine's ports to
+localhost, so it keeps working when the machine's IP changes and does not need
+the macOS Local Network permission that the machine's own address does. `make dev` also reads
 the cluster join URL, token and CIDRs from the cluster and passes them to the
 API, so the console's add-server flow is configured; a second OrbStack machine
 (`orbctl create ubuntu:24.04 worker`) can serve as the server to add (see

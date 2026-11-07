@@ -166,6 +166,12 @@ write_kubeconfig() {
   # The installer names the context "default". A distinct name keeps it apart
   # from other clusters and is what scripts/dev.sh recognises as local.
   kube config rename-context default "$CONTEXT_NAME" >/dev/null 2>&1 || true
+  # OrbStack forwards the machine's ports to localhost, and the API server
+  # certificate includes 127.0.0.1. Going through localhost keeps the kubeconfig
+  # valid when the machine's IP changes, and avoids macOS blocking terminals and
+  # editors from reaching the machine's LAN address (Privacy & Security >
+  # Local Network).
+  kube config set-cluster default --server=https://127.0.0.1:6443 >/dev/null
 }
 
 up() {
