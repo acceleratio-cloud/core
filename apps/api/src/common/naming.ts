@@ -17,15 +17,20 @@
  *   the 63 characters a label allows.
  * - `workloadExternalName(name, id)` returns `<slug>-<id prefix>`. The name is
  *   kept in DNS-1035 shape, which requires a leading letter, because a Docker
- *   service with domains gets a Kubernetes Service of the same name. A slug that starts with a digit therefore gets a `w-`
- *   marker (`2048` becomes `w-2048-<id>`); names that already start with a
- *   letter keep their shape, and existing names stay stable. The slug is
- *   truncated to 40 characters by
+ *   service with domains gets a Kubernetes Service of the same name. A slug
+ *   that starts with a digit therefore gets a `w-` marker (`2048` becomes
+ *   `w-2048-<id>`); names that already start with a letter keep their shape,
+ *   and existing names stay stable. The slug is truncated to 40 characters by
  *   default and the id prefix is 8 characters, which keeps the name inside the
  *   63-character limit (a numeric-leading name uses 2 + 40 + 1 + 8 = 51). The
  *   name is generated once at creation and never changes, so renaming a
  *   workload does not break Deployment selectors or DNS labels. A collision
  *   on `(project_id, external_name)` is retried with a 12-character id prefix.
+ * - `internalHostname(name, attempt)` returns the private DNS label of a
+ *   Docker service: the slug in DNS-1035 shape (the same `w-` marker), cut to
+ *   `INTERNAL_HOSTNAME_MAX_LENGTH`, with `-<attempt>` from the second attempt
+ *   on (`postgres`, `postgres-2`). It names the service's headless Service, and
+ *   `internalDomain(label)` is the name other services use: `<label>.internal`.
  */
 
 export const DNS1123_LABEL_MAX_LENGTH = 63;
@@ -178,3 +183,28 @@ export const storageClassExternalName = (
 
   return `${STORAGE_CLASS_PREFIX}${slug}-${suffix}`;
 };
+
+/** Leaves room for a `-<n>` suffix inside the 63-character label. */
+export const INTERNAL_HOSTNAME_MAX_LENGTH = 50;
+export const INTERNAL_DNS_SUFFIX = 'internal';
+
+const DNS1035_LABEL = /^[a-z]([a-z0-9-]*[a-z0-9])?$/;
+
+export const isInternalHostname = (value: string): boolean =>
+  value.length <= INTERNAL_HOSTNAME_MAX_LENGTH && DNS1035_LABEL.test(value);
+
+export const internalHostname = (name: string, attempt = 1): string => {
+  const slug = slugify(name);
+  const marker = /^[0-9]/.test(slug) ? NUMERIC_SLUG_PREFIX : '';
+  const base = truncateLabel(
+    slug,
+    INTERNAL_HOSTNAME_MAX_LENGTH - marker.length,
+  );
+
+  return attempt > 1
+    ? `${marker}${base}-${Math.trunc(attempt)}`
+    : `${marker}${base}`;
+};
+
+export const internalDomain = (hostname: string): string =>
+  `${hostname}.${INTERNAL_DNS_SUFFIX}`;

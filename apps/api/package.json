@@ -18,6 +18,7 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
+    "test:cluster": "CLUSTER_E2E=1 node --test --test-timeout=900000 -r ts-node/register/transpile-only -r tsconfig-paths/register tests/cluster/*.cluster.test.ts",
     "test:e2e": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --config ./tests/jest-e2e.json",
     "db:generate": "drizzle-kit generate",
     "db:check": "drizzle-kit check",

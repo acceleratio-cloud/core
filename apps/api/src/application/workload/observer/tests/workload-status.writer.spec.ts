@@ -45,6 +45,7 @@ const createRow = (overrides: Partial<WorkloadRow> = {}): WorkloadRow => ({
   draft_config: { docker_image: 'nginx:1.25' },
   position: { x: 0, y: 0 },
   external_name: externalName,
+  internal_hostname: null,
   storage_class_id: null,
   status: 'deploying',
   status_message: null,

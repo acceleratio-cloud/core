@@ -291,6 +291,52 @@ Adding a workload type:
    generate the migration
 4) add the service and deriver to `application.module.ts` providers
 
+### Docker service private network
+
+Every project is one private network: its namespace plus the `CiliumNetworkPolicy` from
+`ProjectIsolationService`. Every pod of the project reaches every other one on any port; pods of
+other projects cannot connect in either direction (`world` covers only addresses outside the
+cluster). There are no separate networks inside a project.
+
+- Each Docker service has a private hostname (`workload.internal_hostname`): the slug of its name on
+  create (`postgres`, then `postgres-2`), unique in the project and never equal to an
+  `external_name` there. It does not follow a rename. `PATCH
+  projects/:projectId/workloads/:id/internal-hostname` changes it at once, outside the draft: the new
+  Service is written before the old one is deleted. The API returns it as `internal_hostname` and
+  `internal_domain` (`postgres.internal`).
+- `buildInternalService` in `docker-workload-network.manifests.ts` is a headless Service
+  (`clusterIP: None`, no ports) named by that hostname, labeled `acceleratio.io/service-role:
+  internal` and selecting the workload's pods. DNS answers with the ready pod IPs, so no port needs
+  declaring. `DockerWorkloadNetworkService.ensureInternalService` writes it on every deploy, before
+  the Deployment, and never touches the pods. It only manages Services that carry the internal role
+  and the workload's id, so it never takes over the domain Service or another workload's name; such a
+  clash is logged and the deploy goes on without the private name. It also deletes the workload's
+  private Services under any other name (left by a rename), and the workload's removal deletes them
+  all. It stays while the service has no domain.
+- Renames and the startup pass run in `DockerWorkloadService`'s per-workload write queue, like a
+  deploy, so a deploy in flight cannot bring an old name back. The startup pass names Docker rows that
+  have no hostname yet (rows from before migration 0019) and writes the Service of deployed ones
+  (`WORKLOAD_INTERNAL_BACKFILL=0` disables it); a deploy names such a row too.
+- Because the Service is headless, the name follows pod IPs: a client that resolves once and keeps
+  the address (nginx `proxy_pass` with a literal host, long-lived pools, the JVM DNS cache) reaches a
+  stale IP after the target restarts. CoreDNS also caches answers for up to 30 s. A stable virtual IP
+  would need declared ports, which the Docker config does not have yet.
+- `<hostname>.internal` resolves through one cluster-wide CoreDNS rule, written by
+  `ProjectDnsService` (`project/project-dns.service.ts`) into the `coredns-custom` ConfigMap that
+  k3s's Corefile imports (key `acceleratio-internal.override`; other keys are left alone). A pod's
+  resolv.conf searches `<namespace>.svc.<cluster domain>` first, so `postgres.internal` is asked as
+  `postgres.internal.project-<id>.svc.…` and rewritten to `postgres.project-<id>.svc.…`. The
+  namespace comes from the asking pod, so the name never resolves into another project. The short
+  name `postgres` works as well. `CLUSTER_DOMAIN` overrides `cluster.local`.
+- `ProjectIsolationService.ensure` calls `ProjectDnsService.ensure`, so every deploy path keeps the
+  rule in place; after a success it is skipped for 5 minutes, so a ConfigMap deleted by hand comes
+  back. If the `coredns` Corefile does not import `/etc/coredns/custom/*.override` (not k3s, or a
+  customized Corefile), the API logs once that private names will not resolve.
+- `apps/api/tests/cluster/project-network.cluster.test.ts` checks all of it on a real cluster:
+  `bun run test:cluster` with `KUBECONFIG` pointing at the `make cluster-up` cluster. It runs on
+  Node's test runner, because Jest cannot load the ESM-only Kubernetes client and Bun's fetch drops
+  the kubeconfig client certificate.
+
 ### Docker service domains
 
 `docker/docker-workload-network.service.ts` owns the domains of a Docker service (table
@@ -303,8 +349,9 @@ after the workload's `external_name` at once, and never touches the Deployment, 
 - A custom domain is saved in `verification` and writes nothing to the cluster until its A record
   points to the server; then its routes are published and the service waits for a trusted certificate
   (`success`), or marks it `failed` after 10 minutes and removes the routes.
-- Each domain targets its own container port. The Service exposes the distinct ports of routed
-  domains and is deleted with the last one.
+- Each domain targets its own container port. The domain Service (named `external_name`) exposes
+  the distinct ports of routed domains and is deleted with the last one; the private-network
+  Service is separate and stays.
 - The certificate is tracked separately (`certificate_status`): a domain counts as live only after a
   trusted TLS handshake. A generated domain whose certificate is late reports `failed` but keeps its
   routes and keeps being probed.

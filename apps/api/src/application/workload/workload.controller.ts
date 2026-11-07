@@ -21,6 +21,7 @@ import type {
   WorkloadDomain,
   WorkloadDomains,
   S3BucketCredentials,
+  UpdateInternalHostnamePayload,
   UpdateWorkloadPayload,
   Workload,
   WorkloadEnv,
@@ -102,6 +103,19 @@ export class WorkloadController {
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<WorkloadDomains> {
     return this.network.list(projectId, id);
+  }
+
+  /**
+   * Renames the private hostname of a Docker service (`<hostname>.internal`).
+   * Like domains it applies at once, without a deploy.
+   */
+  @Patch(':id/internal-hostname')
+  updateInternalHostname(
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: UpdateInternalHostnamePayload,
+  ): Promise<Workload> {
+    return this.workloadService.updateInternalHostname(projectId, id, body);
   }
 
   @Post(':id/domains/generate')

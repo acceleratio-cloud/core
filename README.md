@@ -28,8 +28,10 @@ the keys to a third party.
   managed from the console, plus configurable storage classes for volumes.
 - **Observability and access.** Per-project metrics, instance status and a browser
   terminal into running containers, without leaving the console.
-- **Network isolation.** Projects are isolated from each other with Cilium network
-  policies.
+- **Private networking.** Every service of a project reaches every other one by
+  its private name (`postgres.internal`) on any port, so an app talks to its
+  database without a public domain. Projects are isolated from each other with
+  Cilium network policies.
 - **Operator-first console.** First-run setup creates the initial account;
   servers, storage and system settings are managed from the same web console.
 - **Built on open components.** Kubernetes (k3s), Cilium, SeaweedFS, Traefik,

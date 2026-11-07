@@ -90,6 +90,7 @@ erDiagram
         jsonb draft_config
         jsonb position
         varchar external_name
+        varchar internal_hostname
         workload_status status
         text status_message
         timestamp last_deployed_at
@@ -199,13 +200,20 @@ Columns: `id`, `name`, `created_at`, `updated_at`.
 One row per deployable node on the project canvas. `project_id` scopes every read and write.
 
 Columns: `id`, `project_id`, `name`, `type`, `active_version_id`, `draft_config`, `position`,
-`external_name`, `storage_class_id`, `status`, `status_message`, `last_deployed_at`, `status_observed_at`, `created_at`,
-`updated_at`.
+`external_name`, `internal_hostname`, `storage_class_id`, `status`, `status_message`, `last_deployed_at`,
+`status_observed_at`, `created_at`, `updated_at`.
 
 Invariants:
 
 - `(project_id, external_name)` is unique. `external_name` becomes the Kubernetes Deployment name,
   is generated once on create, and never changes.
+- `internal_hostname` is the private DNS label of a `docker` workload (`<label>.internal` inside the
+  project) and names its headless Service. `(project_id, internal_hostname)` is unique; the API also
+  keeps it apart from every `external_name` of the project, since that is the name of the domain
+  Service. It is the slug of the name on create (`postgres`, then `postgres-2`), does not follow a
+  rename and can be changed on its own. Rows of other types leave it null. Migration
+  `0019_workload_internal_hostname` leaves existing Docker rows null; the API names them on startup
+  and on their next deploy, never with their `external_name`.
 - `type` selects the shape of every config of the workload (`draft_config` and its versions). The
   values are `docker` and `s3_bucket`. A `docker` config carries the image reference (`docker_image`) and optional
   `cpu_max` (vCPU, default 1), `ram_max` (MiB, default 1024), `entrypoint` and `command` (string

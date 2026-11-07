@@ -134,6 +134,13 @@
       "when": 1793992221093,
       "tag": "0018_platform_update",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1794035738918,
+      "tag": "0019_workload_internal_hostname",
+      "breakpoints": true
     }
   ]
 }

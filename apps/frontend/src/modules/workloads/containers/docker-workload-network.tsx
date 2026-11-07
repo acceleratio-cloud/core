@@ -462,7 +462,7 @@ export const DockerWorkloadNetwork = () => {
                 No public domain
               </p>
               <p className="text-xs leading-5 text-fg-tertiary">
-                The service is reachable only from inside the cluster.
+                Only services in this project can reach it, by its private hostname.
               </p>
             </div>
           </div>

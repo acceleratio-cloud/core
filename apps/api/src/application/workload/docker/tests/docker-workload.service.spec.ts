@@ -1,3 +1,4 @@
+import { ConflictException } from '@nestjs/common';
 import type { V1Deployment } from '@kubernetes/client-node';
 import type { WorkloadType } from '@acceleratio/shared';
 import type { ProjectIsolationService } from '@/application/project/project-isolation.service';
@@ -63,6 +64,7 @@ const baseRow: WorkloadRow = {
   draft_config: null,
   position: { x: 0, y: 0 },
   external_name: externalName,
+  internal_hostname: 'my-api',
   storage_class_id: null,
   status: 'running',
   status_message: null,
@@ -205,7 +207,14 @@ const createService = () => {
     record: jest.fn(),
     clearAppliedDraft: jest.fn(),
   };
-  const network = { removeAll: jest.fn() };
+  const network = {
+    removeAll: jest.fn(),
+    ensureInternalService: jest.fn().mockResolvedValue(undefined),
+    takenServiceNames: jest.fn().mockResolvedValue(new Set<string>()),
+    assignInternalHostname: jest.fn((row: WorkloadRow) => Promise.resolve(row)),
+    renameInternalHostname: jest.fn((row: WorkloadRow) => Promise.resolve(row)),
+    ensureDnsRule: jest.fn().mockResolvedValue(undefined),
+  };
   const storageClasses = {
     kubernetesName: jest.fn((id: string | null) =>
       Promise.resolve(id === null ? 'seaweedfs-storage' : `sc-${id}`),
@@ -420,6 +429,175 @@ describe('DockerWorkloadService.create', () => {
     expect(firstArgument(insertValues)).toMatchObject({
       draft_config: { docker_image: 'nginx:1.25', cpu_max: null, ram_max: 512 },
     });
+  });
+});
+
+describe('DockerWorkloadService private hostname', () => {
+  it('names a new service after its slug and skips names used in the project', async () => {
+    const { service, exists, selectWhere, insertValues, returning, network } =
+      createService();
+
+    exists.mockResolvedValue(true);
+    selectWhere.mockResolvedValueOnce([]);
+    network.takenServiceNames.mockResolvedValue(
+      new Set(['postgres', 'postgres-2']),
+    );
+    returning.mockResolvedValue([
+      { ...baseRow, internal_hostname: 'postgres-3' },
+    ]);
+
+    const created = await service.create(projectId, {
+      name: 'Postgres',
+      type: 'docker',
+      config: { docker_image: 'postgres:17' },
+    });
+
+    expect(network.takenServiceNames).toHaveBeenCalledWith(projectId);
+    expect(firstArgument(insertValues)).toMatchObject({
+      internal_hostname: 'postgres-3',
+    });
+    expect(created).toMatchObject({
+      internal_hostname: 'postgres-3',
+      internal_domain: 'postgres-3.internal',
+    });
+  });
+
+  it('picks again when a concurrent create took the hostname', async () => {
+    const { service, exists, selectWhere, insertValues, returning, network } =
+      createService();
+    const conflict = Object.assign(new Error('duplicate key'), {
+      code: '23505',
+      constraint: 'workload_project_id_internal_hostname_unique',
+    });
+
+    exists.mockResolvedValue(true);
+    selectWhere.mockResolvedValueOnce([]);
+    network.takenServiceNames
+      .mockResolvedValueOnce(new Set())
+      .mockResolvedValueOnce(new Set(['postgres']));
+    returning
+      .mockRejectedValueOnce(conflict)
+      .mockResolvedValueOnce([{ ...baseRow, internal_hostname: 'postgres-2' }]);
+
+    await service.create(projectId, {
+      name: 'Postgres',
+      type: 'docker',
+      config: { docker_image: 'postgres:17' },
+    });
+
+    expect(
+      insertValues.mock.calls.map(
+        ([values]: [{ internal_hostname: string }]) => values.internal_hostname,
+      ),
+    ).toEqual(['postgres', 'postgres-2']);
+  });
+
+  it('deploys without the private name when another Service holds it', async () => {
+    const { service, limit, returning, appsV1, network } = createService();
+
+    limit.mockResolvedValue([baseRow]);
+    appsV1.readNamespacedDeployment.mockResolvedValue(undefined);
+    appsV1.createNamespacedDeployment.mockResolvedValue({});
+    network.ensureInternalService.mockRejectedValue(
+      new ConflictException('taken'),
+    );
+    returning.mockResolvedValue([{ ...baseRow, status: 'deploying' }]);
+
+    await expect(service.deploy(projectId, workloadId)).resolves.toMatchObject({
+      status: 'deploying',
+    });
+    expect(appsV1.createNamespacedDeployment).toHaveBeenCalledTimes(1);
+  });
+
+  it('names a service created before private names on its next deploy', async () => {
+    const { service, limit, returning, appsV1, network } = createService();
+    const legacy = { ...baseRow, internal_hostname: null };
+
+    limit.mockResolvedValue([legacy]);
+    appsV1.readNamespacedDeployment.mockResolvedValue(undefined);
+    appsV1.createNamespacedDeployment.mockResolvedValue({});
+    network.assignInternalHostname.mockResolvedValue(baseRow);
+    returning.mockResolvedValue([{ ...baseRow, status: 'deploying' }]);
+
+    await service.deploy(projectId, workloadId);
+
+    expect(network.assignInternalHostname).toHaveBeenCalledWith(legacy);
+    expect(network.ensureInternalService).toHaveBeenCalledWith(baseRow);
+  });
+
+  it('renames only after a deploy in flight has finished', async () => {
+    const { service, limit, returning, appsV1, network } = createService();
+    const order: string[] = [];
+    let finishDeployment!: () => void;
+
+    limit.mockResolvedValue([baseRow]);
+    appsV1.readNamespacedDeployment.mockResolvedValue(undefined);
+    appsV1.createNamespacedDeployment.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishDeployment = () => {
+            order.push('deployment');
+            resolve({});
+          };
+        }),
+    );
+    network.renameInternalHostname.mockImplementation((row: WorkloadRow) => {
+      order.push('rename');
+      return Promise.resolve(row);
+    });
+    returning.mockResolvedValue([{ ...baseRow, status: 'deploying' }]);
+
+    const deploying = service.deploy(projectId, workloadId);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const renaming = service.updateInternalHostname(projectId, workloadId, {
+      internal_hostname: 'postgres',
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(order).toEqual([]);
+    finishDeployment();
+    await deploying;
+    await renaming;
+
+    expect(order).toEqual(['deployment', 'rename']);
+  });
+
+  it('backfills names and private Services of existing services', async () => {
+    const { service, selectWhere, limit, network } = createService();
+    const legacy = { ...baseRow, internal_hostname: null };
+
+    selectWhere.mockResolvedValueOnce([legacy]);
+    limit.mockResolvedValue([legacy]);
+    network.assignInternalHostname.mockResolvedValue(baseRow);
+
+    await service.backfillPrivateNetwork();
+
+    expect(network.ensureDnsRule).toHaveBeenCalledTimes(1);
+    expect(network.ensureInternalService).toHaveBeenCalledWith(baseRow);
+  });
+
+  it('writes the private Service before the Deployment on deploy', async () => {
+    const { service, limit, returning, appsV1, network } = createService();
+    const order: string[] = [];
+
+    limit.mockResolvedValue([baseRow]);
+    appsV1.readNamespacedDeployment.mockResolvedValue(undefined);
+    network.ensureInternalService.mockImplementation(() => {
+      order.push('service');
+      return Promise.resolve();
+    });
+    appsV1.createNamespacedDeployment.mockImplementation(() => {
+      order.push('deployment');
+      return Promise.resolve({});
+    });
+    returning.mockResolvedValue([{ ...baseRow, status: 'deploying' }]);
+
+    await service.deploy(projectId, workloadId);
+
+    expect(network.ensureInternalService).toHaveBeenCalledWith(
+      expect.objectContaining({ id: workloadId, internal_hostname: 'my-api' }),
+    );
+    expect(order).toEqual(['service', 'deployment']);
   });
 });
 

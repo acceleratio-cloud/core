@@ -3,6 +3,7 @@ import type { V1Service } from '@kubernetes/client-node';
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import type { DnsCheck } from '@acceleratio/shared';
 import { getTableName, type Table } from 'drizzle-orm';
+import type { ProjectDnsService } from '@/application/project/project-dns.service';
 import type { ProjectIsolationService } from '@/application/project/project-isolation.service';
 import type { ControlPlaneDnsService } from '@/application/system/control-plane-dns.service';
 import type { Database } from '@/vendor/db/database.constants';
@@ -16,6 +17,10 @@ import {
   GENERATED_ISSUING_MESSAGE,
   ISSUING_CERTIFICATE_MESSAGE,
 } from '../docker-workload-network.domains';
+import {
+  INTERNAL_HOSTNAME_TAKEN_MESSAGE,
+  INVALID_INTERNAL_HOSTNAME_MESSAGE,
+} from '../docker-workload-network.internal';
 import {
   CERTIFICATE_TIMEOUT_MS,
   CONTROL_PLANE_HOSTNAME_MESSAGE,
@@ -31,6 +36,9 @@ jest.mock('@/vendor/kubernetes/kubernetes.service', () => ({
 }));
 jest.mock('@/application/project/project-isolation.service', () => ({
   ProjectIsolationService: class ProjectIsolationService {},
+}));
+jest.mock('@/application/project/project-dns.service', () => ({
+  ProjectDnsService: class ProjectDnsService {},
 }));
 
 const projectId = '2f1c9a3e-8b7d-4e6f-9a0b-1c2d3e4f5a6b';
@@ -48,6 +56,7 @@ const workloadRow = (overrides: Partial<WorkloadRow> = {}): WorkloadRow => ({
   draft_config: null,
   position: { x: 0, y: 0 },
   external_name: externalName,
+  internal_hostname: 'my-api',
   storage_class_id: null,
   status: 'running',
   status_message: null,
@@ -190,11 +199,11 @@ const createDatabase = (workloads: WorkloadRow[]) => {
     }),
   });
 
-  const update = () => ({
-    set: (values: Partial<WorkloadDomainRow>) => ({
+  const update = (table: Table) => ({
+    set: (values: Record<string, unknown>) => ({
       where: (condition: unknown) => ({
         returning: () => {
-          const updated = domains
+          const updated = (tableRows(table) as WorkloadDomainRow[])
             .filter((row) => matches(row, condition))
             .map((row) =>
               Object.assign(row, values, { updated_at: new Date() }),
@@ -237,6 +246,7 @@ const createService = (workloads: WorkloadRow[] = [workloadRow()]) => {
   const database = createDatabase(workloads);
   const coreV1 = {
     readNamespacedService: jest.fn().mockRejectedValue({ code: 404 }),
+    listNamespacedService: jest.fn().mockResolvedValue({ items: [] }),
     createNamespacedService: jest.fn().mockResolvedValue({}),
     patchNamespacedService: jest.fn().mockResolvedValue({}),
     deleteNamespacedService: jest.fn().mockResolvedValue({}),
@@ -260,15 +270,27 @@ const createService = (workloads: WorkloadRow[] = [workloadRow()]) => {
     ),
   };
   const isolation = { ensure: jest.fn().mockResolvedValue(undefined) };
+  const projectDns = { ensure: jest.fn().mockResolvedValue(undefined) };
   const service = new DockerWorkloadNetworkService(
     database.db,
     kubernetes,
     traefik as unknown as TraefikClient,
     dns as unknown as ControlPlaneDnsService,
     isolation as unknown as ProjectIsolationService,
+    projectDns as unknown as ProjectDnsService,
   );
 
-  return { service, coreV1, appsV1, traefik, dns, isolation, ...database };
+  return {
+    service,
+    coreV1,
+    appsV1,
+    traefik,
+    dns,
+    isolation,
+    projectDns,
+    workloads,
+    ...database,
+  };
 };
 
 const upsertedRoutes = (traefik: { upsert: jest.Mock }) =>
@@ -740,6 +762,303 @@ describe('DockerWorkloadNetworkService', () => {
         `domain-${domain.id}`,
       );
       expect(coreV1.deleteNamespacedService).toHaveBeenCalled();
+    });
+  });
+
+  describe('private network', () => {
+    const deployedAt = new Date('2026-11-01T10:00:00.000Z');
+    const internalLabels = (owner = workloadId) => ({
+      'acceleratio.io/workload-id': owner,
+      'acceleratio.io/service-role': 'internal',
+    });
+    const headless = (name = 'my-api', owner = workloadId): V1Service => ({
+      metadata: { name, labels: internalLabels(owner) },
+      spec: {
+        clusterIP: 'None',
+        selector: { 'acceleratio.io/workload-id': owner },
+      },
+    });
+    const serviceList = (items: V1Service[]) => ({ items });
+    const deletedNames = (coreV1: { deleteNamespacedService: jest.Mock }) =>
+      (
+        coreV1.deleteNamespacedService.mock.calls as Array<[{ name: string }]>
+      ).map(([request]) => request.name);
+
+    it('creates a headless Service named by the private hostname', async () => {
+      const { service, coreV1 } = createService();
+      coreV1.listNamespacedService.mockResolvedValue(serviceList([]));
+
+      await service.ensureInternalService(workloadRow());
+
+      const [request] = coreV1.createNamespacedService.mock.calls[0] as [
+        { namespace: string; body: V1Service },
+      ];
+
+      expect(request.namespace).toBe(namespace);
+      expect(request.body.metadata).toMatchObject({
+        name: 'my-api',
+        namespace,
+      });
+      expect(request.body.spec).toEqual({
+        clusterIP: 'None',
+        selector: { 'acceleratio.io/workload-id': workloadId },
+      });
+    });
+
+    it('leaves a matching Service alone', async () => {
+      const { service, coreV1 } = createService();
+      coreV1.readNamespacedService.mockResolvedValue(headless());
+      coreV1.listNamespacedService.mockResolvedValue(serviceList([headless()]));
+
+      await service.ensureInternalService(workloadRow());
+
+      expect(coreV1.createNamespacedService).not.toHaveBeenCalled();
+      expect(coreV1.deleteNamespacedService).not.toHaveBeenCalled();
+    });
+
+    it('recreates its own Service when it has a cluster IP', async () => {
+      const { service, coreV1 } = createService();
+      const existing = headless();
+      existing.spec!.clusterIP = '10.43.0.20';
+      coreV1.readNamespacedService.mockResolvedValue(existing);
+
+      await service.ensureInternalService(workloadRow());
+
+      expect(deletedNames(coreV1)).toEqual(['my-api']);
+      expect(coreV1.createNamespacedService).toHaveBeenCalled();
+    });
+
+    it('never takes over a Service of another workload', async () => {
+      const { service, coreV1 } = createService();
+      coreV1.readNamespacedService.mockResolvedValue(
+        headless('my-api', randomUUID()),
+      );
+
+      await expect(
+        service.ensureInternalService(workloadRow()),
+      ).rejects.toThrow(INTERNAL_HOSTNAME_TAKEN_MESSAGE);
+      expect(coreV1.deleteNamespacedService).not.toHaveBeenCalled();
+    });
+
+    it('never takes over the domain Service of the same workload', async () => {
+      const { service, coreV1 } = createService();
+      // The domain Service carries the workload label but no internal role.
+      coreV1.readNamespacedService.mockResolvedValue({
+        metadata: {
+          name: 'my-api',
+          labels: { 'acceleratio.io/workload-id': workloadId },
+        },
+        spec: { clusterIP: '10.43.0.20', ports: [{ port: 80 }] },
+      });
+
+      await expect(
+        service.ensureInternalService(workloadRow()),
+      ).rejects.toThrow(ConflictException);
+      expect(coreV1.deleteNamespacedService).not.toHaveBeenCalled();
+    });
+
+    it('refuses a hostname equal to the external name', async () => {
+      const { service, coreV1 } = createService();
+
+      await expect(
+        service.ensureInternalService(
+          workloadRow({ internal_hostname: externalName }),
+        ),
+      ).rejects.toThrow(ConflictException);
+      expect(coreV1.readNamespacedService).not.toHaveBeenCalled();
+    });
+
+    it('removes private Services left under older names', async () => {
+      const { service, coreV1 } = createService();
+      coreV1.listNamespacedService.mockResolvedValue(
+        serviceList([headless('my-api'), headless('db'), headless('old')]),
+      );
+
+      await service.ensureInternalService(workloadRow());
+
+      expect(coreV1.listNamespacedService).toHaveBeenCalledWith({
+        namespace,
+        labelSelector: `acceleratio.io/workload-id=${workloadId},acceleratio.io/service-role=internal`,
+      });
+      expect(deletedNames(coreV1)).toEqual(['db', 'old']);
+    });
+
+    it('does nothing for a row without a private hostname', async () => {
+      const { service, coreV1 } = createService();
+
+      await service.ensureInternalService(
+        workloadRow({ internal_hostname: null }),
+      );
+
+      expect(coreV1.readNamespacedService).not.toHaveBeenCalled();
+    });
+
+    it('keeps the private Service when the last domain goes away', async () => {
+      const { service, coreV1 } = createService();
+      const domain = await service.generate(projectId, workloadId, {
+        label: 'api',
+        port: 80,
+      });
+
+      await service.remove(projectId, workloadId, domain.id);
+
+      expect(deletedNames(coreV1)).toEqual([externalName]);
+    });
+
+    it('removeAll deletes every private Service of the workload', async () => {
+      const { service, coreV1 } = createService();
+      coreV1.listNamespacedService.mockResolvedValue(
+        serviceList([headless('my-api'), headless('db')]),
+      );
+
+      await service.removeAll(workloadRow());
+
+      expect(deletedNames(coreV1)).toEqual([externalName, 'my-api', 'db']);
+    });
+
+    it('lists every Service name used in the project', async () => {
+      const other = workloadRow({
+        id: randomUUID(),
+        external_name: 'db-1a2b3c4d',
+        internal_hostname: 'db',
+      });
+      const { service } = createService([workloadRow(), other]);
+
+      await expect(service.takenServiceNames(projectId)).resolves.toEqual(
+        new Set([externalName, 'my-api', 'db-1a2b3c4d', 'db']),
+      );
+      await expect(
+        service.takenServiceNames(projectId, workloadId),
+      ).resolves.toEqual(new Set([externalName, 'db-1a2b3c4d', 'db']));
+    });
+
+    describe('assignInternalHostname', () => {
+      it('gives a row created before private names a free slug, never its external name', async () => {
+        const legacy = workloadRow({
+          name: 'Postgres',
+          internal_hostname: null,
+        });
+        const other = workloadRow({
+          id: randomUUID(),
+          external_name: 'postgres-1a2b3c4d',
+          internal_hostname: 'postgres',
+        });
+        const { service, workloads } = createService([legacy, other]);
+
+        const named = await service.assignInternalHostname(legacy);
+
+        expect(named.internal_hostname).toBe('postgres-2');
+        expect(workloads[0].internal_hostname).toBe('postgres-2');
+      });
+
+      it('keeps an existing hostname', async () => {
+        const { service } = createService();
+
+        await expect(
+          service.assignInternalHostname(workloadRow()),
+        ).resolves.toMatchObject({ internal_hostname: 'my-api' });
+      });
+    });
+
+    describe('renameInternalHostname', () => {
+      it('renames a deployed service: new Service first, then the old one goes', async () => {
+        const row = workloadRow({ last_deployed_at: deployedAt });
+        const { service, coreV1, workloads } = createService([row]);
+        const order: string[] = [];
+        coreV1.createNamespacedService.mockImplementation(
+          ({ body }: { body: V1Service }) => {
+            order.push(`create ${body.metadata?.name}`);
+            return Promise.resolve({});
+          },
+        );
+        coreV1.listNamespacedService.mockImplementation(() => {
+          order.push('list');
+          return Promise.resolve(
+            serviceList([headless('my-api'), headless('postgres')]),
+          );
+        });
+        coreV1.deleteNamespacedService.mockImplementation(
+          ({ name }: { name: string }) => {
+            order.push(`delete ${name}`);
+            return Promise.resolve({});
+          },
+        );
+
+        const renamed = await service.renameInternalHostname(row, {
+          internal_hostname: ' Postgres.internal ',
+        });
+
+        expect(renamed.internal_hostname).toBe('postgres');
+        expect(workloads[0].internal_hostname).toBe('postgres');
+        expect(order).toEqual(['create postgres', 'list', 'delete my-api']);
+      });
+
+      it('only stores the name of a service that was never deployed', async () => {
+        const { service, coreV1, workloads } = createService();
+
+        await service.renameInternalHostname(workloadRow(), {
+          internal_hostname: 'postgres',
+        });
+
+        expect(workloads[0].internal_hostname).toBe('postgres');
+        expect(coreV1.createNamespacedService).not.toHaveBeenCalled();
+      });
+
+      it('is a no-op for the current name', async () => {
+        const row = workloadRow({ last_deployed_at: deployedAt });
+        const { service, coreV1 } = createService([row]);
+
+        await service.renameInternalHostname(row, {
+          internal_hostname: 'my-api',
+        });
+
+        expect(coreV1.createNamespacedService).not.toHaveBeenCalled();
+      });
+
+      it.each(['', '1db', 'db-', 'my_db', 'a'.repeat(51), 42])(
+        'rejects %p',
+        async (value) => {
+          const { service } = createService();
+
+          await expect(
+            service.renameInternalHostname(workloadRow(), {
+              internal_hostname: value as string,
+            }),
+          ).rejects.toThrow(INVALID_INTERNAL_HOSTNAME_MESSAGE);
+        },
+      );
+
+      it.each(['db', 'db-1a2b3c4d', externalName])(
+        'rejects %p, a Service name already used in the project',
+        async (value) => {
+          const other = workloadRow({
+            id: randomUUID(),
+            external_name: 'db-1a2b3c4d',
+            internal_hostname: 'db',
+          });
+          const { service } = createService([workloadRow(), other]);
+
+          await expect(
+            service.renameInternalHostname(workloadRow(), {
+              internal_hostname: value,
+            }),
+          ).rejects.toThrow(ConflictException);
+        },
+      );
+
+      it('restores the old name when the cluster write fails', async () => {
+        const row = workloadRow({ last_deployed_at: deployedAt });
+        const { service, coreV1, workloads } = createService([row]);
+        coreV1.createNamespacedService.mockRejectedValue({ code: 500 });
+
+        await expect(
+          service.renameInternalHostname(row, {
+            internal_hostname: 'postgres',
+          }),
+        ).rejects.toBeDefined();
+        expect(workloads[0].internal_hostname).toBe('my-api');
+        expect(coreV1.deleteNamespacedService).not.toHaveBeenCalled();
+      });
     });
   });
 });

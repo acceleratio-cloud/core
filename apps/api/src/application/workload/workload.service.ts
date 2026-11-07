@@ -6,6 +6,7 @@ import {
 import type {
   CreateWorkloadPayload,
   S3BucketCredentials,
+  UpdateInternalHostnamePayload,
   UpdateWorkloadPayload,
   Workload,
   WorkloadEnv,
@@ -53,6 +54,23 @@ export class WorkloadService {
     }
 
     return this.docker.getEnv(projectId, id);
+  }
+
+  /** Renames the private `<hostname>.internal` name of a Docker service. */
+  async updateInternalHostname(
+    projectId: string,
+    id: string,
+    payload: UpdateInternalHostnamePayload,
+  ): Promise<Workload> {
+    const type = await this.resolver.resolve(projectId, id);
+
+    if (type !== this.docker.type) {
+      throw new BadRequestException(
+        'Only Docker services have a private hostname',
+      );
+    }
+
+    return this.docker.updateInternalHostname(projectId, id, payload);
   }
 
   /** Endpoint and keys of an S3 bucket, including the secret key. */

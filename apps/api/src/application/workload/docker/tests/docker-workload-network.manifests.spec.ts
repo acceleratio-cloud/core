@@ -1,6 +1,7 @@
 import {
   buildDomainRoutes,
   buildHttpsRedirectMiddleware,
+  buildInternalService,
   buildNetworkService,
   domainHttpRouteName,
   domainRouteName,
@@ -53,6 +54,29 @@ describe('buildNetworkService', () => {
         { name: 'port-80', port: 80, targetPort: 80, protocol: 'TCP' },
         { name: 'port-8080', port: 8080, targetPort: 8080, protocol: 'TCP' },
       ],
+    });
+  });
+});
+
+describe('buildInternalService', () => {
+  it('is a headless Service with no ports, so every port is reachable', () => {
+    expect(buildInternalService(workload, 'postgres')).toEqual({
+      apiVersion: 'v1',
+      kind: 'Service',
+      metadata: {
+        name: 'postgres',
+        namespace,
+        labels: {
+          'app.kubernetes.io/managed-by': 'acceleratio',
+          'acceleratio.io/project-id': projectId,
+          'acceleratio.io/workload-id': workload.id,
+          'acceleratio.io/service-role': 'internal',
+        },
+      },
+      spec: {
+        clusterIP: 'None',
+        selector: { 'acceleratio.io/workload-id': workload.id },
+      },
     });
   });
 });

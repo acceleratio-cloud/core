@@ -15,6 +15,7 @@ import { PlatformUpdateController } from '@/application/platform-update/platform
 import { PlatformUpdateService } from '@/application/platform-update/platform-update.service';
 import { PlatformVersionService } from '@/application/platform-update/platform-version.service';
 import { ProjectController } from '@/application/project/project.controller';
+import { ProjectDnsService } from '@/application/project/project-dns.service';
 import { ProjectIsolationService } from '@/application/project/project-isolation.service';
 import { ProjectService } from '@/application/project/project.service';
 import { StorageBenchmarkController } from '@/application/storage-class/benchmark/storage-benchmark.controller';
@@ -80,6 +81,7 @@ import { VictoriaMetricsClient } from '@/vendor/victoriametrics/victoriametrics.
     PlatformUpdateService,
     PlatformVersionService,
     ProjectService,
+    ProjectDnsService,
     ProjectIsolationService,
     StorageClassService,
     StorageBenchmarkService,

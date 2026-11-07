@@ -9,16 +9,19 @@ import {
   type OnModuleDestroy,
   type OnModuleInit,
 } from '@nestjs/common';
+import type { V1Service } from '@kubernetes/client-node';
 import type {
   AddWorkloadDomainPayload,
   DnsCheck,
   GenerateWorkloadDomainPayload,
+  UpdateInternalHostnamePayload,
   UpdateWorkloadDomainPayload,
   WorkloadDomain,
   WorkloadDomainCertificate,
   WorkloadDomains,
 } from '@acceleratio/shared';
 import { and, asc, count, eq, type SQL } from 'drizzle-orm';
+import { ProjectDnsService } from '@/application/project/project-dns.service';
 import { ProjectIsolationService } from '@/application/project/project-isolation.service';
 import { ControlPlaneDnsService } from '@/application/system/control-plane-dns.service';
 import { systemSetting } from '@/application/system/schemas/system-setting.schema';
@@ -42,12 +45,22 @@ import { TraefikClient } from '@/vendor/traefik/traefik.client';
 import {
   buildDomainRoutes,
   buildHttpsRedirectMiddleware,
+  buildInternalService,
   buildNetworkService,
   domainHttpRouteName,
   domainRouteName,
+  INTERNAL_SERVICE_ROLE,
+  SERVICE_ROLE_LABEL,
   servicePorts,
   type NetworkWorkloadInput,
 } from './docker-workload-network.manifests';
+import {
+  INTERNAL_HOSTNAME_CONSTRAINT,
+  INTERNAL_HOSTNAME_TAKEN_MESSAGE,
+  normalizeInternalHostname,
+  pickInternalHostname,
+} from './docker-workload-network.internal';
+import { WORKLOAD_ID_LABEL } from './docker-workload.manifests';
 import {
   AWAITING_RECORD_MESSAGE,
   CERTIFICATE_TIMEOUT_MESSAGE,
@@ -127,6 +140,16 @@ const toCertificate = (row: WorkloadDomainRow): WorkloadDomainCertificate => {
   return row.certificate_status === 'issued' ? 'issued' : 'issuing';
 };
 
+/** A private-network Service that this workload wrote. */
+const isOwnInternalService = (service: V1Service, workloadId: string) => {
+  const labels = service.metadata?.labels ?? {};
+
+  return (
+    labels[WORKLOAD_ID_LABEL] === workloadId &&
+    labels[SERVICE_ROLE_LABEL] === INTERNAL_SERVICE_ROLE
+  );
+};
+
 const toNetworkInput = (row: WorkloadRow): NetworkWorkloadInput => ({
   id: row.id,
   project_id: row.project_id,
@@ -134,7 +157,15 @@ const toNetworkInput = (row: WorkloadRow): NetworkWorkloadInput => ({
 });
 
 /**
- * Domains of Docker services. A domain is not part of the versioned config:
+ * Domains and the private network name of Docker services.
+ *
+ * Every Docker service has a headless Service named by its private hostname,
+ * so `<hostname>.internal` reaches it on any port from the same project. It
+ * is written on every deploy, kept while the service has no domain, and
+ * renamed immediately when the hostname changes. It never shares a name with
+ * the domain Service (`external_name`).
+ *
+ * A domain is not part of the versioned config:
  * every change writes Traefik routes and the service's Kubernetes Service at
  * once and never touches the Deployment, so pods do not roll.
  *
@@ -158,7 +189,225 @@ export class DockerWorkloadNetworkService
     private readonly traefik: TraefikClient,
     private readonly dns: ControlPlaneDnsService,
     private readonly isolation: ProjectIsolationService,
+    private readonly projectDns: ProjectDnsService,
   ) {}
+
+  /** The cluster-wide DNS rule behind `<hostname>.internal`. */
+  ensureDnsRule(): Promise<void> {
+    return this.projectDns.ensure();
+  }
+
+  /**
+   * Gives a Docker row without a private hostname the first free one
+   * (`postgres`, `postgres-2`, ...). Rows created before private names
+   * existed get theirs this way, never their external name: that is the
+   * name of the domain Service.
+   */
+  async assignInternalHostname(row: WorkloadRow): Promise<WorkloadRow> {
+    if (row.internal_hostname !== null) {
+      return row;
+    }
+
+    for (let attempt = 1; ; attempt += 1) {
+      const taken = await this.takenServiceNames(row.project_id, row.id);
+
+      try {
+        return await this.setInternalHostname(
+          row.id,
+          pickInternalHostname(row.name, taken),
+        );
+      } catch (error) {
+        if (attempt >= 3 || !(error instanceof ConflictException)) {
+          throw error;
+        }
+      }
+    }
+  }
+
+  /**
+   * Writes the headless Service of a deployed service and removes private
+   * Services it left under older names. Neither touches the Deployment, so
+   * pods do not roll. A Service of that name that this workload's private
+   * network does not own (another workload, the domain Service, anything
+   * created by hand) is never taken over.
+   */
+  async ensureInternalService(row: WorkloadRow): Promise<void> {
+    const hostname = row.internal_hostname;
+
+    if (hostname === null) {
+      return;
+    }
+
+    if (hostname === row.external_name) {
+      throw new ConflictException(INTERNAL_HOSTNAME_TAKEN_MESSAGE);
+    }
+
+    const namespace = projectNamespace(row.project_id);
+    const body = buildInternalService(toNetworkInput(row), hostname);
+    let existing: V1Service | null = null;
+
+    try {
+      existing = await this.kubernetes.coreV1.readNamespacedService({
+        name: hostname,
+        namespace,
+      });
+    } catch (error) {
+      if (getKubernetesStatusCode(error) !== 404) {
+        throw error;
+      }
+    }
+
+    let create = true;
+
+    if (existing !== null) {
+      if (!isOwnInternalService(existing, row.id)) {
+        throw new ConflictException(INTERNAL_HOSTNAME_TAKEN_MESSAGE);
+      }
+
+      if (
+        existing.spec?.clusterIP === 'None' &&
+        existing.spec.selector?.[WORKLOAD_ID_LABEL] === row.id
+      ) {
+        create = false;
+      } else {
+        // The cluster IP is immutable, so a different shape is recreated.
+        await this.deleteServiceNamed(hostname, namespace);
+      }
+    }
+
+    if (create) {
+      try {
+        await this.kubernetes.coreV1.createNamespacedService({
+          namespace,
+          body,
+        });
+      } catch (error) {
+        // Created concurrently by another write of the same workload.
+        if (getKubernetesStatusCode(error) !== 409) {
+          throw error;
+        }
+      }
+    }
+
+    // Housekeeping: a stale name keeps resolving until the next pass, but
+    // the current one already answers.
+    try {
+      await this.pruneInternalServices(row, hostname);
+    } catch (error) {
+      this.logger.warn(
+        `Could not remove old private Services of workload ${row.id}: ${describeError(error)}`,
+      );
+    }
+  }
+
+  /**
+   * Renames the private hostname. Applies at once: the new name answers
+   * before the old one goes away. A service that was never deployed only
+   * stores it; its first deploy writes the Service. The caller runs it in the
+   * workload's write queue, so a deploy cannot bring the old name back.
+   */
+  async renameInternalHostname(
+    row: WorkloadRow,
+    payload: UpdateInternalHostnamePayload,
+  ): Promise<WorkloadRow> {
+    const hostname = normalizeInternalHostname(payload?.internal_hostname);
+    const previous = row.internal_hostname;
+
+    if (hostname === previous) {
+      return row;
+    }
+
+    if ((await this.takenServiceNames(row.project_id, row.id)).has(hostname)) {
+      throw new ConflictException(INTERNAL_HOSTNAME_TAKEN_MESSAGE);
+    }
+
+    const updated = await this.setInternalHostname(row.id, hostname);
+
+    if (updated.last_deployed_at === null) {
+      return updated;
+    }
+
+    try {
+      await this.ensureInternalService(updated);
+    } catch (error) {
+      try {
+        await this.setInternalHostname(row.id, previous);
+      } catch (rollbackError) {
+        this.logger.error(
+          `Workload ${row.id} keeps private hostname ${hostname} without a Service; the next deploy writes it: ${describeError(rollbackError)}`,
+        );
+      }
+
+      throw this.mapClusterError(error);
+    }
+
+    return updated;
+  }
+
+  /**
+   * Deletes the private Services of a workload except `keep`. They are
+   * found by label, so names left by a failed or raced rename go too.
+   */
+  private async pruneInternalServices(
+    row: WorkloadRow,
+    keep: string | null,
+  ): Promise<void> {
+    const namespace = projectNamespace(row.project_id);
+    let services: V1Service[];
+
+    try {
+      services = (
+        await this.kubernetes.coreV1.listNamespacedService({
+          namespace,
+          labelSelector: `${WORKLOAD_ID_LABEL}=${row.id},${SERVICE_ROLE_LABEL}=${INTERNAL_SERVICE_ROLE}`,
+        })
+      ).items;
+    } catch (error) {
+      if (getKubernetesStatusCode(error) === 404) {
+        return;
+      }
+
+      throw error;
+    }
+
+    for (const service of services) {
+      const name = service.metadata?.name;
+
+      if (name && name !== keep && name !== row.external_name) {
+        await this.deleteServiceNamed(name, namespace);
+      }
+    }
+  }
+
+  /**
+   * Every Kubernetes Service name used in a project: the private hostnames
+   * and the external names (the domain Service) of its workloads. The
+   * private hostname of `excludeId` is left out, so it can be kept.
+   */
+  async takenServiceNames(
+    projectId: string,
+    excludeId?: string,
+  ): Promise<Set<string>> {
+    const rows = await this.db
+      .select({
+        id: workload.id,
+        external_name: workload.external_name,
+        internal_hostname: workload.internal_hostname,
+      })
+      .from(workload)
+      .where(eq(workload.project_id, projectId));
+    const taken = new Set<string>();
+
+    for (const row of rows) {
+      taken.add(row.external_name);
+
+      if (row.internal_hostname !== null && row.id !== excludeId) {
+        taken.add(row.internal_hostname);
+      }
+    }
+
+    return taken;
+  }
 
   onModuleInit(): void {
     if (process.env.WORKLOAD_DOMAIN_VERIFIER === '0') {
@@ -387,8 +636,8 @@ export class DockerWorkloadNetworkService
   }
 
   /**
-   * Deletes the routes and the Service of a workload that is being deleted.
-   * The rows go with the workload through the foreign key.
+   * Deletes the routes and both Services of a workload that is being
+   * deleted. The rows go with the workload through the foreign key.
    */
   async removeAll(row: WorkloadRow): Promise<void> {
     const domains = await this.findDomains(row.id);
@@ -398,6 +647,7 @@ export class DockerWorkloadNetworkService
     }
 
     await this.deleteService(row);
+    await this.pruneInternalServices(row, null);
   }
 
   /**
@@ -664,16 +914,48 @@ export class DockerWorkloadNetworkService
     });
   }
 
-  private async deleteService(row: WorkloadRow): Promise<void> {
+  private deleteService(row: WorkloadRow): Promise<void> {
+    return this.deleteServiceNamed(
+      row.external_name,
+      projectNamespace(row.project_id),
+    );
+  }
+
+  private async deleteServiceNamed(
+    name: string,
+    namespace: string,
+  ): Promise<void> {
     try {
-      await this.kubernetes.coreV1.deleteNamespacedService({
-        name: row.external_name,
-        namespace: projectNamespace(row.project_id),
-      });
+      await this.kubernetes.coreV1.deleteNamespacedService({ name, namespace });
     } catch (error) {
       if (getKubernetesStatusCode(error) !== 404) {
         throw error;
       }
+    }
+  }
+
+  private async setInternalHostname(
+    id: string,
+    hostname: string | null,
+  ): Promise<WorkloadRow> {
+    try {
+      const [row] = await this.db
+        .update(workload)
+        .set({ internal_hostname: hostname })
+        .where(eq(workload.id, id))
+        .returning();
+
+      if (!row) {
+        throw new NotFoundException('Workload not found');
+      }
+
+      return row;
+    } catch (error) {
+      if (uniqueViolation(error) === INTERNAL_HOSTNAME_CONSTRAINT) {
+        throw new ConflictException(INTERNAL_HOSTNAME_TAKEN_MESSAGE);
+      }
+
+      throw error;
     }
   }
 
