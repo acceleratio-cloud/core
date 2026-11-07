@@ -5,7 +5,7 @@ Acceleratio — an open-source, self-hosted cloud platform. The console lives in
 ## Local development
 
 From a fresh clone, `make dev` (or `./scripts/dev.sh`) installs dependencies,
-starts PostgreSQL through Docker Compose, applies Drizzle migrations, and runs
+creates the OrbStack cluster, starts PostgreSQL through Docker Compose, applies Drizzle migrations, and runs
 the API on <http://localhost:8080> and the console on <http://localhost:3000>.
 Create the first account at <http://localhost:3000/auth/installation>. Use
 `make setup` to prepare the environment without starting the servers and
@@ -17,16 +17,19 @@ checks against a real cluster run with `KUBECONFIG=$(./scripts/cluster.sh kubeco
 and `cd apps/api && bun run test:cluster` (needs `make cluster-up`).
 
 The API targets the Kubernetes cluster from `KUBECONFIG` (the shell value wins
-over `apps/api/.env`; a path or inline YAML), otherwise the k3d cluster created
-by `make cluster-up`, otherwise the current kubeconfig context
-(`~/.kube/config`). `make dev` validates the effective value and refuses
-non-local contexts unless `ALLOW_REMOTE_KUBECONTEXT=1` is set. Use
-`make cluster-up` / `make cluster-down` for a disposable local k3d + Cilium
-cluster, and never point local development at a shared or production cluster.
-The local cluster reads the k3s, Cilium and SeaweedFS chart versions from
-`deploy/install.sh` and installs SeaweedFS + CSI (`SEAWEEDFS=0` skips it) and
-VictoriaMetrics for the project Observability tab (`VICTORIAMETRICS=0` skips it)
-and VictoriaLogs with Vector for the project Logs tab (`VICTORIALOGS=0` skips it).
+over `apps/api/.env`; a path or inline YAML), otherwise the local OrbStack
+cluster, otherwise (with `CLUSTER=0`) the current kubeconfig context
+(`~/.kube/config`). The local cluster is an OrbStack Linux machine named
+`acceleratio` that runs `deploy/install.sh` from this checkout, so it matches a
+server: k3s with embedded etcd, Cilium, SeaweedFS + CSI, VictoriaMetrics for the
+project Observability tab and VictoriaLogs with Vector for the Logs tab. `make dev`
+and `make setup` create or start it through `scripts/cluster.sh up` (idempotent;
+the released API and console the installer deploys are scaled to zero), write
+`~/.kube/acceleratio-orbstack.yaml` (context `orbstack-acceleratio`) and pass the
+cluster's join values to the API. `make cluster-down` deletes the machine. `make dev`
+validates the effective kubeconfig and refuses non-local contexts unless
+`ALLOW_REMOTE_KUBECONTEXT=1` is set; never point local development at a shared or
+production cluster.
 See the Kubernetes section in [README.md](./README.md).
 
 ## Documentation

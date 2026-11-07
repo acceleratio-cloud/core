@@ -101,15 +101,21 @@ details live in [deploy/README.md](./deploy/README.md).
 
 ## Local development
 
-Prerequisites: [Bun](https://bun.sh) 1.2 or newer and Docker with Compose v2.
+Prerequisites on macOS: [OrbStack](https://orbstack.dev) (it provides Docker
+with Compose v2 and the Linux machine for the cluster), [Bun](https://bun.sh)
+1.2 or newer, and kubectl:
+
+```bash
+brew install --cask orbstack
+brew install oven-sh/bun/bun kubectl
+```
+
 `make dev` also needs `make`; if it is not installed, run `./scripts/dev.sh`
-instead. Cluster-backed features additionally need k3d 5.9 or newer, Helm, and
-kubectl (`brew install k3d helm kubectl` on macOS).
+instead. Open OrbStack once so it finishes its setup.
 
 ```bash
 git clone https://github.com/acceleratio-cloud/core.git
 cd core
-make cluster-up   # optional: disposable local k3d cluster with Cilium
 make dev
 ```
 
@@ -117,10 +123,12 @@ make dev
 
 1. creates `apps/api/.env` (with a generated auth secret) and
    `apps/frontend/.env.local` from the committed examples,
-2. installs dependencies for `packages/shared`, `apps/api` and `apps/frontend`,
-3. starts PostgreSQL through Docker Compose,
-4. applies the Drizzle migrations, and
-5. runs the API and the console in watch mode.
+2. creates or starts the local cluster in an OrbStack machine (several minutes
+   the first time, see [Kubernetes target](#kubernetes-target)),
+3. installs dependencies for `packages/shared`, `apps/api` and `apps/frontend`,
+4. starts PostgreSQL through Docker Compose,
+5. applies the Drizzle migrations, and
+6. runs the API and the console in watch mode.
 
 Once both servers are up:
 
@@ -150,74 +158,76 @@ in `apps/api/.env`.
 ### Kubernetes target
 
 The API is a Kubernetes control plane: the servers page and the project and
-workload features read and write the cluster it targets. The target is chosen in
-this order:
-
-1. `KUBECONFIG` from the shell environment or `apps/api/.env` (a path to a
-   kubeconfig file or the YAML contents themselves). An exported shell value
-   wins, matching dotenv, and `make dev` validates whichever value the API will
-   actually use. A leading `~` in a path is expanded.
-2. the disposable k3d cluster created by `make cluster-up`; its kubeconfig path
-   is printed by `./scripts/cluster.sh kubeconfig`,
-3. the current context in your default kubeconfig (`~/.kube/config`), or
-4. the in-cluster service account when running inside Kubernetes.
-
-For local development, use the disposable cluster:
+workload features read and write the cluster it targets. `make dev` runs the
+API and console from source on the Mac and points them at a cluster in an
+[OrbStack](https://orbstack.dev) Linux machine named `acceleratio`. The machine
+runs `deploy/install.sh` from your checkout (OrbStack shares the Mac filesystem
+with its machines), so the cluster is the one a server gets: k3s with embedded
+etcd, Cilium as the CNI, SeaweedFS and its CSI driver with the default
+StorageClass `seaweedfs-storage`, VictoriaMetrics for the project Observability
+tab, and VictoriaLogs with Vector for the Logs tab. The installer also deploys
+the released API and console into the cluster; `cluster.sh` scales them to zero
+so they do not compete with the copy you are developing.
 
 ```bash
-make cluster-up     # create k3d + k3s + Cilium + SeaweedFS + VictoriaMetrics + VictoriaLogs; idempotent
-make dev            # picks up the k3d kubeconfig automatically
-make cluster-status # show nodes, Cilium and SeaweedFS pods, StorageClasses
-make cluster-down   # delete the cluster and its kubeconfig
+make cluster-up     # create the machine and install the cluster; idempotent
+make dev            # runs cluster-up itself, then picks up the kubeconfig
+make cluster-status # show the machine, nodes, pods and StorageClasses
+make cluster-down   # delete the machine and its kubeconfig
 ```
 
-The cluster disables flannel and the k3s network policy controller, then installs
-Cilium. That matches the production CNI closely enough for workloads and for the
-`CiliumNetworkPolicy` resources created by project isolation. k3d 5.9 or newer
-is required because older releases cannot start the current k3s images. The
-first `make cluster-up` pulls the k3s, Cilium and SeaweedFS images.
+You rarely need `make cluster-up` on its own: `make dev` and `make setup` call
+it, and it returns quickly once the cluster is installed. The first run
+downloads and installs everything, which takes several minutes. After a Mac
+restart `make dev` starts the machine again.
 
-SeaweedFS and its CSI driver are installed as on a server, so the default
-StorageClass is `seaweedfs-storage` and the console's storage settings can
-create and use custom classes. Data lives inside the k3d node container and is
-deleted with the cluster. The CSI driver needs `/dev/fuse` in the node; set
-`SEAWEEDFS=0` to skip SeaweedFS (k3s `local-path` then stays the default).
+The kubeconfig is written to `~/.kube/acceleratio-orbstack.yaml` with the
+context `orbstack-acceleratio` (`./scripts/cluster.sh kubeconfig` prints the
+path), and your default `~/.kube/config` is not touched. `make dev` also reads
+the cluster join URL, token and CIDRs from the cluster and passes them to the
+API, so the console's add-server flow is configured; a second OrbStack machine
+(`orbctl create ubuntu:24.04 worker`) can serve as the server to add (see
+[Cluster servers](./deploy/README.md#cluster-servers) for what the wizard needs).
 
-VictoriaMetrics (single node) scrapes kubelet and cAdvisor metrics for the
-project Observability tab. Its data lives inside the k3d node container with 7
-days of retention; set `VICTORIAMETRICS=0` to skip it, and the tab then shows
-that the metrics backend is unavailable. The API reaches it through the API
-server's service proxy at `VICTORIAMETRICS_ADDRESS` (default
-`victoria-metrics.victoria-metrics:8428`).
+The target is chosen in this order:
 
-VictoriaLogs (single node) with Vector collects the stdout and stderr of project
-services for the project Logs tab, with the same values as a server (they come
-from `victorialogs_values` in `deploy/install.sh`) and 3 days of retention; set
-`VICTORIALOGS=0` to skip it, and the tab then shows that log storage is
-unavailable. The API reaches it through the API server's service proxy at
-`VICTORIALOGS_ADDRESS` (default `victoria-logs.victoria-logs:9428`).
+1. `KUBECONFIG` from the shell environment or `apps/api/.env` (a path to a
+   kubeconfig file or the YAML contents themselves) when you want your own
+   cluster. An exported shell value wins, matching dotenv, and `make dev`
+   validates whichever value the API will actually use. A leading `~` in a path
+   is expanded. `make dev` does not create the OrbStack cluster then,
+2. the OrbStack cluster created by `make cluster-up`,
+3. the current context in your default kubeconfig (`~/.kube/config`) when you
+   run with `CLUSTER=0`, or
+4. the in-cluster service account when running inside Kubernetes.
 
-The SeaweedFS S3 gateway runs with authentication on, as on a server, so S3 bucket
-services can be created locally. A cluster created before S3 was enabled has no
-gateway: recreate it with `make cluster-down && make cluster-up`. The API finds
-SeaweedFS through `SEAWEEDFS_NAMESPACE`, `SEAWEEDFS_MASTER`, `SEAWEEDFS_FILER`,
-`SEAWEEDFS_S3_ENDPOINT` and `SEAWEEDFS_SHELL_IMAGE`; the defaults match both
-installers.
+Requirements: OrbStack (`brew install --cask orbstack`) and kubectl (`brew
+install kubectl`). The checkout must live under a path OrbStack shares with its
+machines (anything under `/Users`, or `/Volumes`). The machine gets the OrbStack
+defaults (4 CPUs, up to 8 GiB of memory); the stack idles at about 2 GiB.
+Environment variables for `scripts/cluster.sh`:
 
-The local cluster reads the k3s, Cilium and SeaweedFS chart versions from
-`deploy/install.sh`, so local development and the server installer move together.
-Override them with `K3S_VERSION`, `K3S_IMAGE`, `CILIUM_VERSION`,
-`SEAWEEDFS_CHART_VERSION` or `SEAWEEDFS_CSI_CHART_VERSION` if needed.
+| Variable | Default | Purpose |
+|---|---|---|
+| `ACCELERATIO_MACHINE` | `acceleratio` | machine name, also used in the kubeconfig name |
+| `MACHINE_IMAGE` | `ubuntu:24.04` | machine image |
+| `REINSTALL=1` | unset | run the installer again even if the cluster is ready (after changing `deploy/install.sh`) |
+
+`CLUSTER=0 make dev` skips the cluster entirely. Without any kubeconfig the API
+still starts and the console works, but cluster-backed endpoints return 503.
 
 Local development must not point at a shared or production cluster. `make dev`
 validates the effective target, including an explicit `KUBECONFIG`, and refuses
-to start unless it recognizes a local cluster (`minikube`, `kind-*`, `k3d-*`,
-`docker-desktop`, `rancher-desktop`, `orbstack`, `colima`) or you pass
-`ALLOW_REMOTE_KUBECONTEXT=1`. Only use that override for an intentional
-non-local development cluster.
+to start unless it recognizes a local cluster (`orbstack-*`, `orbstack`,
+`minikube`, `kind-*`, `k3d-*`, `docker-desktop`, `rancher-desktop`, `colima`) or
+you pass `ALLOW_REMOTE_KUBECONTEXT=1`. Only use that override for an
+intentional non-local development cluster.
 
-Without any kubeconfig the API still starts and the console works, but
-cluster-backed endpoints return 503.
+The machine disables swap (OrbStack machines come with zram swap that the
+installer rejects); this affects only the machine. Data in the machine, such as
+SeaweedFS volumes and metrics, is deleted with `make cluster-down`. The
+PostgreSQL database of `make dev` is separate: it lives in a Docker volume and
+survives `make cluster-down`.
 
 ### Setup without starting the servers
 
@@ -252,7 +262,8 @@ docker compose up -d --wait postgres
 
 # 4. Development servers (one terminal each)
 # In the API terminal, after `make cluster-up` (skip the export if you do not
-# use cluster features):
+# use cluster features). Add the join values to the environment too if you
+# want to try adding servers: ./scripts/cluster.sh env prints them.
 export KUBECONFIG="$(./scripts/cluster.sh kubeconfig)"
 (cd apps/api && bun run start:dev)
 

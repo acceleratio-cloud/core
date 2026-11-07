@@ -22,14 +22,14 @@ db-down:
 migrate: db-up
 	cd apps/api && bun run db:migrate
 
-# Create a disposable local k3d cluster with Cilium.
+# Create the local cluster in an OrbStack machine (k3s, Cilium, SeaweedFS, VictoriaMetrics, VictoriaLogs).
 cluster-up:
 	./scripts/cluster.sh up
 
-# Delete the local k3d cluster and its kubeconfig.
+# Delete the OrbStack machine and its kubeconfig.
 cluster-down:
 	./scripts/cluster.sh down
 
-# Show the local cluster, its nodes, and Cilium pods.
+# Show the OrbStack machine, its nodes, pods and StorageClasses.
 cluster-status:
 	./scripts/cluster.sh status

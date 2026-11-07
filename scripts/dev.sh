@@ -22,8 +22,9 @@ for arg in "$@"; do
       printf '  --setup    run the setup steps and exit without starting the servers\n\n'
       printf 'Environment:\n'
       printf '  WEB_PORT=3001               console port (default 3000)\n'
-      printf '  K3D_CLUSTER_NAME=name       k3d cluster name (see scripts/cluster.sh)\n'
-      printf '  KUBECONFIG=...              overrides apps/api/.env; its context is validated\n'
+      printf '  CLUSTER=0                   do not create or start the OrbStack cluster\n'
+      printf '  ACCELERATIO_MACHINE=name    OrbStack machine name (see scripts/cluster.sh)\n'
+      printf '  KUBECONFIG=...              use your own cluster instead; its context is validated\n'
       printf '  ALLOW_REMOTE_KUBECONTEXT=1  allow a non-local Kubernetes context\n'
       exit 0
       ;;
@@ -126,10 +127,10 @@ if [[ -z "$API_PORT" ]]; then
 fi
 WEB_PORT="${WEB_PORT:-3000}"
 
-# The k3d scripts own the cluster name and kubeconfig path; do not repeat the
-# literal name here or the two paths will drift apart.
-K3D_CLUSTER_NAME="${K3D_CLUSTER_NAME:-$(./scripts/cluster.sh name)}"
-K3D_KUBECONFIG="$(K3D_CLUSTER_NAME="$K3D_CLUSTER_NAME" ./scripts/cluster.sh kubeconfig)"
+# scripts/cluster.sh owns the machine name and kubeconfig path; do not repeat
+# the literal name here or the two paths will drift apart.
+CLUSTER_MACHINE="$(./scripts/cluster.sh name)"
+CLUSTER_KUBECONFIG="$(./scripts/cluster.sh kubeconfig)"
 
 if [[ ! -f apps/frontend/.env.local ]]; then
   log "Creating apps/frontend/.env.local with NEXT_PUBLIC_API_URL=http://localhost:${API_PORT}"
@@ -151,10 +152,11 @@ port_in_use() {
 
 # The API is a Kubernetes control plane. With no explicit KUBECONFIG it uses
 # the ambient ~/.kube/config context, which may be a shared or production
-# cluster. Prefer the local k3d cluster and refuse any other non-local context.
+# cluster. Prefer the local OrbStack cluster (scripts/cluster.sh) and refuse any
+# other non-local context.
 is_local_context() {
   case "$1" in
-    minikube | minikube-* | kind-* | k3d-* | docker-desktop | docker-for-desktop | rancher-desktop | orbstack | colima | colima-*)
+    minikube | minikube-* | kind-* | k3d-* | docker-desktop | docker-for-desktop | rancher-desktop | orbstack | orbstack-* | colima | colima-*)
       return 0
       ;;
     *)
@@ -198,7 +200,7 @@ approve_kube_context() {
   local context="$1" origin="$2"
 
   if [[ -z "$context" ]]; then
-    warn "No Kubernetes context found in ${origin}. Cluster-backed endpoints will return 503. Run 'make cluster-up' for a local k3d cluster."
+    warn "No Kubernetes context found in ${origin}. Cluster-backed endpoints will return 503. Run 'make cluster-up' for the local OrbStack cluster."
     return 0
   fi
 
@@ -212,7 +214,41 @@ approve_kube_context() {
     return 0
   fi
 
-  die "Refusing to start: the API would manage Kubernetes context \"${context}\" (${origin}). Run 'make cluster-up' for a disposable local k3d cluster. To allow this context intentionally, run ALLOW_REMOTE_KUBECONTEXT=1 make dev."
+  die "Refusing to start: the API would manage Kubernetes context \"${context}\" (${origin}). Remove KUBECONFIG from apps/api/.env and the shell to use the local OrbStack cluster ('make cluster-up'). To allow this context intentionally, run ALLOW_REMOTE_KUBECONTEXT=1 make dev."
+}
+
+# True when the shell or apps/api/.env names a kubeconfig, i.e. the developer
+# brought their own cluster and the OrbStack one is not needed.
+explicit_kubeconfig_set() {
+  [[ -n "${KUBECONFIG:-}" ]] || dotenv_value KUBECONFIG apps/api/.env >/dev/null
+}
+
+# Create or start the OrbStack cluster. It is idempotent and fast once the
+# cluster is installed; the first run installs k3s, Cilium, SeaweedFS and the
+# observability stack, which takes a few minutes.
+ensure_cluster() {
+  [[ "${CLUSTER:-1}" = "0" ]] && return 0
+  explicit_kubeconfig_set && return 0
+
+  command -v orbctl >/dev/null 2>&1 ||
+    die "OrbStack is required for the local cluster. Install it from https://orbstack.dev (brew install --cask orbstack), or set CLUSTER=0 to run without a cluster, or point KUBECONFIG at your own."
+
+  ./scripts/cluster.sh up
+}
+
+# The installer stores the values the console's "add server" flow needs in the
+# cluster. Pass them to the API unless the developer set them already.
+export_cluster_env() {
+  local line key value
+
+  while IFS= read -r line; do
+    key="${line%%=*}"
+    value="${line#*=}"
+    [[ -n "$key" && -n "$value" ]] || continue
+    if [[ -z "${!key:-}" ]] && ! dotenv_value "$key" apps/api/.env >/dev/null; then
+      export "$key=$value"
+    fi
+  done < <(./scripts/cluster.sh env 2>/dev/null || true)
 }
 
 kube_context_guard() {
@@ -268,16 +304,17 @@ kube_context_guard() {
     return
   fi
 
-  if [[ -f "$K3D_KUBECONFIG" ]]; then
-    context="$(kubeconfig_context "$K3D_KUBECONFIG")"
+  if [[ -f "$CLUSTER_KUBECONFIG" ]]; then
+    context="$(kubeconfig_context "$CLUSTER_KUBECONFIG")"
 
-    if [[ "$context" == k3d-* ]]; then
-      export KUBECONFIG="$K3D_KUBECONFIG"
-      log "Kubernetes: using local k3d cluster \"${K3D_CLUSTER_NAME}\" (context ${context})"
+    if [[ "$context" == orbstack-* ]]; then
+      export KUBECONFIG="$CLUSTER_KUBECONFIG"
+      log "Kubernetes: using the local OrbStack cluster \"${CLUSTER_MACHINE}\" (context ${context})"
+      export_cluster_env
       return
     fi
 
-    warn "Ignoring ${K3D_KUBECONFIG}: its context \"${context:-unknown}\" is not a k3d context."
+    warn "Ignoring ${CLUSTER_KUBECONFIG}: its context \"${context:-unknown}\" is not an OrbStack context."
   fi
 
   if command -v kubectl >/dev/null 2>&1; then
@@ -315,6 +352,18 @@ fi
 export PORT="$API_PORT"
 check_port_settings
 
+# The local PostgreSQL service (docker compose) is the development database.
+# Migrations run against whatever DATABASE_URL names, so say so when it is not it.
+DATABASE_URL_VALUE="${DATABASE_URL:-$(dotenv_value DATABASE_URL apps/api/.env || true)}"
+case "$DATABASE_URL_VALUE" in
+  "" | *@localhost[:/]* | *@127.0.0.1[:/]* | *@\[::1\][:/]*) ;;
+  *)
+    warn "DATABASE_URL does not point at the local PostgreSQL service; migrations will run against that database. Restore the value from apps/api/.env.example to use the one from docker compose."
+    ;;
+esac
+
+ensure_cluster
+
 if [ "$SETUP_ONLY" = false ]; then
   kube_context_guard
   if port_in_use "$API_PORT"; then
@@ -325,14 +374,16 @@ if [ "$SETUP_ONLY" = false ]; then
   fi
 fi
 
+# apps/api and apps/frontend depend on packages/shared through a file: dependency,
+# which bun copies at install time. Build the package first or the copy has no dist.
+log "Installing and building the shared package"
+(cd packages/shared && bun install --frozen-lockfile && bun run build)
+
 log "Installing dependencies"
-for package_dir in packages/shared apps/api apps/frontend; do
+for package_dir in apps/api apps/frontend; do
   printf '  - %s\n' "$package_dir"
   (cd "$package_dir" && bun install --frozen-lockfile)
 done
-
-log "Building the shared package"
-(cd packages/shared && bun run build)
 
 log "Starting PostgreSQL"
 docker compose up -d --wait postgres

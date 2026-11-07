@@ -35,7 +35,7 @@ migrations, and runs the API on <http://localhost:8080> and the console on
 
 Useful targets: `make setup` (prepare without starting servers), `make db-up` /
 `make db-down`, `make migrate`, and `make cluster-up` / `make cluster-down` for a
-disposable local k3d + Cilium cluster. The manual sequence is in the
+local OrbStack cluster (k3s + Cilium). The manual sequence is in the
 [README](./README.md).
 
 **Never point local development at a shared or production cluster.** `make dev`
