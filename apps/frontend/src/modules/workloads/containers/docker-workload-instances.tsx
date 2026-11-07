@@ -3,6 +3,7 @@
 import { useCallback } from 'react';
 
 import type { Workload, WorkloadInstance } from '@acceleratio/shared';
+import { ViewLogsLink } from '@/modules/logs/components/view-logs-link';
 import { useTerminal } from '@/modules/terminal/providers/terminal-provider';
 import {
   DetailNotice,
@@ -74,6 +75,15 @@ export const DockerWorkloadInstances = ({
         emptyHint={emptyHintFor(workload)}
         onOpenTerminal={handleOpenTerminal}
         canOpenTerminal={canOpen}
+        logsLink={(instance) => (
+          <ViewLogsLink
+            variant="icon"
+            projectId={workload.project_id}
+            service={workload.id}
+            pod={instance.name}
+            label={`View logs of ${instance.name}`}
+          />
+        )}
       />
     </DetailStack>
   );

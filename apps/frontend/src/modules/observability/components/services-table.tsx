@@ -1,5 +1,6 @@
 import type { WorkloadMetrics } from '@acceleratio/shared';
 import { cn } from '@/lib/utils';
+import { ViewLogsLink } from '@/modules/logs/components/view-logs-link';
 import { WorkloadStatus } from '@/modules/workloads/components/workload-status';
 import {
   formatByteRate,
@@ -12,6 +13,7 @@ import { TONE_BG, type ChartTone } from '../utils/series';
 import { Panel } from './panel';
 
 type ServicesTableProps = {
+  projectId: string;
   workloads: WorkloadMetrics[];
   tones: Map<string, ChartTone>;
   className?: string;
@@ -19,6 +21,7 @@ type ServicesTableProps = {
 
 /** Every service with its current usage against its limits. */
 export const ServicesTable = ({
+  projectId,
   workloads,
   tones,
   className,
@@ -56,7 +59,7 @@ export const ServicesTable = ({
         {workloads.map((workload) => (
           <tr
             key={workload.workload_id}
-            className="border-b border-edge-subtle transition-colors last:border-b-0 hover:bg-surface-raised"
+            className="group/service border-b border-edge-subtle transition-colors last:border-b-0 hover:bg-surface-raised"
           >
             <th scope="row" className="px-3 py-2.5 text-left font-normal">
               <span className="flex min-w-0 items-center gap-2.5">
@@ -68,11 +71,22 @@ export const ServicesTable = ({
                   )}
                 />
                 <span className="flex min-w-0 flex-col gap-1">
-                  <span
-                    className="max-w-48 truncate font-medium text-fg-primary"
-                    title={workload.name}
-                  >
-                    {workload.name}
+                  <span className="flex min-w-0 items-center gap-1">
+                    <span
+                      className="max-w-48 truncate font-medium text-fg-primary"
+                      title={workload.name}
+                    >
+                      {workload.name}
+                    </span>
+                    {workload.type === 'docker' ? (
+                      <ViewLogsLink
+                        variant="icon"
+                        projectId={projectId}
+                        service={workload.workload_id}
+                        label={`View logs of ${workload.name}`}
+                        className="size-6 opacity-0 transition-opacity group-hover/service:opacity-100 focus-visible:opacity-100 motion-reduce:transition-none"
+                      />
+                    ) : null}
                   </span>
                   <WorkloadStatus status={workload.status} compact />
                 </span>

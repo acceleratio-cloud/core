@@ -503,7 +503,7 @@ postgres_major() {
 }
 
 collect_plan() {
-  local ns seaweed_ns seaweed_rel csi_rel vm_ns vm_rel
+  local ns seaweed_ns seaweed_rel csi_rel vm_ns vm_rel vl_ns vl_rel
   local target api_image console_image pg_image cur
   local version
 
@@ -513,6 +513,8 @@ collect_plan() {
   csi_rel="$(target_of SEAWEEDFS_CSI_RELEASE)"
   vm_ns="$(target_of VICTORIAMETRICS_NAMESPACE)"
   vm_rel="$(target_of VICTORIAMETRICS_RELEASE)"
+  vl_ns="$(target_of VICTORIALOGS_NAMESPACE)"
+  vl_rel="$(target_of VICTORIALOGS_RELEASE)"
 
   # Where the pieces live, for the steps that follow.
   NAMESPACE="$ns"
@@ -521,6 +523,7 @@ collect_plan() {
     "${seaweed_rel}|${seaweed_ns}"
     "${csi_rel}|${seaweed_ns}"
     "${vm_rel}|${vm_ns}"
+    "${vl_rel}|${vl_ns}"
   )
 
   target="$(target_of K3S_VERSION)"
@@ -534,6 +537,7 @@ collect_plan() {
   add_row "SeaweedFS" "$(helm_chart_version "$seaweed_rel" "$seaweed_ns")" "$(target_of SEAWEEDFS_CHART_VERSION)"
   add_row "SeaweedFS CSI" "$(helm_chart_version "$csi_rel" "$seaweed_ns")" "$(target_of SEAWEEDFS_CSI_CHART_VERSION)"
   add_row "VictoriaMetrics" "$(helm_chart_version "$vm_rel" "$vm_ns")" "$(target_of VICTORIAMETRICS_CHART_VERSION)"
+  add_row "VictoriaLogs" "$(helm_chart_version "$vl_rel" "$vl_ns")" "$(target_of VICTORIALOGS_CHART_VERSION)"
 
   version="$(target_of ACCELERATIO_VERSION)"
   api_image="${ACCELERATIO_API_IMAGE:-ghcr.io/acceleratio-cloud/api:${version}}"

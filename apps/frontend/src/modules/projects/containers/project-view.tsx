@@ -1,11 +1,18 @@
 'use client';
 
-import { useCallback, useState, type ReactNode } from 'react';
+import { useCallback, useMemo, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'next/navigation';
 
 import { cn } from '@/lib/utils';
+import { LogsView } from '@/modules/logs/containers/logs-view';
+import { setLogsTargetParams } from '@/modules/logs/utils/links';
 import { ObservabilityView } from '@/modules/observability/containers/observability-view';
 import { ProjectHeader } from '../components/project-header';
+import {
+  ProjectTabsProvider,
+  type LogsRequest,
+  type LogsTarget,
+} from '../providers/project-tabs-provider';
 import {
   DEFAULT_PROJECT_TAB,
   PROJECT_TAB_PARAM,
@@ -21,7 +28,7 @@ import { ProjectSettings } from './project-settings';
 type Direction = 'forward' | 'backward' | null;
 
 /**
- * The project page: one route, three tabs. The selected tab is local state,
+ * The project page: one route, four tabs. The selected tab is local state,
  * mirrored into `?tab=` (Architecture omits it) with `history.replaceState` so a
  * reload or a shared link opens the same tab without a server round trip.
  * The URL is storage, not the source of truth: with Cache Components on,
@@ -43,6 +50,7 @@ export const ProjectView = () => {
   );
   const [direction, setDirection] = useState<Direction>(null);
   const [previousTab, setPreviousTab] = useState(activeTab);
+  const [logsRequest, setLogsRequest] = useState<LogsRequest | null>(null);
 
   // A navigation that changed `?tab=` (not the tab bar) selects that tab;
   // this is the "adjust state while rendering" pattern.
@@ -85,43 +93,68 @@ export const ProjectView = () => {
     [activeTab],
   );
 
+  // "View logs" links switch here rather than through `?tab=`, which the tab
+  // bar's `replaceState` hides from `useSearchParams`.
+  const openLogs = useCallback((target: LogsTarget) => {
+    const url = new URL(window.location.href);
+
+    url.searchParams.set(PROJECT_TAB_PARAM, 'logs');
+    setLogsTargetParams(url.searchParams, target);
+    setLogsRequest((previous) => ({ ...target, id: (previous?.id ?? 0) + 1 }));
+    setActiveTab('logs');
+    window.history.replaceState(window.history.state, '', url);
+  }, []);
+  const tabsContext = useMemo(() => ({ openLogs }), [openLogs]);
+
   return (
-    <div className="relative min-h-0 flex-1 overflow-hidden bg-surface-board">
-      <div className="pointer-events-none absolute top-3 left-3 z-30 max-w-[calc(100%-1.5rem)]">
-        <div className="pointer-events-auto min-w-0">
-          <ProjectHeader activeTab={activeTab} onTabChange={selectTab} />
+    <ProjectTabsProvider value={tabsContext}>
+      <div className="relative min-h-0 flex-1 overflow-hidden bg-surface-board">
+        <div className="pointer-events-none absolute top-3 left-3 z-30 max-w-[calc(100%-1.5rem)]">
+          <div className="pointer-events-auto min-w-0">
+            <ProjectHeader activeTab={activeTab} onTabChange={selectTab} />
+          </div>
         </div>
+
+        <TabPanel
+          tab="architecture"
+          activeTab={activeTab}
+          visited={visited}
+          direction={direction}
+        >
+          <ProjectCanvas />
+        </TabPanel>
+
+        <TabPanel
+          tab="observability"
+          activeTab={activeTab}
+          visited={visited}
+          direction={direction}
+          scrollable
+        >
+          <ObservabilityView active={activeTab === 'observability'} />
+        </TabPanel>
+
+        {/* The log list scrolls inside its own frame, so the panel does not. */}
+        <TabPanel
+          tab="logs"
+          activeTab={activeTab}
+          visited={visited}
+          direction={direction}
+        >
+          <LogsView active={activeTab === 'logs'} request={logsRequest} />
+        </TabPanel>
+
+        <TabPanel
+          tab="settings"
+          activeTab={activeTab}
+          visited={visited}
+          direction={direction}
+          scrollable
+        >
+          <ProjectSettings />
+        </TabPanel>
       </div>
-
-      <TabPanel
-        tab="architecture"
-        activeTab={activeTab}
-        visited={visited}
-        direction={direction}
-      >
-        <ProjectCanvas />
-      </TabPanel>
-
-      <TabPanel
-        tab="observability"
-        activeTab={activeTab}
-        visited={visited}
-        direction={direction}
-        scrollable
-      >
-        <ObservabilityView active={activeTab === 'observability'} />
-      </TabPanel>
-
-      <TabPanel
-        tab="settings"
-        activeTab={activeTab}
-        visited={visited}
-        direction={direction}
-        scrollable
-      >
-        <ProjectSettings />
-      </TabPanel>
-    </div>
+    </ProjectTabsProvider>
   );
 };
 

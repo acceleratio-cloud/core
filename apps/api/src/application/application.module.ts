@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { AuthController } from '@/application/auth/auth.controller';
 import { PasswordAttemptLimiter } from '@/application/auth/password-attempt-limiter';
 import { HealthController } from '@/application/health/health.controller';
+import { LogsController } from '@/application/logs/logs.controller';
+import { LogsService } from '@/application/logs/logs.service';
 import { MetricsController } from '@/application/metrics/metrics.controller';
 import { MetricsService } from '@/application/metrics/metrics.service';
 import { NodeController } from '@/application/node/node.controller';
@@ -47,6 +49,7 @@ import { WorkloadTypeResolver } from '@/application/workload/workload-type.resol
 import { WorkloadVersionService } from '@/application/workload/workload-version.service';
 import { SeaweedfsFilerClient } from '@/vendor/seaweedfs/seaweedfs-filer.client';
 import { TraefikClient } from '@/vendor/traefik/traefik.client';
+import { VictoriaLogsClient } from '@/vendor/victorialogs/victorialogs.client';
 import { VictoriaMetricsClient } from '@/vendor/victoriametrics/victoriametrics.client';
 
 /**
@@ -60,6 +63,7 @@ import { VictoriaMetricsClient } from '@/vendor/victoriametrics/victoriametrics.
   controllers: [
     AuthController,
     HealthController,
+    LogsController,
     MetricsController,
     NodeController,
     PlatformUpdateController,
@@ -97,6 +101,8 @@ import { VictoriaMetricsClient } from '@/vendor/victoriametrics/victoriametrics.
     TraefikClient,
     VictoriaMetricsClient,
     MetricsService,
+    VictoriaLogsClient,
+    LogsService,
     WorkloadStatusDeriverRegistry,
     WorkloadEventsService,
     WorkloadInstancesService,

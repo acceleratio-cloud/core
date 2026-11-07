@@ -2,8 +2,8 @@
 #
 # Manage a disposable local Kubernetes cluster for development.
 #
-#   ./scripts/cluster.sh up      create a k3d cluster, install Cilium, SeaweedFS
-#                                and VictoriaMetrics
+#   ./scripts/cluster.sh up      create a k3d cluster, install Cilium, SeaweedFS,
+#                                VictoriaMetrics and VictoriaLogs
 #   ./scripts/cluster.sh down    delete the cluster and its kubeconfig
 #   ./scripts/cluster.sh status  show the cluster, nodes, pods and StorageClasses
 #   ./scripts/cluster.sh kubeconfig  print the kubeconfig path used by the API
@@ -14,7 +14,9 @@
 # CSI driver provide the default StorageClass `seaweedfs-storage`, as on a
 # server installed by deploy/install.sh. Set SEAWEEDFS=0 to skip them.
 # VictoriaMetrics scrapes kubelet and cAdvisor metrics for the console's
-# Observability tab. Set VICTORIAMETRICS=0 to skip it.
+# Observability tab. Set VICTORIAMETRICS=0 to skip it. VictoriaLogs with
+# Vector collects project container logs for the Logs tab. Set VICTORIALOGS=0
+# to skip it.
 #
 set -euo pipefail
 
@@ -78,6 +80,10 @@ VICTORIAMETRICS_CHART_VERSION="${VICTORIAMETRICS_CHART_VERSION:-}"
 VICTORIAMETRICS="${VICTORIAMETRICS:-1}"
 VICTORIAMETRICS_NAMESPACE="victoria-metrics"
 VICTORIAMETRICS_RELEASE="victoria-metrics"
+VICTORIALOGS_CHART_VERSION="${VICTORIALOGS_CHART_VERSION:-}"
+VICTORIALOGS="${VICTORIALOGS:-1}"
+VICTORIALOGS_NAMESPACE="victoria-logs"
+VICTORIALOGS_RELEASE="victoria-logs"
 
 load_cluster_versions() {
   K3S_VERSION="${K3S_VERSION:-$(installer_default K3S_VERSION)}"
@@ -86,6 +92,7 @@ load_cluster_versions() {
   SEAWEEDFS_CHART_VERSION="${SEAWEEDFS_CHART_VERSION:-$(installer_default SEAWEEDFS_CHART_VERSION)}"
   SEAWEEDFS_CSI_CHART_VERSION="${SEAWEEDFS_CSI_CHART_VERSION:-$(installer_default SEAWEEDFS_CSI_CHART_VERSION)}"
   VICTORIAMETRICS_CHART_VERSION="${VICTORIAMETRICS_CHART_VERSION:-$(installer_default VICTORIAMETRICS_CHART_VERSION)}"
+  VICTORIALOGS_CHART_VERSION="${VICTORIALOGS_CHART_VERSION:-$(installer_default VICTORIALOGS_CHART_VERSION)}"
 }
 
 version_ge() {
@@ -297,6 +304,36 @@ EOF_VALUES
     "statefulset/${VICTORIAMETRICS_RELEASE}" --timeout=5m
 }
 
+# Mirrors install_victorialogs in deploy/install.sh. The values (including
+# the Vector pipeline) come from victorialogs_values in that file, so the
+# local cluster collects and labels logs exactly like a server does. Data
+# lives inside the k3d node container and goes away with the cluster.
+install_victorialogs() {
+  local values_fn
+
+  values_fn="$(awk '/^victorialogs_values\(\)/ { found = 1 } found { print } found && /^}$/ { exit }' "$ROOT_DIR/deploy/install.sh")"
+  [[ -n "$values_fn" ]] || die "Could not read victorialogs_values from deploy/install.sh."
+  eval "$values_fn"
+
+  log "Installing VictoriaLogs ${VICTORIALOGS_CHART_VERSION} with Vector"
+  VICTORIALOGS_RELEASE="$VICTORIALOGS_RELEASE" \
+    VICTORIALOGS_RETENTION=3d \
+    VICTORIALOGS_MAX_DISK=1GiB \
+    VICTORIALOGS_DATA_DIR=/var/lib/victoria-logs \
+    victorialogs_values |
+    KUBECONFIG="$KUBECONFIG_PATH" helm upgrade --install "$VICTORIALOGS_RELEASE" victoria-logs-single \
+      --repo https://victoriametrics.github.io/helm-charts/ \
+      --version "$VICTORIALOGS_CHART_VERSION" \
+      --namespace "$VICTORIALOGS_NAMESPACE" --create-namespace \
+      --values - \
+      --wait --timeout 10m
+
+  kube -n "$VICTORIALOGS_NAMESPACE" rollout status \
+    "statefulset/${VICTORIALOGS_RELEASE}" --timeout=5m
+  kube -n "$VICTORIALOGS_NAMESPACE" rollout status \
+    "daemonset/${VICTORIALOGS_RELEASE}-vector" --timeout=5m
+}
+
 up() {
   local exists_status=0
 
@@ -354,6 +391,10 @@ up() {
     install_victoriametrics
   fi
 
+  if [[ "$VICTORIALOGS" != "0" ]]; then
+    install_victorialogs
+  fi
+
   log "Local cluster is ready"
   printf '    KUBECONFIG: %s\n' "$KUBECONFIG_PATH"
   printf '    Next: make dev (it picks up this kubeconfig automatically)\n'
@@ -404,6 +445,8 @@ status() {
   kube -n "$SEAWEEDFS_NAMESPACE" get pods 2>/dev/null || true
   printf '\n'
   kube -n "$VICTORIAMETRICS_NAMESPACE" get pods 2>/dev/null || true
+  printf '\n'
+  kube -n "$VICTORIALOGS_NAMESPACE" get pods 2>/dev/null || true
   printf '\n'
   kube get storageclass || true
 }

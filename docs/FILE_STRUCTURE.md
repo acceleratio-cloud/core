@@ -40,9 +40,9 @@ src/
 
 ## Project page
 
-- `/project/[id]` is one route with three tabs (`modules/projects/tabs.ts`): Overview (the workload
-  canvas), Observability and Settings. They are not routes: `ProjectView` reads `?tab=` through
-  `useSearchParams` and writes it with `history.replaceState` (Overview omits it), so a reload or a
+- `/project/[id]` is one route with four tabs (`modules/projects/tabs.ts`): Architecture (the workload
+  canvas), Observability, Logs and Settings. They are not routes: `ProjectView` reads `?tab=` through
+  `useSearchParams` and writes it with `history.replaceState` (Architecture omits it), so a reload or a
   shared link opens the same tab without a server round trip. The project switcher keeps the tab.
 - Panels mount on first visit and then stay mounted while hidden (`hidden` + `inert`), so the canvas
   keeps its viewport and status stream. A shown panel replays a short fade-and-slide entrance whose
@@ -53,6 +53,20 @@ src/
   in workload order (never cycled; a seventh service folds into a neutral Other) so a service keeps
   its color in every panel. Saturation gauges use the `status-*` colors and always repeat the level
   as a word and an icon.
+- `modules/logs/` is the Logs tab: every service of the project in one newest-first list. The
+  container (`containers/logs-view.tsx`) owns the filters (service, pod, level, search, window);
+  `hooks/use-log-history.ts` loads pages and older pages by cursor, `hooks/use-log-stream.ts` follows
+  `GET /projects/:projectId/logs/stream` over `EventSource` (reconnecting by hand with backoff and
+  `since` = the newest line, never the browser's own retry), and `hooks/use-log-overview.ts` loads
+  the frequency chart and the sidebar facets. The list is virtualized with `@tanstack/react-virtual`;
+  live lines land on top only while the reader is at the top, otherwise they wait behind a
+  "new lines" button. Services keep their Observability colors (`assignSeriesTones`). A link opens
+  the tab filtered: `projectLogsHref` builds `?tab=logs&service=<id>&pod=<name>`, used by
+  `ViewLogsLink` in the service header, the instance rows and the Observability services table.
+  A plain click goes through `useProjectTabs().openLogs` (`providers/project-tabs-provider.tsx`)
+  instead: the tab bar's `replaceState` hides `?tab=` from `useSearchParams`, so only the context
+  switches tabs reliably from inside the page. The level counts come from a histogram read without
+  the level filter; the chart hides unselected levels itself.
 - The console imports only types from `@acceleratio/shared`: the package is not resolvable at
   runtime in the Next bundle, so contract constants the UI needs (metric ranges, the Other series
   key) are mirrored in the module that uses them.
@@ -516,6 +530,8 @@ calls.
 - Benchmarks add `get` and `create` on `namespaces`, `create`, `get` and `delete` on
   `persistentvolumeclaims`, `create`, `get` and `delete` on `jobs` (`batch`), `list` on `pods`, `get` on
   `pods/log` in the benchmark namespace, and `patch` on `persistentvolumes`.
+- Metrics and logs add `get` on `services/proxy` (core) in the `victoria-metrics` and `victoria-logs`
+  namespaces. The API never reads `pods/log`: Vector ships container logs to VictoriaLogs.
 - The dev setup uses an admin kubeconfig. An in-cluster installation needs a `ClusterRole` with those
   rules and a `ClusterRoleBinding` to the API service account.
 
@@ -603,6 +619,43 @@ SSH, with the scripts and requirement checks in `node-join-script.ts`. SSH goes 
 - Readiness, restarts and container limits come from the live pod list, PVC capacity from the
   claims, and cluster capacity from node allocatable. VictoriaMetrics being unreachable is a 503
   that the console shows as "Metrics backend unavailable".
+
+## Shutdown
+
+- `common/http-shutdown.service.ts` gives in-flight requests 5 s once the app stops, then closes
+  the connections still open. `server.close()` waits for every connection, and the console's
+  server-sent event streams stay open for as long as a tab does, so without it a rollout or a watch
+  rebuild would wait on browsers indefinitely.
+
+## Logs
+
+- `application/logs/` serves `GET /projects/:projectId/logs` (history, newest first, `limit` up to
+  500 and `cursor` = the `next_cursor` of the previous page: `<time>~<skip>`, the last line's time
+  and how many lines at exactly that time were already returned, so lines that share a timestamp
+  are never lost between pages), `GET .../logs/histogram` (lines per level
+  in about 60 buckets), `GET .../logs/sources` (services and pods with line counts, plus live pods) and
+  `GET .../logs/stream` (server-sent events). Every endpoint takes `range=15m|1h|6h|24h|7d` or
+  `start` + `end` (RFC 3339, at most 31 days) and the filters `workload`, `pod`, `level`
+  (`error|warn|info|debug|unknown`, comma separated or repeated) and `q`.
+- Storage is a single-node VictoriaLogs; Vector runs as a DaemonSet from the same chart and reads
+  container logs only from namespaces labelled `app.kubernetes.io/managed-by=acceleratio` (plus a
+  `project-` guard in its VRL). It writes flat fields (`namespace`, `pod`, `container`,
+  `workload_id`, `level`, `stream`, `_msg`) and detects `level` once at ingestion: JSON
+  `level`/`severity`, logfmt `level=`, glog prefixes, upper-case keywords. Logs outlive pods, so
+  history spans restarts and deploys. `deploy/install.sh` (`victorialogs_values`) is the single source
+  of the chart values; `scripts/cluster.sh` reads that function.
+- `vendor/victorialogs/victorialogs.client.ts` calls `/select/logsql/query`, `/hits` and `/tail`
+  through the API server's service proxy. `VICTORIALOGS_ADDRESS` (default
+  `victoria-logs.victoria-logs:9428`) names the Service.
+- `logs-query.ts` builds LogsQL only from validated, structured filters. Every query starts with the
+  `{namespace="project-<id>"}` stream filter, which is the project isolation; user text only appears
+  JSON-quoted (search is an escaped, case-insensitive substring regexp). Unknown service ids are
+  allowed so deleted services stay filterable.
+- The live stream reads `/select/logsql/tail` from the store, not from pods, so new pods after a
+  deploy appear without reconnecting. It batches lines into unnamed SSE frames
+  (`{ type: 'entries' | 'dropped' | 'error' }`), forwards at most 500 lines/s (the rest are counted
+  as `dropped`), allows 5 open streams per user (checked again at subscription, where concurrent opens cannot
+  race) and completes on shutdown. VictoriaLogs being unreachable is a 503 ("Log storage unavailable" in the console).
 
 ## Platform updates
 
@@ -730,8 +783,10 @@ SSH, with the scripts and requirement checks in `node-join-script.ts`. SSH goes 
   existing kubeconfig file; an exported shell value wins over `.env`, a leading
   `~` is expanded, and the default or in-cluster config is used when unset),
   `WORKLOAD_OBSERVER_ENABLED` (`false` disables the observer) and
-  `WORKLOAD_OBSERVER_RESYNC_MS` (full resync interval, default 60000) and `VICTORIAMETRICS_ADDRESS`
-  (`service.namespace:port` of VictoriaMetrics, default `victoria-metrics.victoria-metrics:8428`).
+  `WORKLOAD_OBSERVER_RESYNC_MS` (full resync interval, default 60000), `VICTORIAMETRICS_ADDRESS`
+  (`service.namespace:port` of VictoriaMetrics, default `victoria-metrics.victoria-metrics:8428`) and
+  `VICTORIALOGS_ADDRESS` (`service.namespace:port` of VictoriaLogs, default
+  `victoria-logs.victoria-logs:9428`).
   Platform updates read `ACCELERATIO_VERSION`, `PLATFORM_UPDATES_ENABLED`,
   `PLATFORM_UPDATE_CHECK_INTERVAL_MS`, `ACCELERATIO_RELEASE_REPOSITORY`, `ACCELERATIO_CONFIG_DIR`
   (default `/etc/acceleratio`) and `PLATFORM_UPDATE_ROOT` (default `/var/lib/acceleratio/updates`).

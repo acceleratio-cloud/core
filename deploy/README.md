@@ -12,6 +12,12 @@ other hardware. It provisions a single-node Kubernetes cluster:
 - VictoriaMetrics single node (chart `0.50.0`), which scrapes kubelet and
   cAdvisor metrics for the project Observability tab and keeps 14 days on the
   server's own disk (`/var/lib/victoria-metrics`)
+- VictoriaLogs single node with Vector (chart `victoria-logs-single`
+  `0.13.11`): Vector collects the stdout and stderr of project services for the
+  project Logs tab, and VictoriaLogs keeps 7 days, at most 2 GiB, on the
+  server's own disk (`/var/lib/victoria-logs`). Platform namespaces are not
+  collected. Together they use about 90 MiB of memory at rest and about 110 MiB
+  at 1,000 lines/s (limits 256 MiB and 160 MiB)
 
 and then deploys Acceleratio into the `acceleratio` namespace:
 
@@ -173,6 +179,12 @@ Every variable can be set in the environment or in a file passed to
 | `VICTORIAMETRICS_RELEASE` | `victoria-metrics` | Helm release and Service name |
 | `VICTORIAMETRICS_DATA_DIR` | `/var/lib/victoria-metrics` | hostPath for the metrics database |
 | `VICTORIAMETRICS_RETENTION` | `14d` | how long metrics are kept |
+| `VICTORIALOGS_CHART_VERSION` | `0.13.11` | `victoria-logs-single` chart version (includes Vector) |
+| `VICTORIALOGS_NAMESPACE` | `victoria-logs` | VictoriaLogs and Vector namespace |
+| `VICTORIALOGS_RELEASE` | `victoria-logs` | Helm release and Service name |
+| `VICTORIALOGS_DATA_DIR` | `/var/lib/victoria-logs` | hostPath for the log store |
+| `VICTORIALOGS_RETENTION` | `7d` | how long logs are kept |
+| `VICTORIALOGS_MAX_DISK` | `2GiB` | disk cap; the oldest logs go first beyond it |
 | `ACCELERATIO_NAMESPACE` | `acceleratio` | namespace for PostgreSQL, the API and the console |
 | `ACCELERATIO_VERSION` | `0.1.8` | image tag for the API and the console |
 | `ACCELERATIO_API_IMAGE` | `ghcr.io/acceleratio-cloud/api:<version>` | API image |
@@ -388,7 +400,8 @@ session secret are generated once and reused by later runs. Back up
 
 `update.sh` brings an existing installation to the versions pinned in the
 target `install.sh`: k3s, Helm, Cilium, SeaweedFS, the SeaweedFS CSI driver,
-VictoriaMetrics and Acceleratio (API and console). Pull the new release, then:
+VictoriaMetrics, VictoriaLogs with Vector and Acceleratio (API and console).
+Pull the new release, then:
 
 ```bash
 sudo ./deploy/update.sh --dry-run   # print the plan, change nothing

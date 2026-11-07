@@ -5,7 +5,7 @@ import {
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
-import type { V1Node, V1Pod } from '@kubernetes/client-node';
+import type { V1Node } from '@kubernetes/client-node';
 import type {
   ClusterNode,
   ClusterNodeStatus,
@@ -15,6 +15,7 @@ import type {
 } from '@acceleratio/shared';
 import { KubernetesService } from '@/vendor/kubernetes/kubernetes.service';
 import { getKubernetesStatusCode } from '@/vendor/kubernetes/kubernetes-error';
+import { isActivePod } from '@/vendor/kubernetes/pods';
 import {
   isReservedKey,
   normalizeLabels,
@@ -22,9 +23,6 @@ import {
 } from './node-metadata';
 
 const TAINT_EFFECTS = ['NoSchedule', 'PreferNoSchedule', 'NoExecute'] as const;
-
-const isActivePod = (pod: V1Pod): boolean =>
-  pod.status?.phase !== 'Succeeded' && pod.status?.phase !== 'Failed';
 
 @Injectable()
 export class NodeService {

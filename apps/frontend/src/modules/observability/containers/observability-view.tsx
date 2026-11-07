@@ -44,7 +44,7 @@ export const ObservabilityView = ({ active }: { active: boolean }) => {
   let body;
 
   if (data) {
-    body = <Dashboard metrics={data} />;
+    body = <Dashboard metrics={data} projectId={project.id} />;
   } else if (error?.unavailable) {
     body = <UnavailableState message={error.message} onRetry={refresh} />;
   } else if (error) {
@@ -124,7 +124,13 @@ const saturation = (
   };
 };
 
-const Dashboard = ({ metrics }: { metrics: ProjectMetrics }) => {
+const Dashboard = ({
+  metrics,
+  projectId,
+}: {
+  metrics: ProjectMetrics;
+  projectId: string;
+}) => {
   const { summary, series, cluster, workloads } = metrics;
 
   const tones = useMemo(
@@ -361,6 +367,7 @@ const Dashboard = ({ metrics }: { metrics: ProjectMetrics }) => {
           format={formatBytes}
         />
         <ServicesTable
+          projectId={projectId}
           workloads={workloads}
           tones={tones}
           className="xl:col-span-2"
