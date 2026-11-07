@@ -17,7 +17,8 @@ the keys to a third party.
 
 - **One-command install.** A single script turns a fresh Ubuntu or Debian server
   into a working cloud: single-node k3s with embedded etcd, Cilium networking,
-  SeaweedFS storage, VictoriaMetrics metrics and the Acceleratio control plane.
+  SeaweedFS storage, VictoriaMetrics metrics, VictoriaLogs logs and the
+  Acceleratio control plane.
 - **Projects and services.** Group workloads into projects on a visual canvas and
   run Docker services from any image, with versioned configuration, environment
   variables and secrets.
@@ -26,8 +27,9 @@ the keys to a third party.
   at your server.
 - **Object storage.** S3-compatible buckets backed by SeaweedFS, with access keys
   managed from the console, plus configurable storage classes for volumes.
-- **Observability and access.** Per-project metrics, instance status and a browser
-  terminal into running containers, without leaving the console.
+- **Observability and access.** Per-project metrics, project-wide logs with live
+  tail, search and per-service filters, instance status and a browser terminal
+  into running containers, without leaving the console.
 - **Private networking.** Every service of a project reaches every other one by
   its private name (`postgres.internal`) on any port, so an app talks to its
   database without a public domain. Projects are isolated from each other with
@@ -35,7 +37,7 @@ the keys to a third party.
 - **Operator-first console.** First-run setup creates the initial account;
   servers, storage and system settings are managed from the same web console.
 - **Built on open components.** Kubernetes (k3s), Cilium, SeaweedFS, Traefik,
-  VictoriaMetrics and PostgreSQL. Everything runs on a cluster you control, and
+  VictoriaMetrics, VictoriaLogs, Vector and PostgreSQL. Everything runs on a cluster you control, and
   you can inspect it with the standard Kubernetes tools.
 
 ## Installation
@@ -163,7 +165,7 @@ this order:
 For local development, use the disposable cluster:
 
 ```bash
-make cluster-up     # create k3d + k3s + Cilium + SeaweedFS + VictoriaMetrics; idempotent
+make cluster-up     # create k3d + k3s + Cilium + SeaweedFS + VictoriaMetrics + VictoriaLogs; idempotent
 make dev            # picks up the k3d kubeconfig automatically
 make cluster-status # show nodes, Cilium and SeaweedFS pods, StorageClasses
 make cluster-down   # delete the cluster and its kubeconfig
@@ -187,6 +189,13 @@ days of retention; set `VICTORIAMETRICS=0` to skip it, and the tab then shows
 that the metrics backend is unavailable. The API reaches it through the API
 server's service proxy at `VICTORIAMETRICS_ADDRESS` (default
 `victoria-metrics.victoria-metrics:8428`).
+
+VictoriaLogs (single node) with Vector collects the stdout and stderr of project
+services for the project Logs tab, with the same values as a server (they come
+from `victorialogs_values` in `deploy/install.sh`) and 3 days of retention; set
+`VICTORIALOGS=0` to skip it, and the tab then shows that log storage is
+unavailable. The API reaches it through the API server's service proxy at
+`VICTORIALOGS_ADDRESS` (default `victoria-logs.victoria-logs:9428`).
 
 The SeaweedFS S3 gateway runs with authentication on, as on a server, so S3 bucket
 services can be created locally. A cluster created before S3 was enabled has no

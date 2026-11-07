@@ -2,8 +2,8 @@
 #
 # Acceleratio uninstaller.
 #
-# Removes the Helm releases, Cilium networking, k3s, SeaweedFS and
-# VictoriaMetrics data that
+# Removes the Helm releases, Cilium networking, k3s, SeaweedFS,
+# VictoriaMetrics and VictoriaLogs data that
 # deploy/install.sh created. This is destructive.
 #
 # Usage: sudo ./deploy/uninstall.sh [--dry-run] [--yes]
@@ -17,6 +17,11 @@ SEAWEEDFS_DATA_DIR="${SEAWEEDFS_DATA_DIR:-/var/lib/seaweedfs}"
 VICTORIAMETRICS_NAMESPACE="${VICTORIAMETRICS_NAMESPACE:-victoria-metrics}"
 VICTORIAMETRICS_RELEASE="${VICTORIAMETRICS_RELEASE:-victoria-metrics}"
 VICTORIAMETRICS_DATA_DIR="${VICTORIAMETRICS_DATA_DIR:-/var/lib/victoria-metrics}"
+VICTORIALOGS_NAMESPACE="${VICTORIALOGS_NAMESPACE:-victoria-logs}"
+VICTORIALOGS_RELEASE="${VICTORIALOGS_RELEASE:-victoria-logs}"
+VICTORIALOGS_DATA_DIR="${VICTORIALOGS_DATA_DIR:-/var/lib/victoria-logs}"
+# Vector's file checkpoints (hostPath set by the victoria-logs-single chart).
+VECTOR_DATA_DIR="/var/lib/vector"
 ACCELERATIO_NAMESPACE="${ACCELERATIO_NAMESPACE:-acceleratio}"
 ACCELERATIO_DATA_DIR="${ACCELERATIO_DATA_DIR:-/var/lib/acceleratio}"
 POSTGRES_DATA_DIR="${POSTGRES_DATA_DIR:-${ACCELERATIO_DATA_DIR}/postgres}"
@@ -152,6 +157,7 @@ uninstall_helm_releases() {
     run k3s kubectl delete clusterrolebinding acceleratio-api --ignore-not-found || true
   fi
 
+  run "$helm_cmd" uninstall "$VICTORIALOGS_RELEASE" -n "$VICTORIALOGS_NAMESPACE" --ignore-not-found
   run "$helm_cmd" uninstall "$VICTORIAMETRICS_RELEASE" -n "$VICTORIAMETRICS_NAMESPACE" --ignore-not-found
   run "$helm_cmd" uninstall "$SEAWEEDFS_CSI_RELEASE" -n "$SEAWEEDFS_NAMESPACE" --ignore-not-found
   run "$helm_cmd" uninstall "$SEAWEEDFS_RELEASE" -n "$SEAWEEDFS_NAMESPACE" --ignore-not-found
@@ -160,6 +166,7 @@ uninstall_helm_releases() {
   if [ -f "$K3S_KUBECONFIG" ] && command -v k3s >/dev/null 2>&1; then
     run k3s kubectl delete namespace "$SEAWEEDFS_NAMESPACE" --ignore-not-found --wait=true --timeout=180s || true
     run k3s kubectl delete namespace "$VICTORIAMETRICS_NAMESPACE" --ignore-not-found --wait=true --timeout=180s || true
+    run k3s kubectl delete namespace "$VICTORIALOGS_NAMESPACE" --ignore-not-found --wait=true --timeout=180s || true
   fi
 }
 
@@ -227,7 +234,7 @@ remove_k3s() {
 
 validate_data_dir() {
   local dir
-  for dir in "$SEAWEEDFS_DATA_DIR" "$VICTORIAMETRICS_DATA_DIR" "$POSTGRES_DATA_DIR"; do
+  for dir in "$SEAWEEDFS_DATA_DIR" "$VICTORIAMETRICS_DATA_DIR" "$VICTORIALOGS_DATA_DIR" "$POSTGRES_DATA_DIR"; do
     case "$dir" in
       ""|"/"|"/var"|"/var/lib"|"/etc")
         die "Refusing to remove unsafe data directory: '${dir}'"
@@ -250,6 +257,8 @@ validate_cni_paths() {
 remove_data() {
   run rm -rf "$SEAWEEDFS_DATA_DIR"
   run rm -rf "$VICTORIAMETRICS_DATA_DIR"
+  run rm -rf "$VICTORIALOGS_DATA_DIR"
+  run rm -rf "$VECTOR_DATA_DIR"
   run rm -rf "$POSTGRES_DATA_DIR"
   run rm -rf "$CONFIG_DIR"
   run rm -rf /etc/rancher/k3s
@@ -263,13 +272,13 @@ remove_data() {
 print_summary() {
   if (( DRY_RUN )); then
     printf '\n%s\n' "${C_GREEN}Acceleratio uninstall dry run complete${C_RESET}"
-    printf 'Would remove: k3s, etcd, Cilium, Acceleratio, SeaweedFS, VictoriaMetrics, %s and %s\n' "$SEAWEEDFS_DATA_DIR" "$VICTORIAMETRICS_DATA_DIR"
+    printf 'Would remove: k3s, etcd, Cilium, Acceleratio, SeaweedFS, VictoriaMetrics, VictoriaLogs, %s, %s and %s\n' "$SEAWEEDFS_DATA_DIR" "$VICTORIAMETRICS_DATA_DIR" "$VICTORIALOGS_DATA_DIR"
     printf 'Would keep: /root/.kube/config and user kubeconfigs\n'
     printf 'Dry run complete: no changes were made.\n'
   else
     printf '\n%s\n' "${C_GREEN}Acceleratio uninstall complete${C_RESET}"
     printf 'Kept: /root/.kube/config and user kubeconfigs\n'
-    printf 'Removed: k3s, etcd, Cilium, Acceleratio, SeaweedFS, VictoriaMetrics, %s and %s\n' "$SEAWEEDFS_DATA_DIR" "$VICTORIAMETRICS_DATA_DIR"
+    printf 'Removed: k3s, etcd, Cilium, Acceleratio, SeaweedFS, VictoriaMetrics, VictoriaLogs, %s, %s and %s\n' "$SEAWEEDFS_DATA_DIR" "$VICTORIAMETRICS_DATA_DIR" "$VICTORIALOGS_DATA_DIR"
     printf 'Reinstall: sudo ./deploy/install.sh\n'
   fi
 }

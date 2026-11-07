@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 
 import type { DockerWorkloadConfig, Workload } from '@acceleratio/shared';
+import { ViewLogsLink } from '@/modules/logs/components/view-logs-link';
 import { DockerWorkloadConfiguration } from '@/modules/workloads/components/workload-details/docker-workload-overview';
 import {
   DEFAULT_CPU_MAX,
@@ -111,5 +112,13 @@ export const getDockerDetailView = (
       ),
     },
   ],
-  headerActions: <WorkloadLifecycleActions />,
+  headerActions: (
+    <WorkloadLifecycleActions
+      leading={
+        workload.status === 'draft' ? null : (
+          <ViewLogsLink projectId={workload.project_id} service={workload.id} />
+        )
+      }
+    />
+  ),
 });

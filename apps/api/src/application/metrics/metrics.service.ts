@@ -19,6 +19,7 @@ import { WorkloadService } from '@/application/workload/workload.service';
 import { WORKLOAD_ID_LABEL } from '@/application/workload/docker/docker-workload.manifests';
 import { getKubernetesStatusCode } from '@/vendor/kubernetes/kubernetes-error';
 import { KubernetesService } from '@/vendor/kubernetes/kubernetes.service';
+import { isActivePod, listNamespacePods } from '@/vendor/kubernetes/pods';
 import {
   VictoriaMetricsClient,
   VictoriaMetricsUnavailableError,
@@ -57,9 +58,6 @@ const emptyUsage = (): PodUsage => ({
   cpuLimit: 0,
   memoryLimit: 0,
 });
-
-const isActivePod = (pod: V1Pod): boolean =>
-  pod.status?.phase !== 'Succeeded' && pod.status?.phase !== 'Failed';
 
 const isReadyPod = (pod: V1Pod): boolean =>
   pod.status?.conditions?.some(
@@ -301,11 +299,7 @@ export class MetricsService {
   /** Pods of the namespace; a project that never deployed has none. */
   private async listPods(namespace: string): Promise<V1Pod[]> {
     try {
-      const { items } = await this.kubernetes.coreV1.listNamespacedPod({
-        namespace,
-      });
-
-      return items;
+      return await listNamespacePods(this.kubernetes, namespace);
     } catch (error) {
       return this.emptyWhenMissing(error, 'pods');
     }

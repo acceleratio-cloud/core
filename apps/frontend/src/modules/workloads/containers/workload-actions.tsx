@@ -244,8 +244,11 @@ type LifecycleAction = {
  * the actions the current status allows are shown. The deploy action (Deploy,
  * Apply changes or Redeploy, see `deployAction`) is the one solid button; the rest are outline buttons whose icon color hints at the action.
  * Renders as a fragment so the header can place the buttons and their error.
+ * `leading` goes first in the button row, for links such as "Logs".
  */
-export const WorkloadLifecycleActions = () => {
+export const WorkloadLifecycleActions = ({
+  leading,
+}: { leading?: ReactNode } = {}) => {
   const { workload, pendingAction, lifecycleError, runLifecycle } =
     useWorkloadActions();
   const deploy = deployAction(workload);
@@ -287,7 +290,7 @@ export const WorkloadLifecycleActions = () => {
 
   const visible = actions.filter((action) => action.visible);
 
-  if (visible.length === 0) {
+  if (visible.length === 0 && !leading) {
     return null;
   }
 
@@ -298,6 +301,7 @@ export const WorkloadLifecycleActions = () => {
         aria-label="Service actions"
         className="flex flex-wrap justify-end gap-2"
       >
+        {leading}
         {visible.map(
           ({ key, primary, icon: Icon, iconTone, label, pendingLabel }) => (
             <Button

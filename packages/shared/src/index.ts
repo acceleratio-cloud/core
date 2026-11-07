@@ -5,6 +5,7 @@ export * from './types/workload';
 export * from './types/storage-class';
 export * from './types/system';
 export * from './types/metrics';
+export * from './types/logs';
 export * from './types/terminal';
 export * from './types/network';
 export * from './types/platform-update';

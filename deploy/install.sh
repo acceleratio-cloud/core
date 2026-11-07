@@ -60,6 +60,14 @@ VICTORIAMETRICS_RELEASE="${VICTORIAMETRICS_RELEASE:-victoria-metrics}"
 VICTORIAMETRICS_DATA_DIR="${VICTORIAMETRICS_DATA_DIR:-/var/lib/victoria-metrics}"
 VICTORIAMETRICS_RETENTION="${VICTORIAMETRICS_RETENTION:-14d}"
 
+# scripts/cluster.sh reads this default; keep the KEY="${KEY:-default}" form.
+VICTORIALOGS_CHART_VERSION="${VICTORIALOGS_CHART_VERSION:-0.13.11}"
+VICTORIALOGS_NAMESPACE="${VICTORIALOGS_NAMESPACE:-victoria-logs}"
+VICTORIALOGS_RELEASE="${VICTORIALOGS_RELEASE:-victoria-logs}"
+VICTORIALOGS_DATA_DIR="${VICTORIALOGS_DATA_DIR:-/var/lib/victoria-logs}"
+VICTORIALOGS_RETENTION="${VICTORIALOGS_RETENTION:-7d}"
+VICTORIALOGS_MAX_DISK="${VICTORIALOGS_MAX_DISK:-2GiB}"
+
 ACCELERATIO_NAMESPACE="${ACCELERATIO_NAMESPACE:-acceleratio}"
 ACCELERATIO_VERSION="${ACCELERATIO_VERSION:-0.1.8}"
 ACCELERATIO_API_IMAGE="${ACCELERATIO_API_IMAGE:-ghcr.io/acceleratio-cloud/api:${ACCELERATIO_VERSION}}"
@@ -218,6 +226,8 @@ Installs on any Ubuntu/Debian server (bare metal, private server, any hardware):
     (default seaweedfs-storage)
   - VictoriaMetrics (single node) scraping kubelet and cAdvisor metrics
     for the console's Observability tab
+  - VictoriaLogs (single node) with Vector collecting project container logs
+    for the console's Logs tab
   - Acceleratio in namespace "acceleratio": PostgreSQL, API and console,
     then prints the dashboard URL
 
@@ -229,7 +239,7 @@ Options:
   --config FILE      Load variables from FILE (shell syntax).
   --reset            Remove an existing k3s/SeaweedFS installation first.
                      Destructive: deletes etcd, Cilium networking,
-                     SeaweedFS data and VictoriaMetrics history. Requires --yes when stdin is not a TTY.
+                     SeaweedFS data, VictoriaMetrics and VictoriaLogs history. Requires --yes when stdin is not a TTY.
   --yes, -y          Do not ask for confirmation.
   --help, -h         Show this help.
 
@@ -259,6 +269,12 @@ Common variables (environment or --config):
   VICTORIAMETRICS_RELEASE     default victoria-metrics
   VICTORIAMETRICS_DATA_DIR    default /var/lib/victoria-metrics
   VICTORIAMETRICS_RETENTION   default 14d
+  VICTORIALOGS_CHART_VERSION  default 0.13.11
+  VICTORIALOGS_NAMESPACE      default victoria-logs
+  VICTORIALOGS_RELEASE        default victoria-logs
+  VICTORIALOGS_DATA_DIR       default /var/lib/victoria-logs
+  VICTORIALOGS_RETENTION      default 7d
+  VICTORIALOGS_MAX_DISK       default 2GiB (oldest logs are dropped beyond it)
   ACCELERATIO_NAMESPACE       default acceleratio
   ACCELERATIO_VERSION         default 0.1.8 (image tag for API and console)
   ACCELERATIO_API_IMAGE       default ghcr.io/acceleratio-cloud/api:<version>
@@ -648,12 +664,18 @@ reset_installation() {
       die "Refusing to remove unsafe data directory: '${VICTORIAMETRICS_DATA_DIR}'"
       ;;
   esac
+  case "$VICTORIALOGS_DATA_DIR" in
+    ""|"/"|"/var"|"/var/lib"|"/etc")
+      die "Refusing to remove unsafe data directory: '${VICTORIALOGS_DATA_DIR}'"
+      ;;
+  esac
 
   log_warn "Removing existing installation"
   local helm_cmd=""
   helm_cmd="$(command -v helm 2>/dev/null || true)"
   if [ -n "$helm_cmd" ] && [ -f "$K3S_KUBECONFIG" ]; then
     export KUBECONFIG="$K3S_KUBECONFIG"
+    "$helm_cmd" uninstall "$VICTORIALOGS_RELEASE" -n "$VICTORIALOGS_NAMESPACE" --ignore-not-found >/dev/null 2>&1 || true
     "$helm_cmd" uninstall "$VICTORIAMETRICS_RELEASE" -n "$VICTORIAMETRICS_NAMESPACE" --ignore-not-found >/dev/null 2>&1 || true
     "$helm_cmd" uninstall "$SEAWEEDFS_CSI_RELEASE" -n "$SEAWEEDFS_NAMESPACE" --ignore-not-found >/dev/null 2>&1 || true
     "$helm_cmd" uninstall "$SEAWEEDFS_RELEASE" -n "$SEAWEEDFS_NAMESPACE" --ignore-not-found >/dev/null 2>&1 || true
@@ -696,6 +718,8 @@ reset_installation() {
   done
   rm -rf "$SEAWEEDFS_DATA_DIR"
   rm -rf "$VICTORIAMETRICS_DATA_DIR"
+  rm -rf "$VICTORIALOGS_DATA_DIR"
+  rm -rf /var/lib/vector
   rm -rf "$POSTGRES_DATA_DIR"
   rm -rf "$CONFIG_DIR"
   rm -rf /etc/rancher/k3s
@@ -947,7 +971,7 @@ prepare_helm_environment() {
 
 prepare_helm_repos() {
   if (( DRY_RUN )); then
-    log_info "DRY-RUN: would add SeaweedFS and VictoriaMetrics Helm repositories"
+    log_info "DRY-RUN: would add SeaweedFS and VictoriaMetrics Helm repositories (VictoriaMetrics and VictoriaLogs charts)"
     return 0
   fi
   log_info "Adding Helm repositories"
@@ -1335,6 +1359,188 @@ install_victoriametrics() {
   log_ok "VictoriaMetrics is ready"
 }
 
+# ---------------------------------------------------------------------------
+# VictoriaLogs and Vector.
+# ---------------------------------------------------------------------------
+
+# Prints the values for the victoria-logs-single chart. scripts/cluster.sh
+# extracts this function to install the same configuration locally, so it
+# must only read the VICTORIALOGS_* variables and print to stdout.
+#
+# Vector runs as a DaemonSet and reads container logs only from project
+# namespaces (labelled app.kubernetes.io/managed-by=acceleratio), never from
+# the platform itself. It normalises every line to a few flat fields
+# (namespace, pod, container, workload_id, level, stream) and detects the
+# level once, at ingestion, so the console filters on an indexed field
+# instead of matching text on every query. Resource limits keep both
+# components small enough for a 4 GiB server.
+victorialogs_values() {
+  cat <<EOF
+# ${MANAGED_BY:-Acceleratio} - manual edits will be overwritten.
+# Single-node VictoriaLogs for the project Logs tab, fed by Vector. The API
+# reads it through the API server's service proxy. Data lives on hostPath:
+# it must not sit on the FUSE-backed SeaweedFS StorageClass.
+server:
+  fullnameOverride: "${VICTORIALOGS_RELEASE}"
+  retentionPeriod: "${VICTORIALOGS_RETENTION}"
+  retentionDiskSpaceUsage: "${VICTORIALOGS_MAX_DISK}"
+  persistentVolume:
+    enabled: false
+  podSecurityContext:
+    enabled: false
+  resources:
+    requests:
+      cpu: 25m
+      memory: 48Mi
+    limits:
+      memory: 256Mi
+  extraArgs:
+    storageDataPath: /vl-data
+    search.maxConcurrentRequests: "4"
+  extraVolumes:
+    - name: data
+      hostPath:
+        path: "${VICTORIALOGS_DATA_DIR}"
+        type: DirectoryOrCreate
+  extraVolumeMounts:
+    - name: data
+      mountPath: /vl-data
+vector:
+  enabled: true
+  resources:
+    requests:
+      cpu: 20m
+      memory: 32Mi
+    limits:
+      cpu: 500m
+      memory: 160Mi
+  customConfig:
+    sources:
+      k8s:
+        type: kubernetes_logs
+        extra_namespace_label_selector: app.kubernetes.io/managed-by=acceleratio
+        glob_minimum_cooldown_ms: 5000
+        max_line_bytes: 65536
+    transforms:
+      parser:
+        type: remap
+        inputs: [k8s]
+        drop_on_abort: true
+        source: |
+          k = object(.kubernetes) ?? {}
+          # Second guard behind the namespace label selector: platform logs
+          # never reach the store.
+          if !starts_with(to_string(k.pod_namespace) ?? "", "project-") {
+            abort
+          }
+          labels = object(k.pod_labels) ?? {}
+          raw = to_string(.message) ?? ""
+          head = truncate(raw, 512)
+
+          level = null
+          if starts_with(strip_whitespace(head), "{") {
+            parsed = object(parse_json(raw) ?? null) ?? {}
+            candidate = parsed.level || parsed.severity || parsed.lvl || parsed.levelname || parsed.log_level || parsed.loglevel
+            if is_integer(candidate) {
+              n = int!(candidate)
+              level = if n >= 50 { "error" } else if n >= 40 { "warn" } else if n >= 30 { "info" } else { "debug" }
+            } else if is_string(candidate) {
+              level = string!(candidate)
+            }
+          }
+          if level == null {
+            kv = parse_regex(head, r'(?i)\b(?:level|lvl|severity)\s*[=:]\s*"?(?P<value>[a-z]+)') ?? {}
+            level = kv.value
+          }
+          if level == null {
+            glog = parse_regex(head, r'^(?P<value>[IWEF])\d{4} \d{2}:\d{2}:\d{2}') ?? {}
+            level = glog.value
+          }
+          if level == null {
+            level = if match(head, r'\b(FATAL|PANIC|CRITICAL|CRIT|EMERG|ALERT|ERROR|ERR)\b') || match(head, r'(?i)^\s*(error|fatal|panic)\b') || starts_with(head, "Traceback ") {
+              "error"
+            } else if match(head, r'\b(WARN|WARNING)\b') || match(head, r'(?i)^\s*warn(ing)?\b') {
+              "warn"
+            } else if match(head, r'\b(INFO|NOTICE)\b') {
+              "info"
+            } else if match(head, r'\b(DEBUG|TRACE)\b') {
+              "debug"
+            } else {
+              null
+            }
+          }
+          if level != null {
+            l = downcase(to_string(level))
+            level = if includes(["fatal", "panic", "critical", "crit", "emerg", "emergency", "alert", "error", "err", "severe", "e", "f"], l) {
+              "error"
+            } else if includes(["warn", "warning", "w"], l) {
+              "warn"
+            } else if includes(["info", "information", "informational", "notice", "i"], l) {
+              "info"
+            } else if includes(["debug", "trace", "verbose", "fine", "d", "t"], l) {
+              "debug"
+            } else {
+              null
+            }
+          }
+
+          . = {
+            "timestamp": .timestamp,
+            "message": raw,
+            "stream": .stream,
+            "namespace": k.pod_namespace,
+            "pod": k.pod_name,
+            "container": k.container_name,
+            "workload_id": get(labels, ["acceleratio.io/workload-id"]) ?? null,
+            "level": level
+          }
+          . = compact(.)
+      throttle:
+        type: throttle
+        inputs: [parser]
+        threshold: 2000
+        window_secs: 1
+        key_field: '{{ "{{ pod }}" }}'
+    sinks:
+      vlogs:
+        inputs: [throttle]
+        request:
+          headers:
+            VL-Time-Field: timestamp
+            VL-Stream-Fields: namespace,pod,container
+            VL-Msg-Field: message
+EOF
+}
+
+write_victorialogs_values() {
+  victorialogs_values | write_file "${CONFIG_DIR}/victorialogs-values.yaml" 0644
+}
+
+install_victorialogs() {
+  write_victorialogs_values
+
+  if (( DRY_RUN )); then
+    log_info "DRY-RUN: would install VictoriaLogs ${VICTORIALOGS_CHART_VERSION} and Vector in namespace ${VICTORIALOGS_NAMESPACE}"
+    return 0
+  fi
+
+  log_info "Installing VictoriaLogs ${VICTORIALOGS_CHART_VERSION} with Vector"
+  install -d -m 0755 "$VICTORIALOGS_DATA_DIR"
+  ensure_namespace "$VICTORIALOGS_NAMESPACE"
+
+  "$HELM_BIN" upgrade --install "$VICTORIALOGS_RELEASE" victoria-metrics/victoria-logs-single \
+    --version "$VICTORIALOGS_CHART_VERSION" \
+    --namespace "$VICTORIALOGS_NAMESPACE" \
+    --values "${CONFIG_DIR}/victorialogs-values.yaml" \
+    --wait --timeout 10m
+
+  k3s kubectl -n "$VICTORIALOGS_NAMESPACE" rollout status \
+    "statefulset/${VICTORIALOGS_RELEASE}" --timeout=5m
+  k3s kubectl -n "$VICTORIALOGS_NAMESPACE" rollout status \
+    "daemonset/${VICTORIALOGS_RELEASE}-vector" --timeout=5m
+  log_ok "VictoriaLogs is ready"
+}
+
 verify_installation() {
   if (( DRY_RUN )); then
     log_info "DRY-RUN: would verify the cluster and run a PVC smoke test"
@@ -1349,6 +1555,8 @@ verify_installation() {
   k3s kubectl -n "$SEAWEEDFS_NAMESPACE" get pods -o wide
   log_info "VictoriaMetrics pods:"
   k3s kubectl -n "$VICTORIAMETRICS_NAMESPACE" get pods -o wide
+  log_info "VictoriaLogs pods:"
+  k3s kubectl -n "$VICTORIALOGS_NAMESPACE" get pods -o wide
   log_info "Cilium status:"
   k3s kubectl -n kube-system get daemonset/cilium deployment/cilium-operator
 
@@ -1691,6 +1899,8 @@ spec:
               value: "${SEAWEEDFS_NAMESPACE}"
             - name: VICTORIAMETRICS_ADDRESS
               value: "${VICTORIAMETRICS_RELEASE}.${VICTORIAMETRICS_NAMESPACE}:8428"
+            - name: VICTORIALOGS_ADDRESS
+              value: "${VICTORIALOGS_RELEASE}.${VICTORIALOGS_NAMESPACE}:9428"
             - name: PLATFORM_STORAGE_CLASS_NAME
               value: "${STORAGE_CLASS_NAME}"
             # Shown in the DNS instructions when an admin sets a custom domain.
@@ -2022,6 +2232,7 @@ print_summary() {
   printf '    Cilium        %s (CNI, kube-proxy replacement)\n' "$CILIUM_VERSION"
   printf '    SeaweedFS     %s (namespace %s)\n' "$SEAWEEDFS_CHART_VERSION" "$SEAWEEDFS_NAMESPACE"
   printf '    VictoriaMetrics %s (namespace %s)\n' "$VICTORIAMETRICS_CHART_VERSION" "$VICTORIAMETRICS_NAMESPACE"
+  printf '    VictoriaLogs  %s with Vector (namespace %s)\n' "$VICTORIALOGS_CHART_VERSION" "$VICTORIALOGS_NAMESPACE"
   printf '    Storage       %s (default StorageClass)\n' "${default_sc:-$STORAGE_CLASS_NAME}"
   printf '\n'
 
@@ -2073,6 +2284,7 @@ main() {
   install_seaweedfs
   install_csi
   install_victoriametrics
+  install_victorialogs
   verify_installation
   resolve_acceleratio_urls
   configure_traefik
