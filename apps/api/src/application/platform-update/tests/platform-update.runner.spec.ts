@@ -64,7 +64,10 @@ for stage in $FAKE_STAGES; do
   echo "stage $stage"
 done
 if [ "\${FAKE_RC:-0}" != 0 ]; then
-  echo "[10:00:00] ERROR: \${FAKE_ERROR:-boom}" >&2
+  # One ERROR line per line of FAKE_ERROR, like the real scripts' trailers.
+  printf '%s\n' "\${FAKE_ERROR:-boom}" | while IFS= read -r line; do
+    echo "[10:00:00] ERROR: $line" >&2
+  done
 fi
 exit "\${FAKE_RC:-0}"
 `;
@@ -214,6 +217,42 @@ describe('platform update runner', () => {
     expect(result.status).toMatchObject({ phase: 'failed', stage: 'prepare' });
     expect(result.status.message).toBe(
       'The update stopped before changing anything. Configuration differs from the running installation: API node port',
+    );
+  });
+
+  it('gives the real cause, not the lines that only point at the log', () => {
+    const result = run({
+      stages: 'prepare backup install rollback rolled_back',
+      rc: 1,
+      error: [
+        'Cilium did not become ready on every node within 10 minutes. Node(s) not ready: worker-2.',
+        'Log: /var/log/acceleratio/install-20261107-123414.log',
+        'Installation failed at line 1002 (exit code 1).',
+        'Diagnostics:',
+        'Update failed at line 1033 (exit code 1).',
+        'Log: /var/log/acceleratio/update-20261107-123409.log',
+      ].join('\n'),
+    });
+
+    expect(result.status.message).toContain(
+      'Cause: Cilium did not become ready on every node within 10 minutes. Node(s) not ready: worker-2.',
+    );
+    expect(result.status.message).not.toContain('Log: ');
+  });
+
+  it('reports a node that is down before anything changes', () => {
+    const result = run({
+      stages: 'prepare',
+      rc: 1,
+      error: [
+        'Node(s) not ready: worker-2. Bring the node back, or remove it, then run the update again. Nothing was changed.',
+        'Log: /var/log/acceleratio/update-20261107-123409.log',
+      ].join('\n'),
+    });
+
+    expect(result.status).toMatchObject({ phase: 'failed', stage: 'prepare' });
+    expect(result.status.message).toBe(
+      'The update stopped before changing anything. Node(s) not ready: worker-2. Bring the node back, or remove it, then run the update again. Nothing was changed.',
     );
   });
 

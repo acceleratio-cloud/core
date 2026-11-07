@@ -985,12 +985,35 @@ operator:
 EOF
 }
 
+# not_ready_nodes [EXCEPT]: names of the nodes whose Ready condition is not
+# True, one per line, leaving out EXCEPT. A node with no Ready condition at
+# all counts as not ready.
+not_ready_nodes() {
+  k3s kubectl --request-timeout=15s get nodes -o jsonpath='{range .items[*]}{.metadata.name}{" "}{range .status.conditions[?(@.type=="Ready")]}{.status}{end}{"\n"}{end}' 2>/dev/null |
+    awk -v skip="${1:-}" '$1 != skip && $2 != "True" { print $1 }'
+}
+
+# check_other_nodes_ready: Cilium and the SeaweedFS CSI driver are DaemonSets,
+# and the installer waits until every node runs them. Another node that is
+# down would only surface as a rollout timeout many minutes later, so stop
+# before touching anything. This node is left out: on a fresh install it
+# stays NotReady until Cilium is installed.
+check_other_nodes_ready() {
+  local nodes
+  nodes="$(not_ready_nodes "$K3S_NODE_NAME" | paste -sd ',' - | sed 's/,/, /g')" || true
+  [ -z "$nodes" ] && return 0
+
+  die "Node(s) not ready: ${nodes}. Cilium and the storage driver must run on every node, so the install cannot finish while one is down. Bring the node back, or remove it (Servers in the console, or: k3s kubectl delete node NAME), then run the installer again."
+}
+
 install_cilium() {
   write_cilium_values
   if (( DRY_RUN )); then
     log_info "DRY-RUN: would install Cilium ${CILIUM_VERSION} with kube-proxy replacement"
     return 0
   fi
+
+  check_other_nodes_ready
 
   log_info "Installing Cilium ${CILIUM_VERSION} (kube-proxy replacement)"
   "$HELM_BIN" upgrade --install cilium oci://quay.io/cilium/charts/cilium \
@@ -999,7 +1022,11 @@ install_cilium() {
     --values "${CONFIG_DIR}/cilium-values.yaml" \
     --wait --timeout 15m
 
-  k3s kubectl -n kube-system rollout status daemonset/cilium --timeout=10m
+  if ! k3s kubectl -n kube-system rollout status daemonset/cilium --timeout=10m; then
+    local stuck
+    stuck="$(not_ready_nodes | paste -sd ',' - | sed 's/,/, /g')" || true
+    die "Cilium did not become ready on every node within 10 minutes.${stuck:+ Node(s) not ready: ${stuck}.} Check: k3s kubectl -n kube-system get pods -l k8s-app=cilium -o wide"
+  fi
   k3s kubectl -n kube-system rollout status deployment/cilium-operator --timeout=10m
 
   # Remove CNI files written by older versions of this installer. k3s 1.36

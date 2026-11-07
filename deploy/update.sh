@@ -732,6 +732,26 @@ preflight() {
     || die "Namespace ${NAMESPACE} not found. Is Acceleratio installed? Pass the same CONFIG as at install time."
 }
 
+# not_ready_nodes: names of the nodes whose Ready condition is not True, one
+# per line. A node with no Ready condition at all counts as not ready.
+not_ready_nodes() {
+  kubectl --request-timeout=15s get nodes -o jsonpath='{range .items[*]}{.metadata.name}{" "}{range .status.conditions[?(@.type=="Ready")]}{.status}{end}{"\n"}{end}' |
+    awk '$2 != "True" { print $1 }'
+}
+
+# check_nodes_ready: the install rolls DaemonSets (Cilium, the SeaweedFS CSI
+# driver) out to every node and waits for each one. A node that is down never
+# reports its pod, so the wait times out after many minutes and the update
+# rolls back. Stop here instead, before the backup, and say which node it is.
+check_nodes_ready() {
+  local nodes
+  nodes="$(not_ready_nodes)" || die "Could not list the cluster nodes. Check: systemctl status k3s"
+  [ -z "$nodes" ] && return 0
+
+  nodes="$(printf '%s' "$nodes" | paste -sd ',' - | sed 's/,/, /g')"
+  die "Node(s) not ready: ${nodes}. The update rolls Cilium and the storage driver out to every node and cannot finish while one is down. Bring the node back, or remove it (Servers in the console, or: k3s kubectl delete node NAME), then run the update again. Nothing was changed."
+}
+
 # ---------------------------------------------------------------------------
 # Backup and rollback state.
 # ---------------------------------------------------------------------------
@@ -1005,6 +1025,7 @@ main() {
   fetch_target_install
   NAMESPACE="$(target_of ACCELERATIO_NAMESPACE)"
   preflight
+  check_nodes_ready
   collect_plan
   print_plan
 

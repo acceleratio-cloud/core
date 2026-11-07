@@ -128,8 +128,15 @@ read_stage() {
   esac
 }
 
+# last_error: the last ERROR line of the log that says what went wrong. The
+# scripts end every failure with bookkeeping lines (where it failed, where the
+# log is, the diagnostics header); those say nothing to the person reading
+# the console, so they are skipped.
 last_error() {
-  grep -E 'ERROR:' "$LOG" 2>/dev/null | tail -n 1 | sed -E 's/^.*ERROR:[[:space:]]*//' || true
+  grep -E 'ERROR:' "$LOG" 2>/dev/null |
+    sed -E 's/^.*ERROR:[[:space:]]*//' |
+    grep -vE '^(Log: |Diagnostics:$|(Update|Installation) failed at line )' |
+    tail -n 1 || true
 }
 
 : >"$LOG"

@@ -593,6 +593,20 @@ will look for the defaults.
 
 ## Troubleshooting
 
+**Update or re-install stops with "Node(s) not ready".** Cilium and the
+SeaweedFS CSI driver are DaemonSets, and both scripts wait until every node runs
+them. A server that is down (`NotReady`, often also `SchedulingDisabled` after an
+unfinished removal) would make that wait time out after ten minutes and the
+update roll back, so `update.sh` checks every node before the backup and
+`install.sh` checks the other nodes before Cilium, and stops with the node's
+name. Nothing has changed at that point. Bring the server back, or remove it
+(Servers in the console, or `sudo k3s kubectl delete node <name>`), then run the
+update again:
+
+```bash
+sudo k3s kubectl get nodes
+```
+
 **Node stays `NotReady` after Cilium.** k3s 1.36 reads the standard CNI paths,
 so Cilium must write its config to `/etc/cni/net.d` and its plugin to
 `/opt/cni/bin`:
