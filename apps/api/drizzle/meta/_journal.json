@@ -141,6 +141,13 @@
       "when": 1794035738918,
       "tag": "0019_workload_internal_hostname",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1794072807573,
+      "tag": "0020_workload_version_author",
+      "breakpoints": true
     }
   ]
 }

@@ -10,9 +10,12 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
   Sse,
 } from '@nestjs/common';
 import type { MessageEvent } from '@nestjs/common';
+import { Session } from '@thallesp/nestjs-better-auth';
+import type { UserSession } from '@thallesp/nestjs-better-auth';
 import type {
   AddWorkloadDomainPayload,
   CreateWorkloadPayload,
@@ -27,12 +30,25 @@ import type {
   WorkloadEnv,
   WorkloadInstancesSnapshot,
   WorkloadVersion,
+  WorkloadVersionDiff,
+  WorkloadVersionDiffQuery,
 } from '@acceleratio/shared';
 import type { Observable } from 'rxjs';
 import { DockerWorkloadNetworkService } from './docker/docker-workload-network.service';
 import { WorkloadInstancesService } from './instances/workload-instances.service';
 import { WorkloadEventsService } from './observer/workload-events.service';
 import { WorkloadService } from './workload.service';
+import type { VersionAuthorInput } from './workload-version.service';
+
+/** The signed-in user, recorded as the author of the version they apply. */
+const authorOf = (session: UserSession | null): VersionAuthorInput | null =>
+  session
+    ? {
+        id: session.user.id,
+        name: session.user.name,
+        email: session.user.email,
+      }
+    : null;
 
 @Controller('projects/:projectId/workloads')
 export class WorkloadController {
@@ -207,8 +223,9 @@ export class WorkloadController {
   deploy(
     @Param('projectId', ParseUUIDPipe) projectId: string,
     @Param('id', ParseUUIDPipe) id: string,
+    @Session() session: UserSession | null,
   ): Promise<Workload> {
-    return this.workloadService.deploy(projectId, id);
+    return this.workloadService.deploy(projectId, id, authorOf(session));
   }
 
   @Post(':id/start')
@@ -246,6 +263,25 @@ export class WorkloadController {
     return this.workloadService.listVersions(projectId, id);
   }
 
+  /**
+   * What differs between two sides: `active`, `draft` or a version id.
+   * Registered before `:versionId`, whose path would otherwise match.
+   */
+  @Get(':id/versions/diff')
+  @Header('Cache-Control', 'no-store')
+  diffVersions(
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: WorkloadVersionDiffQuery,
+  ): Promise<WorkloadVersionDiff> {
+    return this.workloadService.diffVersions(
+      projectId,
+      id,
+      typeof query.base === 'string' && query.base ? query.base : 'active',
+      typeof query.target === 'string' && query.target ? query.target : 'draft',
+    );
+  }
+
   @Get(':id/versions/:versionId')
   getVersion(
     @Param('projectId', ParseUUIDPipe) projectId: string,
@@ -255,14 +291,31 @@ export class WorkloadController {
     return this.workloadService.getVersion(projectId, id, versionId);
   }
 
+  /** What a rollback to the version would change, before it runs. */
+  @Get(':id/versions/:versionId/rollback/preview')
+  @Header('Cache-Control', 'no-store')
+  previewRollback(
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('versionId', ParseUUIDPipe) versionId: string,
+  ): Promise<WorkloadVersionDiff> {
+    return this.workloadService.previewRollback(projectId, id, versionId);
+  }
+
   @Post(':id/versions/:versionId/rollback')
   @HttpCode(HttpStatus.OK)
   rollback(
     @Param('projectId', ParseUUIDPipe) projectId: string,
     @Param('id', ParseUUIDPipe) id: string,
     @Param('versionId', ParseUUIDPipe) versionId: string,
+    @Session() session: UserSession | null,
   ): Promise<Workload> {
-    return this.workloadService.rollback(projectId, id, versionId);
+    return this.workloadService.rollback(
+      projectId,
+      id,
+      versionId,
+      authorOf(session),
+    );
   }
 
   @Delete(':id/draft')

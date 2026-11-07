@@ -33,6 +33,8 @@ jest.mock('@/application/project/project.service', () => ({
 
 const projectId = '2f1c9a3e-8b7d-4e6f-9a0b-1c2d3e4f5a6b';
 const workloadId = '3f9a1b2c-4d5e-6f70-8192-a3b4c5d6e7f8';
+const versionId = '5a6b7c8d-9e0f-4a1b-8c2d-3e4f5a6b7c8d';
+const author = { id: 'user-1', name: 'Ada', email: 'ada@example.com' };
 // Stand-in for a type added after this refactor; the facade must not care.
 const futureType = 'future' as WorkloadType;
 
@@ -69,6 +71,8 @@ const createTypeService = (type: WorkloadType) => ({
   rollback: jest.fn(),
   listVersions: jest.fn(),
   getVersion: jest.fn(),
+  diffVersions: jest.fn(),
+  previewRollback: jest.fn(),
   discardDraft: jest.fn(),
 });
 
@@ -271,7 +275,16 @@ describe('WorkloadService row operations', () => {
 
   const operations: Array<{
     method:
-      'get' | 'update' | 'deploy' | 'start' | 'stop' | 'restart' | 'remove';
+      | 'get'
+      | 'update'
+      | 'deploy'
+      | 'start'
+      | 'stop'
+      | 'restart'
+      | 'remove'
+      | 'rollback'
+      | 'diffVersions'
+      | 'previewRollback';
     args: unknown[];
     call: (service: WorkloadService) => Promise<unknown>;
   }> = [
@@ -287,8 +300,26 @@ describe('WorkloadService row operations', () => {
     },
     {
       method: 'deploy',
-      args: [projectId, workloadId],
-      call: (service) => service.deploy(projectId, workloadId),
+      args: [projectId, workloadId, author],
+      call: (service) => service.deploy(projectId, workloadId, author),
+    },
+    {
+      method: 'rollback',
+      args: [projectId, workloadId, versionId, author],
+      call: (service) =>
+        service.rollback(projectId, workloadId, versionId, author),
+    },
+    {
+      method: 'diffVersions',
+      args: [projectId, workloadId, 'active', versionId],
+      call: (service) =>
+        service.diffVersions(projectId, workloadId, 'active', versionId),
+    },
+    {
+      method: 'previewRollback',
+      args: [projectId, workloadId, versionId],
+      call: (service) =>
+        service.previewRollback(projectId, workloadId, versionId),
     },
     {
       method: 'start',

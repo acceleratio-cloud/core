@@ -1,9 +1,19 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
-import type { WorkloadConfig, WorkloadVersion } from '@acceleratio/shared';
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import type {
+  WorkloadConfig,
+  WorkloadDiffSide,
+  WorkloadVersion,
+  WorkloadVersionAuthor,
+} from '@acceleratio/shared';
 import { and, desc, eq, inArray, max } from 'drizzle-orm';
 import { DATABASE } from '@/vendor/db/database.constants';
 import type { Database } from '@/vendor/db/database.constants';
-import { workload } from './schemas/workload.schema';
+import { workload, type WorkloadRow } from './schemas/workload.schema';
 import {
   workloadVersion,
   type WorkloadVersionRow,
@@ -15,12 +25,30 @@ export interface RecordVersionInput {
   workloadId: string;
   config: WorkloadConfig;
   sourceVersionId?: string | null;
+  /** The signed-in user who asked for it; absent for platform writes. */
+  author?: VersionAuthorInput | null;
   /**
    * The draft this deploy applied. The stored draft is cleared only when it
    * still equals this snapshot, so an edit made during the rollout survives.
    */
   appliedDraft?: WorkloadConfig;
 }
+
+/** The signed-in user behind a deploy or rollback. */
+export interface VersionAuthorInput {
+  id: string;
+  name: string;
+  email: string;
+}
+
+/** A side of a comparison with the config it stands for. */
+export interface ResolvedDiffSide {
+  side: WorkloadDiffSide;
+  /** Null for `none`: a service that was never deployed. */
+  config: WorkloadConfig | null;
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * Key-order independent comparison. JSONB does not keep key order, so two
@@ -60,8 +88,18 @@ export const toWorkloadVersion = (
   number: row.number,
   config: row.config,
   source_version_id: row.source_version_id,
+  created_by: authorOf(row),
   created_at: row.created_at.toISOString(),
 });
+
+const authorOf = (row: WorkloadVersionRow): WorkloadVersionAuthor | null =>
+  row.created_by_email === null
+    ? null
+    : {
+        id: row.created_by_id,
+        name: row.created_by_name ?? row.created_by_email,
+        email: row.created_by_email,
+      };
 
 /**
  * Version history of workloads, independent of the workload type. Rows are
@@ -117,6 +155,48 @@ export class WorkloadVersionService {
   }
 
   /**
+   * Resolves one side of a comparison for the workload row: `active` (the
+   * applied version, or `none` before the first deploy), `draft` (the pending
+   * changes, or the active version when there are none) or a version id of
+   * this workload.
+   */
+  async resolveSide(
+    row: Pick<WorkloadRow, 'id' | 'active_version_id' | 'draft_config'>,
+    ref: string,
+  ): Promise<ResolvedDiffSide> {
+    if (ref === 'draft' && row.draft_config !== null) {
+      return { side: { kind: 'draft' }, config: row.draft_config };
+    }
+
+    if (ref === 'active' || ref === 'draft') {
+      if (row.active_version_id === null) {
+        return { side: { kind: 'none' }, config: null };
+      }
+
+      return this.sideOf(await this.get(row.id, row.active_version_id));
+    }
+
+    if (!UUID.test(ref)) {
+      throw new BadRequestException(
+        'A version must be "active", "draft" or a version id',
+      );
+    }
+
+    return this.sideOf(await this.get(row.id, ref));
+  }
+
+  private sideOf(version: WorkloadVersionRow): ResolvedDiffSide {
+    return {
+      side: {
+        kind: 'version',
+        version_id: version.id,
+        number: version.number,
+      },
+      config: version.config,
+    };
+  }
+
+  /**
    * Stores an applied config as the next version and makes it active. The
    * workload row is locked so concurrent deploys get distinct numbers.
    */
@@ -144,6 +224,9 @@ export class WorkloadVersionService {
           number: (latest ?? 0) + 1,
           config: input.config,
           source_version_id: input.sourceVersionId ?? null,
+          created_by_id: input.author?.id ?? null,
+          created_by_name: input.author?.name ?? null,
+          created_by_email: input.author?.email ?? null,
         })
         .returning();
       const clearDraft =

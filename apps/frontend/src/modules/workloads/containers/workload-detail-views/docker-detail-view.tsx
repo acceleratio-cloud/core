@@ -21,6 +21,7 @@ import {
   WorkloadDeleteSection,
   WorkloadLifecycleActions,
 } from '../workload-actions';
+import { DockerVersionDetails } from '../docker-version-details';
 import { DockerWorkloadInstances } from '../docker-workload-instances';
 import { EditDockerWorkloadConfig } from '../edit-docker-workload-config';
 import { EditDockerWorkloadEnv } from '../edit-docker-workload-env';
@@ -91,7 +92,8 @@ export const getDockerDetailView = (
       icon: History,
       content: (
         <WorkloadVersions
-          description="Roll back restores the image, command, resources and environment. Volumes and their data stay as they are."
+          description="Open a version to see its full configuration and compare it. Roll back restores the image, command, resources and environment; volumes and their data stay as they are."
+          renderDetails={(config) => <DockerVersionDetails config={config} />}
           renderConfig={(versionConfig) => {
             // Versions of a Docker service hold Docker configs.
             const config = versionConfig as DockerWorkloadConfig;

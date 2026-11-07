@@ -43,6 +43,9 @@ const activeVersion: WorkloadVersionRow = {
   number: 2,
   config: { docker_image: 'nginx:1.25' },
   source_version_id: null,
+  created_by_id: null,
+  created_by_name: null,
+  created_by_email: null,
   created_at: new Date('2026-11-01T10:00:00.000Z'),
 };
 
@@ -52,6 +55,9 @@ const olderVersion: WorkloadVersionRow = {
   number: 1,
   config: { docker_image: 'nginx:1.24' },
   source_version_id: null,
+  created_by_id: null,
+  created_by_name: null,
+  created_by_email: null,
   created_at: new Date('2026-11-01T09:10:00.000Z'),
 };
 
@@ -206,6 +212,7 @@ const createService = () => {
     get: jest.fn(),
     record: jest.fn(),
     clearAppliedDraft: jest.fn(),
+    resolveSide: jest.fn(),
   };
   const network = {
     removeAll: jest.fn(),
@@ -2144,5 +2151,140 @@ describe('DockerWorkloadService volume sweep', () => {
 
     expect(select).not.toHaveBeenCalled();
     expect(coreV1.deleteNamespacedPersistentVolumeClaim).not.toHaveBeenCalled();
+  });
+});
+
+describe('DockerWorkloadService version comparison', () => {
+  const volume = {
+    id: '7c8d9e0f-1a2b-4c3d-8e4f-5a6b7c8d9e0f',
+    mount_path: '/data',
+    size_gb: 10,
+    storage_class_id: null,
+  };
+  const author = { id: 'user-1', name: 'Ada', email: 'ada@example.com' };
+
+  it('compares the resolved sides and keeps variable values on the server', async () => {
+    const { service, limit, versions } = createService();
+    const withDraft: WorkloadRow = {
+      ...baseRow,
+      draft_config: {
+        docker_image: 'nginx:1.26',
+        env: [{ key: 'TOKEN', value: 'new-token-value' }],
+      },
+    };
+
+    limit.mockResolvedValue([withDraft]);
+    versions.resolveSide.mockImplementation((_row, ref: string) =>
+      Promise.resolve(
+        ref === 'draft'
+          ? { side: { kind: 'draft' }, config: withDraft.draft_config }
+          : {
+              side: {
+                kind: 'version',
+                version_id: activeVersionId,
+                number: 2,
+              },
+              config: {
+                docker_image: 'nginx:1.25',
+                env: [{ key: 'TOKEN', value: 'old-token-value' }],
+              },
+            },
+      ),
+    );
+
+    const diff = await service.diffVersions(
+      projectId,
+      workloadId,
+      'active',
+      'draft',
+    );
+
+    expect(versions.resolveSide).toHaveBeenCalledWith(withDraft, 'active');
+    expect(versions.resolveSide).toHaveBeenCalledWith(withDraft, 'draft');
+    expect(diff).toMatchObject({
+      workload_id: workloadId,
+      type: 'docker',
+      base: { kind: 'version', number: 2 },
+      target: { kind: 'draft' },
+      identical: false,
+      restarts: true,
+    });
+    expect(diff.sections.map((section) => section.key)).toEqual([
+      'image',
+      'environment',
+    ]);
+    expect(JSON.stringify(diff)).not.toContain('token-value');
+  });
+
+  it('previews a rollback with the volumes the service has now', async () => {
+    const { service, limit, versions } = createService();
+    const active: WorkloadVersionRow = {
+      ...activeVersion,
+      config: { docker_image: 'nginx:1.25', volumes: [volume] },
+    };
+
+    limit.mockResolvedValue([baseRow]);
+    versions.get.mockResolvedValue(olderVersion);
+    versions.findByIds.mockResolvedValue(new Map([[active.id, active]]));
+
+    const diff = await service.previewRollback(
+      projectId,
+      workloadId,
+      olderVersionId,
+    );
+
+    expect(diff.base).toEqual({
+      kind: 'version',
+      version_id: activeVersionId,
+      number: 2,
+    });
+    expect(diff.target).toEqual({
+      kind: 'version',
+      version_id: olderVersionId,
+      number: 1,
+    });
+    // v1 had no volumes, but the rollback keeps /data: no data loss.
+    expect(diff.sections.map((section) => section.key)).toEqual(['image']);
+    expect(diff.data_loss).toBe(false);
+    expect(diff.notes).toEqual([
+      'v1 had different volumes. A rollback keeps the volumes the service has now and their data.',
+    ]);
+  });
+
+  it('refuses to preview a rollback to the active version', async () => {
+    const { service, limit, versions } = createService();
+
+    limit.mockResolvedValue([baseRow]);
+    versions.get.mockResolvedValue(activeVersion);
+
+    await expect(
+      service.previewRollback(projectId, workloadId, activeVersionId),
+    ).rejects.toThrow('Version is already active');
+  });
+
+  it('records the author of a deploy and of a rollback', async () => {
+    const { service, limit, returning, appsV1, versions } = createService();
+
+    limit.mockResolvedValue([
+      { ...baseRow, draft_config: { docker_image: 'nginx:1.26' } },
+    ]);
+    appsV1.readNamespacedDeployment.mockResolvedValue(undefined);
+    appsV1.createNamespacedDeployment.mockResolvedValue({});
+    returning.mockResolvedValue([{ ...baseRow, status: 'deploying' }]);
+
+    await service.deploy(projectId, workloadId, author);
+
+    expect(firstArgument(versions.record)).toMatchObject({ author });
+
+    versions.record.mockClear();
+    limit.mockResolvedValue([baseRow]);
+    versions.get.mockResolvedValue(olderVersion);
+
+    await service.rollback(projectId, workloadId, olderVersionId, author);
+
+    expect(firstArgument(versions.record)).toMatchObject({
+      author,
+      sourceVersionId: olderVersionId,
+    });
   });
 });

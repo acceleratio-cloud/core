@@ -1,7 +1,9 @@
 import type { WorkloadConfig } from '@acceleratio/shared';
 import type { Database } from '@/vendor/db/database.constants';
+import type { WorkloadVersionRow } from '../schemas/workload-version.schema';
 import {
   sameConfig,
+  toWorkloadVersion,
   WorkloadVersionService,
 } from '../workload-version.service';
 
@@ -84,6 +86,9 @@ describe('WorkloadVersionService.record', () => {
       number: 3,
       config: applied,
       source_version_id: null,
+      created_by_id: null,
+      created_by_name: null,
+      created_by_email: null,
     });
     expect(version.number).toBe(3);
     expect(set).toHaveBeenCalledWith({
@@ -147,5 +152,136 @@ describe('WorkloadVersionService.record', () => {
       }),
     );
     expect(set).toHaveBeenCalledWith({ active_version_id: versionId });
+  });
+});
+
+describe('WorkloadVersionService authors', () => {
+  it('records who applied the version', async () => {
+    const { db, insertValues } = createDatabase({ draft: null, latest: 0 });
+
+    await new WorkloadVersionService(db).record({
+      id: versionId,
+      workloadId,
+      config: { docker_image: 'nginx' },
+      author: { id: 'user-1', name: 'Ada', email: 'ada@example.com' },
+    });
+
+    expect(insertValues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        created_by_id: 'user-1',
+        created_by_name: 'Ada',
+        created_by_email: 'ada@example.com',
+      }),
+    );
+  });
+
+  const row: WorkloadVersionRow = {
+    id: versionId,
+    workload_id: workloadId,
+    number: 1,
+    config: { docker_image: 'nginx' },
+    source_version_id: null,
+    created_by_id: null,
+    created_by_name: 'Ada',
+    created_by_email: 'ada@example.com',
+    created_at: new Date('2026-11-01T10:00:00.000Z'),
+  };
+
+  it('keeps the author of a deleted account', () => {
+    expect(toWorkloadVersion(row).created_by).toEqual({
+      id: null,
+      name: 'Ada',
+      email: 'ada@example.com',
+    });
+  });
+
+  it('has no author for versions from before authors were recorded', () => {
+    expect(
+      toWorkloadVersion({
+        ...row,
+        created_by_name: null,
+        created_by_email: null,
+      }).created_by,
+    ).toBeNull();
+  });
+});
+
+describe('WorkloadVersionService.resolveSide', () => {
+  const activeId = '6b7c8d9e-0f1a-4b2c-9d3e-4f5a6b7c8d9e';
+  const version = (id: string, number: number): WorkloadVersionRow => ({
+    id,
+    workload_id: workloadId,
+    number,
+    config: { docker_image: `nginx:${number}` },
+    source_version_id: null,
+    created_by_id: null,
+    created_by_name: null,
+    created_by_email: null,
+    created_at: new Date(),
+  });
+  const createService = () => {
+    const service = new WorkloadVersionService({} as Database);
+    const get = jest
+      .spyOn(service, 'get')
+      .mockImplementation((_workload, id) =>
+        Promise.resolve(version(id, id === activeId ? 2 : 1)),
+      );
+
+    return { service, get };
+  };
+  const deployed = {
+    id: workloadId,
+    active_version_id: activeId,
+    draft_config: null,
+  };
+
+  it('resolves the active version', async () => {
+    const { service, get } = createService();
+
+    await expect(service.resolveSide(deployed, 'active')).resolves.toEqual({
+      side: { kind: 'version', version_id: activeId, number: 2 },
+      config: { docker_image: 'nginx:2' },
+    });
+    expect(get).toHaveBeenCalledWith(workloadId, activeId);
+  });
+
+  it('resolves the draft, or the active version when there is none', async () => {
+    const { service } = createService();
+    const draft: WorkloadConfig = { docker_image: 'nginx:3' };
+
+    await expect(
+      service.resolveSide({ ...deployed, draft_config: draft }, 'draft'),
+    ).resolves.toEqual({ side: { kind: 'draft' }, config: draft });
+    await expect(service.resolveSide(deployed, 'draft')).resolves.toEqual(
+      expect.objectContaining({
+        side: { kind: 'version', version_id: activeId, number: 2 },
+      }),
+    );
+  });
+
+  it('has nothing on the active side before the first deploy', async () => {
+    const { service, get } = createService();
+
+    await expect(
+      service.resolveSide({ ...deployed, active_version_id: null }, 'active'),
+    ).resolves.toEqual({ side: { kind: 'none' }, config: null });
+    expect(get).not.toHaveBeenCalled();
+  });
+
+  it('resolves a version id of the workload', async () => {
+    const { service, get } = createService();
+
+    await service.resolveSide(deployed, versionId);
+
+    expect(get).toHaveBeenCalledWith(workloadId, versionId);
+  });
+
+  it('rejects anything else before it reaches the database', async () => {
+    const { service, get } = createService();
+
+    await expect(service.resolveSide(deployed, 'latest')).rejects.toThrow(
+      'A version must be "active", "draft" or a version id',
+    );
+    expect(get).not.toHaveBeenCalled();
   });
 });

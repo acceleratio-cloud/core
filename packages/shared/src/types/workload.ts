@@ -1,11 +1,7 @@
-export type WorkloadType = "docker" | "s3_bucket";
+export type WorkloadType = 'docker' | 's3_bucket';
 
 export type WorkloadStatus =
-  | "draft"
-  | "deploying"
-  | "running"
-  | "stopped"
-  | "failed";
+  'draft' | 'deploying' | 'running' | 'stopped' | 'failed';
 
 export interface WorkloadPosition {
   x: number;
@@ -114,7 +110,7 @@ export interface S3BucketEntry {
   name: string;
   /** Object key from the bucket root; folders end with `/`. */
   path: string;
-  kind: "folder" | "file";
+  kind: 'folder' | 'file';
   /** Bytes; null for folders. */
   size: number | null;
   content_type: string | null;
@@ -144,8 +140,92 @@ export interface WorkloadVersion {
   config: WorkloadConfig;
   /** The version a rollback copied its config from. */
   source_version_id: string | null;
+  /**
+   * Who applied it, as they were named at the time. Null for versions from
+   * before authors were recorded and for ones the platform wrote itself.
+   */
+  created_by: WorkloadVersionAuthor | null;
   /** When the version was applied to the cluster. */
   created_at: string;
+}
+
+export interface WorkloadVersionAuthor {
+  /** Null once the account is deleted; name and email stay. */
+  id: string | null;
+  name: string;
+  email: string;
+}
+
+/**
+ * One side of a comparison: a stored version, the pending draft, or nothing
+ * (a service that was never deployed has no current version).
+ */
+export type WorkloadDiffSide =
+  | { kind: 'version'; version_id: string; number: number }
+  | { kind: 'draft' }
+  | { kind: 'none' };
+
+export type WorkloadChangeKind = 'added' | 'removed' | 'changed';
+
+/**
+ * What applying a change does to the running service:
+ * - `restart`: the pods are replaced by a rolling update;
+ * - `data_loss`: a volume claim and its data are deleted.
+ */
+export type WorkloadChangeImpact = 'restart' | 'data_loss';
+
+/** One field that differs between the two sides. */
+export interface WorkloadConfigChange {
+  /** Stable machine key, such as `env.DATABASE_URL` or `volumes.<id>.mount_path`. */
+  path: string;
+  /** What the field is, for people: `CPU limit`, `DATABASE_URL`. */
+  label: string;
+  kind: WorkloadChangeKind;
+  /** Display value on the base side; null when absent or secret. */
+  before: string | null;
+  /** Display value on the target side; null when absent or secret. */
+  after: string | null;
+  /** The values are never sent; only the fact of the change is. */
+  secret: boolean;
+  impact: WorkloadChangeImpact | null;
+}
+
+/** Changes of one part of the config, in the order the type defines. */
+export interface WorkloadDiffSection {
+  /** `image`, `command`, `resources`, `placement`, `environment`, `volumes`, `storage`. */
+  key: string;
+  label: string;
+  changes: WorkloadConfigChange[];
+}
+
+/**
+ * What changes when the target replaces the base. Computed on the server so
+ * every workload type answers in the same shape; sections without changes
+ * are left out.
+ */
+export interface WorkloadVersionDiff {
+  workload_id: string;
+  type: WorkloadType;
+  base: WorkloadDiffSide;
+  target: WorkloadDiffSide;
+  /** True when nothing differs. */
+  identical: boolean;
+  sections: WorkloadDiffSection[];
+  /** Applying it replaces the running pods. */
+  restarts: boolean;
+  /** Applying it deletes stored data. */
+  data_loss: boolean;
+  /** Things the type wants said about this comparison, one sentence each. */
+  notes: string[];
+}
+
+/**
+ * `GET …/versions/diff`. `base` defaults to `active`, `target` to `draft`;
+ * either may also be a version id.
+ */
+export interface WorkloadVersionDiffQuery {
+  base?: 'active' | string;
+  target?: 'active' | 'draft' | string;
 }
 
 export interface Workload {
@@ -184,7 +264,7 @@ export interface Workload {
 }
 
 export interface WorkloadStatusEvent {
-  type: "status";
+  type: 'status';
   workload_id: string;
   project_id: string;
   status: WorkloadStatus;
@@ -194,7 +274,7 @@ export interface WorkloadStatusEvent {
 }
 
 export interface WorkloadPositionEvent {
-  type: "position";
+  type: 'position';
   workload_id: string;
   project_id: string;
   position: WorkloadPosition;
@@ -205,13 +285,13 @@ export type WorkloadEvent = WorkloadStatusEvent | WorkloadPositionEvent;
 
 /** Lifecycle of one running copy (a Kubernetes Pod) of a Docker service. */
 export type WorkloadInstanceStatus =
-  | "running"
-  | "starting"
-  | "pending"
-  | "terminating"
-  | "failed"
-  | "completed"
-  | "unknown";
+  | 'running'
+  | 'starting'
+  | 'pending'
+  | 'terminating'
+  | 'failed'
+  | 'completed'
+  | 'unknown';
 
 /** One running copy of a Docker service with its live resource usage. */
 export interface WorkloadInstance {
