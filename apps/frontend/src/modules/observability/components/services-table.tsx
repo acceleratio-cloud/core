@@ -2,6 +2,7 @@ import type { WorkloadMetrics } from '@acceleratio/shared';
 import { cn } from '@/lib/utils';
 import { ViewLogsLink } from '@/modules/logs/components/view-logs-link';
 import { WorkloadStatus } from '@/modules/workloads/components/workload-status';
+import { isContainerWorkload } from '@/modules/workloads/utils/workload-capabilities';
 import {
   formatByteRate,
   formatBytes,
@@ -78,7 +79,7 @@ export const ServicesTable = ({
                     >
                       {workload.name}
                     </span>
-                    {workload.type === 'docker' ? (
+                    {isContainerWorkload(workload.type) ? (
                       <ViewLogsLink
                         variant="icon"
                         projectId={projectId}
@@ -93,7 +94,7 @@ export const ServicesTable = ({
               </span>
             </th>
             <td className="px-3 py-2.5 text-right font-mono text-fg-primary tabular-nums">
-              {workload.type === 'docker'
+              {isContainerWorkload(workload.type)
                 ? `${workload.pods_ready}/${workload.pods_total}`
                 : '—'}
             </td>

@@ -24,6 +24,7 @@ import {
 import { hasPendingChanges } from '@/modules/workloads/utils/workload-config';
 import { Button } from '@/shared/components/ui/button';
 import { Skeleton } from '@/shared/components/ui/skeleton';
+import { VersionAuthor } from '@/modules/workloads/components/workload-details/version-author';
 import { VersionChangeConfirmDialog } from './version-change-confirm-dialog';
 import { useWorkloadActions } from './workload-actions';
 import {
@@ -222,9 +223,13 @@ export const WorkloadVersions = ({
                           {formatRelativeTime(version.created_at)}
                         </time>
                         {version.created_by ? (
-                          <span title={version.created_by.email}>
-                            {` · ${version.created_by.name}`}
-                          </span>
+                          <>
+                            {' · '}
+                            <VersionAuthor
+                              author={version.created_by}
+                              link={false}
+                            />
+                          </>
                         ) : null}
                         {source !== undefined
                           ? ` · rollback to v${source}`

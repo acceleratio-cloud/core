@@ -75,7 +75,11 @@ export const ViewLogsLink = ({
       href={href}
       scroll={false}
       onClick={handleClick}
-      className={cn(buttonVariants({ variant: 'outline' }), className)}
+      className={cn(
+        buttonVariants({ variant: 'ghost' }),
+        'text-fg-secondary hover:text-fg-primary',
+        className,
+      )}
     >
       <ScrollText
         data-icon="inline-start"

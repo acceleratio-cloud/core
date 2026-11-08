@@ -9,6 +9,7 @@ import {
   timestamp,
   unique,
   uuid,
+  varchar,
 } from 'drizzle-orm/pg-core';
 import { user } from '@/vendor/db/schema';
 import { workload } from './workload.schema';
@@ -43,6 +44,11 @@ export const workloadVersion = pgTable(
     ),
     created_by_name: text('created_by_name'),
     created_by_email: text('created_by_email'),
+    // Set when a push to GitHub applied it: the pusher has no account here,
+    // so `created_by_id` stays null and this names them on github.com.
+    created_by_github_login: varchar('created_by_github_login', {
+      length: 39,
+    }),
     // When this version was applied to the cluster.
     created_at: timestamp('created_at').defaultNow().notNull(),
   },

@@ -18,6 +18,8 @@ other hardware. It provisions a single-node Kubernetes cluster:
   server's own disk (`/var/lib/victoria-logs`). Platform namespaces are not
   collected. Together they use about 90 MiB of memory at rest and about 110 MiB
   at 1,000 lines/s (limits 256 MiB and 160 MiB)
+- An image registry (zot `v2.1.23`) for services built from GitHub, on a
+  50 GiB SeaweedFS volume; see [Image registry](#image-registry)
 
 and then deploys Acceleratio into the `acceleratio` namespace:
 
@@ -138,7 +140,8 @@ log is also linked as `/var/log/acceleratio/install.log`.
    API and the console to become ready. The console and API are published on
    node ports `30300` and `30080`. The API runs with a ServiceAccount bound to
    `cluster-admin`, because it creates namespaces, workloads, volumes and
-   network policies for projects. Before that, it configures the Traefik
+   network policies for projects. It also runs the image registry and waits
+   until the node reaches it. Before that, it configures the Traefik
    bundled with k3s with a Let's Encrypt certificate resolver through
    `/etc/acceleratio/manifests/traefik-config.yaml` (see
    [Custom domain](#custom-domain)).
@@ -343,6 +346,23 @@ published outside the cluster. Port-forward it for local use:
 ```bash
 sudo k3s kubectl -n seaweedfs port-forward svc/seaweedfs-s3 8333:8333
 ```
+
+## Image registry
+
+GitHub services are built by BuildKit Jobs in the `acceleratio-builds`
+namespace (the root `Dockerfile`, or a Railpack plan when there is none; the
+Job downloads a pinned, checksummed Railpack release from github.com) and pushed to a zot registry in the `acceleratio` namespace. It is
+not published outside the cluster and has no authentication: project pods
+cannot reach it (their network policy), and build pods may reach only DNS, the
+registry and the internet. Images are kept on a `REGISTRY_SIZE` volume of the
+default StorageClass; the 20 newest per service and the build cache are kept,
+older ones are garbage collected after a day.
+
+containerd pulls from the host network and cannot resolve cluster DNS, so the
+registry Service has a fixed ClusterIP (`REGISTRY_CLUSTER_IP`, by default
+`.50` in the service CIDR) and every node maps `registry.acceleratio.internal`
+to it in `/etc/rancher/k3s/registries.yaml`. The installer writes that file
+(changing it restarts k3s) and the console writes it on servers it joins.
 
 ## Dashboard address
 

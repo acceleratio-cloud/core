@@ -189,14 +189,15 @@ const describeError = (error: unknown): string =>
  * derive it from the cluster through `WorkloadStatusService`, and lifecycle
  * actions put the Deployment they applied into its snapshot.
  *
- * Every query is scoped to `type = 'docker'`; other types own their own
+ * Every query is scoped to `this.type`. `GithubWorkloadService` extends this
+ * class for services built from a repository; other types own their own
  * services and never pass through this one.
  */
 @Injectable()
 export class DockerWorkloadService
   implements WorkloadTypeService, OnApplicationBootstrap, OnApplicationShutdown
 {
-  readonly type = 'docker' as const;
+  readonly type: 'docker' | 'github' = 'docker';
 
   private readonly logger = new Logger(DockerWorkloadService.name);
 
@@ -207,12 +208,12 @@ export class DockerWorkloadService
   private sweepInterval?: ReturnType<typeof setInterval>;
 
   constructor(
-    @Inject(DATABASE) private readonly db: Database,
+    @Inject(DATABASE) protected readonly db: Database,
     private readonly projectService: ProjectService,
     private readonly isolation: ProjectIsolationService,
-    private readonly kubernetes: KubernetesService,
+    protected readonly kubernetes: KubernetesService,
     private readonly status: WorkloadStatusService,
-    private readonly events: WorkloadEventsService,
+    protected readonly events: WorkloadEventsService,
     private readonly versions: WorkloadVersionService,
     private readonly network: DockerWorkloadNetworkService,
     private readonly storageClasses: StorageClassService,
@@ -426,7 +427,9 @@ export class DockerWorkloadService
     }
 
     const name = normalizeName(payload?.name);
-    const config = newDockerConfig(payload?.config);
+    const config = newDockerConfig(payload?.config, (input) =>
+      this.normalizeConfig(input),
+    );
 
     // A new service has no volumes yet, so every one it brings is new.
     await this.reconcileVolumes(config, []);
@@ -528,7 +531,7 @@ export class DockerWorkloadService
     }
 
     if (payload?.config !== undefined) {
-      const config = normalizeDockerConfig(payload.config);
+      const config = this.normalizeConfig(payload.config);
 
       // Responses never carry values, so a client editing other settings
       // cannot send them back. Leaving `env` out keeps what is stored.
@@ -618,7 +621,7 @@ export class DockerWorkloadService
       const draft =
         row.draft_config === null
           ? null
-          : normalizeDockerConfig(row.draft_config);
+          : this.normalizeConfig(row.draft_config);
 
       if (draft === null && active === null) {
         throw new ConflictException(NO_CONFIG_MESSAGE);
@@ -644,7 +647,7 @@ export class DockerWorkloadService
       // Either no draft, or a draft that equals the applied config (left over
       // after a rollback moved the active version under it).
       return this.applyNow(row, {
-        config: normalizeDockerConfig(active!.config),
+        config: this.normalizeConfig(active!.config),
         versionId: active!.id,
         newVersion: false,
         ...(draft !== null ? { appliedDraft: draft } : {}),
@@ -669,7 +672,7 @@ export class DockerWorkloadService
       }
 
       return this.applyNow(row, {
-        config: normalizeDockerConfig(active.config),
+        config: this.normalizeConfig(active.config),
         versionId: active.id,
         newVersion: false,
       });
@@ -736,8 +739,8 @@ export class DockerWorkloadService
       base: left.side,
       target: right.side,
       sections: diffDockerConfigs(
-        left.config && normalizeDockerConfig(left.config),
-        right.config && normalizeDockerConfig(right.config),
+        left.config && this.normalizeConfig(left.config),
+        right.config && this.normalizeConfig(right.config),
       ),
     });
   }
@@ -760,7 +763,7 @@ export class DockerWorkloadService
     }
 
     const active = await this.activeVersion(row);
-    const restored = normalizeDockerConfig(target.config);
+    const restored = this.normalizeConfig(target.config);
     const applied = this.rollbackConfig(target, active);
     const keepsVolumes = !sameConfig(
       { volumes: restored.volumes ?? [] } as DockerWorkloadConfig,
@@ -776,7 +779,7 @@ export class DockerWorkloadService
           : { kind: 'version', version_id: active.id, number: active.number },
       target: { kind: 'version', version_id: target.id, number: target.number },
       sections: diffDockerConfigs(
-        active && normalizeDockerConfig(active.config),
+        active && this.normalizeConfig(active.config),
         applied,
       ),
       notes: keepsVolumes
@@ -796,7 +799,7 @@ export class DockerWorkloadService
     target: WorkloadVersionRow,
     active: WorkloadVersionRow | null,
   ): DockerWorkloadConfig {
-    const config = normalizeDockerConfig(target.config);
+    const config = this.normalizeConfig(target.config);
 
     delete config.volumes;
     const current = (active?.config as DockerWorkloadConfig | undefined)
@@ -975,7 +978,10 @@ export class DockerWorkloadService
    * overlap could otherwise delete each other's new claims. The queue lives
    * in this process, which is the only API instance a cluster has.
    */
-  private exclusive<T>(workloadId: string, run: () => Promise<T>): Promise<T> {
+  protected exclusive<T>(
+    workloadId: string,
+    run: () => Promise<T>,
+  ): Promise<T> {
     const previous = this.queues.get(workloadId) ?? Promise.resolve();
     const next = previous.catch(() => undefined).then(run);
     const tail = next.catch(() => undefined);
@@ -1522,7 +1528,14 @@ export class DockerWorkloadService
     return toNestException(error);
   }
 
-  private async findRow(projectId: string, id: string): Promise<WorkloadRow> {
+  /** Validates a stored or requested config; a subclass keeps its own fields. */
+  protected normalizeConfig(
+    config: WorkloadConfig | undefined,
+  ): DockerWorkloadConfig {
+    return normalizeDockerConfig(config);
+  }
+
+  protected async findRow(projectId: string, id: string): Promise<WorkloadRow> {
     const [row] = await this.db
       .select()
       .from(workload)
@@ -1542,7 +1555,7 @@ export class DockerWorkloadService
     return row;
   }
 
-  private async activeVersion(
+  protected async activeVersion(
     row: WorkloadRow,
   ): Promise<WorkloadVersionRow | null> {
     if (row.active_version_id === null) {
@@ -1619,6 +1632,7 @@ export class DockerWorkloadService
           ? null
           : internalDomain(row.internal_hostname),
       last_deployed_at: row.last_deployed_at?.toISOString() ?? null,
+      ...(row.type === 'github' ? { auto_deploy: row.auto_deploy } : {}),
       created_at: row.created_at.toISOString(),
       updated_at: row.updated_at.toISOString(),
     };

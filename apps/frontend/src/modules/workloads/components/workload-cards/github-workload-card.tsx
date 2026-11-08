@@ -22,7 +22,10 @@ export const GithubWorkloadCard = ({
   data,
   selected,
 }: NodeProps<GithubWorkloadNode>) => {
-  const config = data.draft_config as GithubWorkloadConfig | null;
+  // The draft until the first deploy, then the applied config.
+  const config = (data.draft_config ??
+    data.active_version?.config ??
+    null) as GithubWorkloadConfig | null;
 
   return (
     <NodeCard selected={selected}>

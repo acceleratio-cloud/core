@@ -117,9 +117,62 @@ export class GithubClient {
     return created.token;
   }
 
+  /**
+   * A short-lived token that can only read one repository's contents, for a
+   * build Job. Not cached: every build gets its own.
+   */
+  async repositoryReadToken(
+    appId: number,
+    pem: string,
+    installationId: number,
+    repository: string,
+  ): Promise<string> {
+    const created = await this.call<{ token: string }>(
+      `/app/installations/${installationId}/access_tokens`,
+      {
+        method: 'POST',
+        token: signAppJwt(appId, pem),
+        body: {
+          repositories: [repository.split('/')[1]],
+          permissions: { contents: 'read' },
+        },
+      },
+    );
+    return created.token;
+  }
+
+  /** Branch names, in GitHub's order, up to 1000. */
+  async listBranches(token: string, repository: string): Promise<string[]> {
+    const names: string[] = [];
+
+    for (let page = 1; page <= MAX_REPOSITORY_PAGES; page += 1) {
+      const result = await this.call<{ name: string }[]>(
+        `/repos/${repository}/branches?per_page=100&page=${page}`,
+        { token },
+      );
+      names.push(...result.map((branch) => branch.name));
+      if (result.length < 100) break;
+    }
+
+    return names;
+  }
+
+  /** The commit a branch points at. */
+  async branchHead(
+    token: string,
+    repository: string,
+    branch: string,
+  ): Promise<{ sha: string; message: string }> {
+    const commit = await this.call<{
+      sha: string;
+      commit: { message: string };
+    }>(`/repos/${repository}/commits/${encodeURIComponent(branch)}`, { token });
+    return { sha: commit.sha, message: commit.commit.message };
+  }
+
   private async call<T>(
     path: string,
-    options: { method?: string; token?: string } = {},
+    options: { method?: string; token?: string; body?: unknown } = {},
   ): Promise<T> {
     let response: Response;
     try {
@@ -132,7 +185,9 @@ export class GithubClient {
           ...(options.token
             ? { Authorization: `Bearer ${options.token}` }
             : {}),
+          ...(options.body ? { 'Content-Type': 'application/json' } : {}),
         },
+        body: options.body ? JSON.stringify(options.body) : undefined,
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
     } catch {

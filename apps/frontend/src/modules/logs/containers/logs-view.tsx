@@ -27,6 +27,7 @@ import {
 } from '@/modules/observability/utils/series';
 import { useProject } from '@/modules/projects/providers/project-provider';
 import { useTerminal } from '@/modules/terminal/providers/terminal-provider';
+import { isContainerWorkload } from '@/modules/workloads/utils/workload-capabilities';
 import { LogList } from '../components/log-list';
 import type { LogRowActions } from '../components/log-row';
 import { LogsHistogram } from '../components/logs-histogram';
@@ -501,7 +502,9 @@ export const LogsView = ({
     ? formatWindow(customWindow.start, customWindow.end)
     : RANGE_LABELS[range].toLowerCase();
   const isLive = live && !customWindow;
-  const dockerCount = workloads.filter((w) => w.type === 'docker').length;
+  const dockerCount = workloads.filter((w) =>
+    isContainerWorkload(w.type),
+  ).length;
 
   let body;
 

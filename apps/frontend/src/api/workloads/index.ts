@@ -4,6 +4,8 @@ import type {
   UpdateInternalHostnamePayload,
   UpdateWorkloadPayload,
   Workload,
+  WorkloadBuild,
+  WorkloadBuildLog,
   WorkloadEnv,
   WorkloadInstancesSnapshot,
   WorkloadVersion,
@@ -142,6 +144,25 @@ export const workloadsApi = {
   rollback: async (projectId: string, id: string, versionId: string) => {
     const { data } = await api.post<Workload>(
       `/projects/${projectId}/workloads/${id}/versions/${versionId}/rollback`,
+    );
+    return data;
+  },
+  /** Recent builds of a GitHub service, newest first. */
+  builds: async (projectId: string, id: string) => {
+    const { data } = await api.get<WorkloadBuild[]>(
+      `/projects/${projectId}/workloads/${id}/builds`,
+    );
+    return data;
+  },
+  cancelBuild: async (projectId: string, id: string, buildId: string) => {
+    const { data } = await api.post<WorkloadBuild>(
+      `/projects/${projectId}/workloads/${id}/builds/${buildId}/cancel`,
+    );
+    return data;
+  },
+  buildLog: async (projectId: string, id: string, buildId: string) => {
+    const { data } = await api.get<WorkloadBuildLog>(
+      `/projects/${projectId}/workloads/${id}/builds/${buildId}/log`,
     );
     return data;
   },

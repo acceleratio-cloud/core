@@ -49,6 +49,7 @@ const activeVersion: WorkloadVersionRow = {
   created_by_id: null,
   created_by_name: null,
   created_by_email: null,
+  created_by_github_login: null,
   created_at: new Date('2026-11-01T10:00:00.000Z'),
 };
 
@@ -61,11 +62,13 @@ const olderVersion: WorkloadVersionRow = {
   created_by_id: null,
   created_by_name: null,
   created_by_email: null,
+  created_by_github_login: null,
   created_at: new Date('2026-11-01T09:10:00.000Z'),
 };
 
 const baseRow: WorkloadRow = {
   id: workloadId,
+  auto_deploy: true,
   project_id: projectId,
   name: 'My API',
   type: 'docker',

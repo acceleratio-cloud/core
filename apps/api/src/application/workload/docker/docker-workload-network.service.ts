@@ -20,6 +20,7 @@ import type {
   WorkloadDomainCertificate,
   WorkloadDomains,
 } from '@acceleratio/shared';
+import { isContainerWorkload } from '@acceleratio/shared';
 import { and, asc, count, eq, type SQL } from 'drizzle-orm';
 import { ProjectDnsService } from '@/application/project/project-dns.service';
 import { ProjectIsolationService } from '@/application/project/project-isolation.service';
@@ -1043,7 +1044,7 @@ export class DockerWorkloadNetworkService
       throw new NotFoundException('Workload not found');
     }
 
-    if (row.type !== 'docker') {
+    if (!isContainerWorkload(row.type)) {
       throw new BadRequestException(NOT_DOCKER_MESSAGE);
     }
 

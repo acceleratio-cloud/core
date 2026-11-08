@@ -1,5 +1,6 @@
 import { isIP } from 'node:net';
 import { BadRequestException } from '@nestjs/common';
+import { registriesYaml, registryClusterIp } from '@/common/registry';
 import type {
   NodeJoinRole,
   NodePreflightResult,
@@ -34,6 +35,8 @@ export interface JoinTarget {
   version: string;
   clusterCidr?: string;
   serviceCidr?: string;
+  /** ClusterIP of the image registry, mirrored in registries.yaml. */
+  registryIp: string;
 }
 
 export const readJoinTarget = (
@@ -68,7 +71,13 @@ export const readJoinTarget = (
     }
   }
 
-  return { url, token, version, clusterCidr, serviceCidr };
+  const registryIp = registryClusterIp(env);
+
+  if (isIP(registryIp) === 0) {
+    throw new BadRequestException('Cluster join settings are invalid');
+  }
+
+  return { url, token, version, clusterCidr, serviceCidr, registryIp };
 };
 
 export const validateNodeName = (name: unknown): string => {
@@ -333,6 +342,10 @@ export const installScript = (options: InstallOptions): string =>
     buildJoinConfig(options).trimEnd(),
     'ACCELERATIO_K3S_CONFIG',
     'chmod 600 /etc/rancher/k3s/config.yaml',
+    // Lets the node pull images built from GitHub, like install.sh does.
+    `cat >/etc/rancher/k3s/registries.yaml <<'ACCELERATIO_K3S_REGISTRIES'`,
+    registriesYaml(options.target.registryIp).trimEnd(),
+    'ACCELERATIO_K3S_REGISTRIES',
     `curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=${shellQuote(options.target.version)} INSTALL_K3S_EXEC=${options.role === 'server' ? 'server' : 'agent'} sh -`,
   ].join('\n');
 

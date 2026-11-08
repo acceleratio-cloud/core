@@ -6,7 +6,7 @@ import type {
   WorkloadType,
 } from '@acceleratio/shared';
 import type { ProjectService } from '@/application/project/project.service';
-import type { DockerWorkloadService } from '../docker/docker-workload.service';
+import { DockerWorkloadService } from '../docker/docker-workload.service';
 import type { S3BucketWorkloadService } from '../s3-bucket/s3-bucket.service';
 import type { WorkloadTypeRegistry } from '../workload-type.registry';
 import type { WorkloadTypeResolver } from '../workload-type.resolver';
@@ -23,6 +23,9 @@ jest.mock('../workload-type.resolver', () => ({
 }));
 jest.mock('../docker/docker-workload.service', () => ({
   DockerWorkloadService: class DockerWorkloadService {},
+}));
+jest.mock('../github/github-workload.service', () => ({
+  GithubWorkloadService: class GithubWorkloadService {},
 }));
 jest.mock('../s3-bucket/s3-bucket.service', () => ({
   S3BucketWorkloadService: class S3BucketWorkloadService {},
@@ -110,18 +113,20 @@ const createService = (
     type: 's3_bucket',
     credentials: jest.fn(),
   },
-  docker: { type: 'docker'; getEnv: jest.Mock } = {
-    type: 'docker',
-    getEnv: jest.fn(),
-  },
 ): WorkloadService =>
   new WorkloadService(
     registry as unknown as WorkloadTypeRegistry,
     resolver as unknown as WorkloadTypeResolver,
     projectService as unknown as ProjectService,
     s3Buckets as unknown as S3BucketWorkloadService,
-    docker as unknown as DockerWorkloadService,
   );
+
+// A Docker-like service the facade recognises by class.
+const createDockerService = () =>
+  Object.assign(Object.create(DockerWorkloadService.prototype) as object, {
+    ...createTypeService('docker'),
+    getEnv: jest.fn(),
+  });
 
 describe('WorkloadService.list', () => {
   it('merges every type list and sorts by created_at with an id tie-breaker', async () => {
@@ -400,14 +405,11 @@ describe('WorkloadService row operations', () => {
 
 describe('WorkloadService.env', () => {
   it('delegates to the Docker service for a Docker workload', async () => {
-    const docker = { type: 'docker' as const, getEnv: jest.fn() };
+    const docker = createDockerService();
     const env = { env: [{ key: 'FOO', value: 'bar' }] };
     const service = createService(
-      createRegistry([]),
+      createRegistry([docker]),
       createResolver('docker'),
-      createProjectService(),
-      undefined,
-      docker,
     );
 
     docker.getEnv.mockResolvedValue(env);
@@ -417,13 +419,10 @@ describe('WorkloadService.env', () => {
   });
 
   it('rejects other workload types', async () => {
-    const docker = { type: 'docker' as const, getEnv: jest.fn() };
+    const docker = createDockerService();
     const service = createService(
-      createRegistry([]),
+      createRegistry([docker, createTypeService('s3_bucket')]),
       createResolver('s3_bucket'),
-      createProjectService(),
-      undefined,
-      docker,
     );
 
     await expect(service.env(projectId, workloadId)).rejects.toThrow(

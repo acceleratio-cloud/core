@@ -1,12 +1,22 @@
-import type { Workload } from '@acceleratio/shared';
+import type { Workload, WorkloadType } from '@acceleratio/shared';
 
 import { hasPendingChanges } from './workload-config';
 
 /**
- * Whether the service runs as a Deployment, so it can be deployed, started,
- * stopped, restarted and rolled back. S3 buckets cannot.
+ * Types that run as a Deployment with Docker service settings (instances,
+ * environment, logs). Mirrors `isContainerWorkload` in the shared package,
+ * which the console imports for types only.
  */
-export const hasLifecycle = (workload: Workload) => workload.type === 'docker';
+export const isContainerWorkload = (type: WorkloadType) =>
+  type === 'docker' || type === 'github';
+
+/**
+ * Whether the service runs as a Deployment, so it can be deployed, started,
+ * stopped, restarted and rolled back: Docker and GitHub services. S3 buckets
+ * cannot.
+ */
+export const hasLifecycle = (workload: Workload) =>
+  isContainerWorkload(workload.type);
 
 export interface DeployAction {
   label: string;

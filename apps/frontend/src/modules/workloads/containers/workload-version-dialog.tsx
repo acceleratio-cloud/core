@@ -38,6 +38,7 @@ import {
   TabsList,
   TabsTrigger,
 } from '@/shared/components/ui/tabs';
+import { VersionAuthor } from '@/modules/workloads/components/workload-details/version-author';
 
 /** What the dialog shows: a stored version, or the pending changes. */
 export type VersionSubject =
@@ -261,11 +262,8 @@ export const WorkloadVersionDialog = ({
                   <>
                     {' '}
                     by{' '}
-                    <span
-                      className="text-fg-secondary"
-                      title={version.created_by.email}
-                    >
-                      {version.created_by.name}
+                    <span className="text-fg-secondary">
+                      <VersionAuthor author={version.created_by} />
                     </span>
                   </>
                 ) : null}

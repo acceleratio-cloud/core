@@ -122,7 +122,8 @@ export class GithubService {
       setup_on_update: true,
       public: false,
       default_permissions: { contents: 'read', metadata: 'read' },
-      default_events: [],
+      // Pushes deploy GitHub services that follow the pushed branch.
+      default_events: ['push'],
     };
 
     return {
@@ -231,6 +232,54 @@ export class GithubService {
     );
 
     return groups.flat();
+  }
+
+  /**
+   * What a build needs: the branch's head commit and a token that can only
+   * read this repository.
+   */
+  async checkout(
+    id: string,
+    repository: string,
+    branch: string,
+  ): Promise<{ token: string; sha: string; message: string }> {
+    const found = await this.requireRepository(id, repository);
+    const app = await this.requireApp(id);
+    const token = await this.github.repositoryReadToken(
+      app.github_app_id,
+      decryptSecret(app.private_key_enc),
+      found.installation_id,
+      repository,
+    );
+    const head = await this.github.branchHead(token, repository, branch);
+    return { token, ...head };
+  }
+
+  /** Branch names of a repository the App can reach. */
+  async branches(id: string, repository: string): Promise<string[]> {
+    const found = await this.requireRepository(id, repository);
+    const app = await this.requireApp(id);
+    const token = await this.github.installationToken(
+      app.github_app_id,
+      decryptSecret(app.private_key_enc),
+      found.installation_id,
+    );
+    return this.github.listBranches(token, repository);
+  }
+
+  private async requireRepository(
+    id: string,
+    repository: string,
+  ): Promise<GithubRepository> {
+    const found = (await this.repositories(id)).find(
+      (item) => item.full_name === repository,
+    );
+    if (!found) {
+      throw new BadRequestException(
+        'The repository is no longer available to this GitHub App',
+      );
+    }
+    return found;
   }
 
   /** Keeps installations in step with changes made on github.com. */

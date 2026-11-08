@@ -416,8 +416,11 @@ export const normalizeDockerConfig = (
  */
 export const newDockerConfig = (
   config: WorkloadConfig | undefined,
+  normalize: (
+    config: WorkloadConfig | undefined,
+  ) => DockerWorkloadConfig = normalizeDockerConfig,
 ): DockerWorkloadConfig => {
-  const normalized = normalizeDockerConfig(config);
+  const normalized = normalize(config);
 
   return {
     ...normalized,

@@ -249,11 +249,14 @@ type LifecycleAction = {
 
 /**
  * Deploy, Start, Restart and Stop at the top right of the panel header. Only
- * the actions the current status allows are shown. The deploy action (Deploy,
- * Apply changes or Redeploy, see `deployAction`) is the one solid button; the rest are outline buttons whose icon color hints at the action.
+ * the actions the current status allows are shown. Start, Restart and Stop
+ * form one segmented control whose icon colors hint at the action; the deploy
+ * action (Deploy, Apply changes or Redeploy, see `deployAction`) is the one
+ * solid button, last in the row.
  * Applying pending changes first shows what they change and asks to confirm.
  * Renders as a fragment so the header can place the buttons and their error.
- * `leading` goes first in the button row, for links such as "Logs".
+ * `leading` goes first in the button row, set apart by a divider, for links
+ * such as "Logs".
  */
 export const WorkloadLifecycleActions = ({
   leading,
@@ -306,48 +309,80 @@ export const WorkloadLifecycleActions = ({
     },
     {
       key: 'stop',
-      visible: workload.status === 'running' || workload.status === 'deploying',
+      // A service never deployed (a first rollout or build) has nothing to stop.
+      visible:
+        workload.active_version !== null &&
+        (workload.status === 'running' || workload.status === 'deploying'),
       icon: Square,
-      iconTone: 'text-status-danger',
+      // Filled, so it reads as a stop glyph rather than an empty checkbox.
+      iconTone: 'size-3 fill-current text-status-danger',
       label: 'Stop',
       pendingLabel: 'Stopping',
     },
   ];
 
   const visible = actions.filter((action) => action.visible);
+  const controls = visible.filter((action) => !action.primary);
+  const primary = visible.find((action) => action.primary);
 
   if (visible.length === 0 && !leading) {
     return null;
   }
+
+  const renderButton = (
+    {
+      key,
+      primary,
+      icon: Icon,
+      iconTone,
+      label,
+      pendingLabel,
+    }: LifecycleAction,
+    className?: string,
+  ) => (
+    <Button
+      key={key}
+      type="button"
+      variant={primary ? 'default' : 'outline'}
+      loading={pendingAction === key}
+      disabled={pendingAction !== null}
+      onClick={() => handleAction(key)}
+      className={className}
+    >
+      <Icon
+        data-icon="inline-start"
+        aria-hidden="true"
+        strokeWidth={1.75}
+        className={iconTone}
+      />
+      {pendingAction === key ? pendingLabel : label}
+    </Button>
+  );
 
   return (
     <>
       <div
         role="group"
         aria-label="Service actions"
-        className="flex flex-wrap justify-end gap-2"
+        className="flex flex-wrap items-center justify-end gap-2"
       >
         {leading}
-        {visible.map(
-          ({ key, primary, icon: Icon, iconTone, label, pendingLabel }) => (
-            <Button
-              key={key}
-              type="button"
-              variant={primary ? 'default' : 'outline'}
-              loading={pendingAction === key}
-              disabled={pendingAction !== null}
-              onClick={() => handleAction(key)}
-            >
-              <Icon
-                data-icon="inline-start"
-                aria-hidden="true"
-                strokeWidth={1.75}
-                className={iconTone}
-              />
-              {pendingAction === key ? pendingLabel : label}
-            </Button>
-          ),
-        )}
+        {leading && visible.length > 0 ? (
+          <span aria-hidden="true" className="h-5 w-px bg-edge-default" />
+        ) : null}
+        {controls.length > 0 ? (
+          // Joined buttons: shared borders, outer corners only; the focused
+          // one rises so its outline is never covered by a neighbour.
+          <div className="inline-flex rounded-md shadow-key-soft">
+            {controls.map((action) =>
+              renderButton(
+                action,
+                'rounded-none shadow-none first:rounded-l-md last:rounded-r-md not-first:-ml-px focus-visible:z-10',
+              ),
+            )}
+          </div>
+        ) : null}
+        {primary ? renderButton(primary) : null}
       </div>
 
       {lifecycleError && !reviewOpen ? (

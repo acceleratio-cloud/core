@@ -1,5 +1,13 @@
 export type WorkloadType = 'docker' | 's3_bucket' | 'github';
 
+/**
+ * Types that run as a Deployment with Docker service settings: instances,
+ * environment, volumes, domains and logs. A `github` service is a Docker
+ * service whose image is built from its repository.
+ */
+export const isContainerWorkload = (type: WorkloadType): boolean =>
+  type === 'docker' || type === 'github';
+
 export type WorkloadStatus =
   'draft' | 'deploying' | 'running' | 'stopped' | 'failed';
 
@@ -86,19 +94,58 @@ export interface S3BucketConfig {
   storage_class_id: string;
 }
 
-/** A repository branch connected through a GitHub App of the integration. */
-export interface GithubWorkloadConfig {
+/**
+ * A service built from a repository branch read through a GitHub App of the
+ * integration. It runs like a Docker service and has the same settings; a
+ * deploy builds the branch's `Dockerfile` and fills `docker_image` and
+ * `commit_sha`. The App and repository are fixed after creation; the branch can be changed and the next deploy builds its head.
+ */
+export interface GithubWorkloadConfig extends Omit<
+  DockerWorkloadConfig,
+  'docker_image'
+> {
   /** `GithubApp.id` the repository is read through. */
   github_app_id: string;
   /** `owner/name`. */
   repository: string;
   branch: string;
+  /** Image of the last build, by digest. Set by the API; absent until then. */
+  docker_image?: string;
+  /** Commit `docker_image` was built from. Set by the API. */
+  commit_sha?: string;
+}
+
+export type WorkloadBuildStatus =
+  | 'building'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled';
+
+/** One image build of a GitHub service, started by a deploy or a push. */
+export interface WorkloadBuild {
+  id: string;
+  workload_id: string;
+  commit_sha: string;
+  /** First line of the commit message. */
+  commit_message: string | null;
+  status: WorkloadBuildStatus;
+  /** Why a build failed, for people. */
+  status_message: string | null;
+  /** Who started it: the deploying user, or the GitHub account that pushed. */
+  author: WorkloadVersionAuthor | null;
+  /** The pushed image, by digest, once the build succeeded. */
+  image: string | null;
+  created_at: string;
+  finished_at: string | null;
+}
+
+/** `GET …/builds/:buildId/log`: the builder's output so far. */
+export interface WorkloadBuildLog {
+  log: string;
 }
 
 export type WorkloadConfig =
-  | DockerWorkloadConfig
-  | S3BucketConfig
-  | GithubWorkloadConfig;
+  DockerWorkloadConfig | S3BucketConfig | GithubWorkloadConfig;
 
 /** How a project workload reaches an S3 bucket. The secret key is separate. */
 export interface S3BucketAccess {
@@ -162,10 +209,15 @@ export interface WorkloadVersion {
 }
 
 export interface WorkloadVersionAuthor {
-  /** Null once the account is deleted; name and email stay. */
+  /**
+   * Null once the account is deleted (name and email stay), and for a GitHub
+   * account that pushed, which has no account here.
+   */
   id: string | null;
   name: string;
   email: string;
+  /** The GitHub account behind a push deploy: `github.com/<login>`. */
+  github_login: string | null;
 }
 
 /**
@@ -269,6 +321,11 @@ export interface Workload {
    */
   internal_domain?: string | null;
   last_deployed_at: string | null;
+  /**
+   * GitHub services only: a push to the followed branch deploys a service
+   * that was deployed before. Applies at once, outside versions.
+   */
+  auto_deploy?: boolean;
   /** Set for `s3_bucket` workloads once their keys exist. */
   s3?: S3BucketAccess | null;
   created_at: string;
@@ -351,6 +408,8 @@ export interface UpdateInternalHostnamePayload {
 
 export interface UpdateWorkloadPayload {
   name?: string;
+  /** GitHub services only; see `Workload.auto_deploy`. */
+  auto_deploy?: boolean;
   config?: WorkloadConfig;
   position?: WorkloadPosition;
 }

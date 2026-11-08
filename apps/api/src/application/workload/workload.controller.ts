@@ -27,6 +27,8 @@ import type {
   UpdateInternalHostnamePayload,
   UpdateWorkloadPayload,
   Workload,
+  WorkloadBuild,
+  WorkloadBuildLog,
   WorkloadEnv,
   WorkloadInstancesSnapshot,
   WorkloadVersion,
@@ -226,6 +228,33 @@ export class WorkloadController {
     @Session() session: UserSession | null,
   ): Promise<Workload> {
     return this.workloadService.deploy(projectId, id, authorOf(session));
+  }
+
+  @Get(':id/builds')
+  builds(
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<WorkloadBuild[]> {
+    return this.workloadService.builds(projectId, id);
+  }
+
+  @Get(':id/builds/:buildId/log')
+  buildLog(
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('buildId', ParseUUIDPipe) buildId: string,
+  ): Promise<WorkloadBuildLog> {
+    return this.workloadService.buildLog(projectId, id, buildId);
+  }
+
+  @Post(':id/builds/:buildId/cancel')
+  @HttpCode(HttpStatus.OK)
+  cancelBuild(
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('buildId', ParseUUIDPipe) buildId: string,
+  ): Promise<WorkloadBuild> {
+    return this.workloadService.cancelBuild(projectId, id, buildId);
   }
 
   @Post(':id/start')

@@ -155,6 +155,7 @@ describe('WorkloadVersionService.record', () => {
       created_by_id: null,
       created_by_name: null,
       created_by_email: null,
+      created_by_github_login: null,
     });
     expect(version.number).toBe(3);
     expect(set).toHaveBeenCalledWith({
@@ -250,6 +251,7 @@ describe('WorkloadVersionService authors', () => {
     created_by_id: null,
     created_by_name: 'Ada',
     created_by_email: 'ada@example.com',
+    created_by_github_login: null,
     created_at: new Date('2026-11-01T10:00:00.000Z'),
   };
 
@@ -258,7 +260,14 @@ describe('WorkloadVersionService authors', () => {
       id: null,
       name: 'Ada',
       email: 'ada@example.com',
+      github_login: null,
     });
+  });
+
+  it('names the GitHub account behind a push deploy', () => {
+    expect(
+      toWorkloadVersion({ ...row, created_by_github_login: 'ada' }).created_by,
+    ).toMatchObject({ id: null, github_login: 'ada' });
   });
 
   it('has no author for versions from before authors were recorded', () => {
@@ -283,6 +292,7 @@ describe('WorkloadVersionService.resolveSide', () => {
     created_by_id: null,
     created_by_name: null,
     created_by_email: null,
+    created_by_github_login: null,
     created_at: new Date(),
   });
   const createService = () => {

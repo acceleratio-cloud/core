@@ -1,0 +1,1 @@
+ALTER TABLE "workload_version" ADD COLUMN "created_by_github_login" varchar(39);

@@ -6,7 +6,10 @@ import {
 } from '@nestjs/common';
 import type { MessageEvent } from '@nestjs/common';
 import type { V1Pod } from '@kubernetes/client-node';
-import type { WorkloadInstancesSnapshot } from '@acceleratio/shared';
+import {
+  isContainerWorkload,
+  type WorkloadInstancesSnapshot,
+} from '@acceleratio/shared';
 import {
   catchError,
   debounceTime,
@@ -92,7 +95,7 @@ export class WorkloadInstancesService {
   async assertDocker(projectId: string, workloadId: string): Promise<void> {
     const type = await this.resolver.resolve(projectId, workloadId);
 
-    if (type !== 'docker') {
+    if (!isContainerWorkload(type)) {
       throw new BadRequestException('Only Docker services have instances');
     }
   }

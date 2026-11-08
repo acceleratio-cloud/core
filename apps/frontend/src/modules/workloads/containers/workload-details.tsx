@@ -7,6 +7,7 @@ import { Tabs as TabsPrimitive } from '@base-ui/react/tabs';
 import type { Workload } from '@acceleratio/shared';
 import { cn } from '@/lib/utils';
 import { WorkloadHeader } from '@/modules/workloads/components/workload-details/workload-header';
+import { isContainerWorkload } from '@/modules/workloads/utils/workload-capabilities';
 import {
   Tabs,
   TabsContent,
@@ -95,7 +96,7 @@ export const WorkloadDetails = ({
                 kindLabel={view.kindLabel}
                 actions={view.headerActions}
                 nameControl={
-                  displayedWorkload.type === 'docker' ? (
+                  isContainerWorkload(displayedWorkload.type) ? (
                     <RenameWorkloadButton />
                   ) : undefined
                 }

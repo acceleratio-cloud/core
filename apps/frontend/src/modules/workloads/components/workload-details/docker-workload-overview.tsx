@@ -24,7 +24,9 @@ export const DockerWorkloadConfiguration = ({
   editor?: ReactNode;
   children?: ReactNode;
 }) => {
-  const { digest } = parseDockerImage(effectiveConfig(workload).docker_image);
+  // A GitHub service has no image until its first build.
+  const image = effectiveConfig(workload).docker_image as string | undefined;
+  const digest = image ? parseDockerImage(image).digest : null;
 
   return (
     <DetailStack>

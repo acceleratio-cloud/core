@@ -35,11 +35,15 @@ export interface RecordVersionInput {
   appliedDraft?: WorkloadConfig;
 }
 
-/** The signed-in user behind a deploy or rollback. */
+/**
+ * Who is behind a deploy or rollback: a signed-in user, or for a push the
+ * GitHub account that pushed (no `id`, with `github_login`).
+ */
 export interface VersionAuthorInput {
-  id: string;
+  id: string | null;
   name: string;
   email: string;
+  github_login?: string;
 }
 
 /** A side of a comparison with the config it stands for. */
@@ -120,6 +124,7 @@ const authorOf = (row: WorkloadVersionRow): WorkloadVersionAuthor | null =>
         id: row.created_by_id,
         name: row.created_by_name ?? row.created_by_email,
         email: row.created_by_email,
+        github_login: row.created_by_github_login,
       };
 
 /**
@@ -248,6 +253,7 @@ export class WorkloadVersionService {
           created_by_id: input.author?.id ?? null,
           created_by_name: input.author?.name ?? null,
           created_by_email: input.author?.email ?? null,
+          created_by_github_login: input.author?.github_login ?? null,
         })
         .onConflictDoNothing({ target: workloadVersion.id })
         .returning();

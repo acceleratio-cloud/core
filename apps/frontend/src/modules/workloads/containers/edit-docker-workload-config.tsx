@@ -1,9 +1,12 @@
 'use client';
 
-import { useEffect, useId, type ReactNode } from 'react';
+import { useEffect, useId, useState, type ReactNode } from 'react';
 import { useController, useForm, type Control } from 'react-hook-form';
 
-import type { DockerWorkloadConfig } from '@acceleratio/shared';
+import type {
+  DockerWorkloadConfig,
+  GithubWorkloadConfig,
+} from '@acceleratio/shared';
 import {
   DetailSection,
   DetailStack,
@@ -12,6 +15,7 @@ import { UnsavedChangesBanner } from '@/modules/workloads/components/workload-de
 import { DockerWorkloadNetwork } from './docker-workload-network';
 import { DockerWorkloadPrivateNetwork } from './docker-workload-private-network';
 import { DockerWorkloadVolumes } from './docker-workload-volumes';
+import { GithubBranchSelect } from './github-branch-select';
 import {
   formatShellArgs,
   parseShellArgs,
@@ -37,6 +41,12 @@ import {
   formatSelector,
   parseLabels,
 } from '@/modules/servers/utils/node-metadata';
+import { ExternalLink } from 'lucide-react';
+
+import { getApiErrorMessage } from '@/api';
+import { GithubIcon } from '@/shared/icons/github-icon';
+import { workloadsApi } from '@/api/workloads';
+import { useProject } from '@/modules/projects/providers/project-provider';
 import { useWorkloadActions } from './workload-actions';
 
 /** Slider ranges. A stored value outside them widens the range to fit. */
@@ -45,6 +55,8 @@ const RAM_RANGE = { min: 128, max: 16384, step: 128 };
 
 interface DockerConfigForm {
   dockerImage: string;
+  /** GitHub services only; empty for Docker services. */
+  branch: string;
   entrypoint: string;
   command: string;
   cpuLimited: boolean;
@@ -57,7 +69,9 @@ interface DockerConfigForm {
 
 /** Absent limits show the default; null limits show the switch off. */
 const toForm = (config: DockerWorkloadConfig): DockerConfigForm => ({
-  dockerImage: config.docker_image,
+  // A GitHub service has no image until its first build.
+  dockerImage: config.docker_image ?? '',
+  branch: (config as Partial<GithubWorkloadConfig>).branch ?? '',
   entrypoint: formatShellArgs(config.entrypoint),
   command: formatShellArgs(config.command),
   cpuLimited: config.cpu_max !== null,
@@ -92,6 +106,11 @@ const toConfig = (
   const config: DockerWorkloadConfig = {
     docker_image: form.dockerImage.trim(),
   };
+
+  // The API keeps the App and repository; the branch is the one it takes.
+  if (form.branch) {
+    (config as Partial<GithubWorkloadConfig>).branch = form.branch;
+  }
   const entrypoint = parseShellArgs(form.entrypoint);
   const command = parseShellArgs(form.command);
   const cpuMax = limitValue(
@@ -324,6 +343,124 @@ const ReplicasField = ({
 };
 
 /**
+ * A setting whose control is short: label and one line of help on the left,
+ * the control at the right edge.
+ */
+const InlineRow = ({
+  label,
+  htmlFor,
+  hint,
+  children,
+  footer,
+}: {
+  label: string;
+  htmlFor: string;
+  hint: ReactNode;
+  children: ReactNode;
+  footer?: ReactNode;
+}) => (
+  <div className="px-3 py-3">
+    <div className="flex items-center gap-4">
+      <div className="min-w-0 flex-1">
+        <label
+          htmlFor={htmlFor}
+          className="text-[13px] leading-5 font-medium text-fg-primary"
+        >
+          {label}
+        </label>
+        <p className="text-xs leading-5 text-fg-tertiary">{hint}</p>
+      </div>
+      <div className="shrink-0">{children}</div>
+    </div>
+    {footer}
+  </div>
+);
+
+/** The repository a GitHub service builds, linked to github.com. */
+const RepositoryHeader = ({ repository }: { repository: string }) => (
+  <div className="flex items-center gap-3 px-3 py-3">
+    <span className="flex size-9 shrink-0 items-center justify-center rounded-md border border-edge-default bg-surface-sunken">
+      <GithubIcon className="size-4.5 text-fg-primary" />
+    </span>
+    <div className="min-w-0 flex-1">
+      <a
+        href={`https://github.com/${repository}`}
+        target="_blank"
+        rel="noreferrer"
+        className="group inline-flex max-w-full items-center gap-1.5 font-mono text-[13px] leading-5 font-medium text-fg-primary underline-offset-2 hover:underline focus-visible:underline"
+      >
+        <span className="truncate">{repository}</span>
+        <ExternalLink
+          aria-hidden="true"
+          strokeWidth={1.75}
+          className="size-3.5 shrink-0 text-fg-tertiary transition-colors group-hover:text-fg-secondary"
+        />
+        <span className="sr-only">(opens GitHub)</span>
+      </a>
+      <p className="truncate text-xs leading-5 text-fg-tertiary">
+        Built from its Dockerfile, or with Railpack when there is none.
+      </p>
+    </div>
+  </div>
+);
+
+/**
+ * Deploy on push of a GitHub service. Unlike the rest of the form it is not
+ * part of a version: the switch saves at once.
+ */
+const AutoDeployRow = ({ branch }: { branch: string }) => {
+  const id = useId();
+  const { project, replaceWorkload } = useProject();
+  const { workload } = useWorkloadActions();
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const toggle = async (checked: boolean) => {
+    setSaving(true);
+    setError(null);
+
+    try {
+      replaceWorkload(
+        await workloadsApi.update(project.id, workload.id, {
+          auto_deploy: checked,
+        }),
+      );
+    } catch (failure) {
+      setError(getApiErrorMessage(failure));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <InlineRow
+      label="Deploy on push"
+      htmlFor={id}
+      hint={
+        <>
+          Pushes to <span className="font-mono">{branch}</span> build and
+          deploy. Saves at once.
+        </>
+      }
+      footer={
+        error ? (
+          <p role="alert" className="mt-1.5 text-xs text-status-danger">
+            {error}
+          </p>
+        ) : null
+      }
+    >
+      <Switch
+        id={id}
+        checked={workload.auto_deploy ?? true}
+        disabled={saving}
+        onCheckedChange={(checked) => void toggle(checked)}
+      />
+    </InlineRow>
+  );
+};
+
+/**
  * Edits the image, process, and resource limits of a Docker service. Saving
  * stores a draft; the header's Deploy applies it as a new version.
  */
@@ -367,6 +504,12 @@ export const EditDockerWorkloadConfig = () => {
   const isSaving = isSubmitting || pendingAction === 'save';
   const isLocked = pendingAction !== null;
   const isDeployed = workload.active_version !== null;
+  const { field: branch } = useController({ control, name: 'branch' });
+  // Builds set the image of a GitHub service; only its branch can change.
+  const source =
+    workload.type === 'github'
+      ? (config as unknown as GithubWorkloadConfig)
+      : null;
 
   return (
     <form onSubmit={onSubmit} noValidate>
@@ -385,69 +528,102 @@ export const EditDockerWorkloadConfig = () => {
 
         <DetailSection
           title="Source"
-          description="The image to run and how its process starts."
+          description={
+            source
+              ? 'The repository and branch each deploy builds.'
+              : 'The image to run and how its process starts.'
+          }
         >
           <div className="divide-y divide-edge-subtle">
-            <SettingRow
-              label="Image"
-              htmlFor="workload-config-image"
-              hint="Tag or digest."
-            >
-              <Input
-                id="workload-config-image"
-                autoComplete="off"
-                spellCheck={false}
-                placeholder="nginx:latest"
-                aria-invalid={!!errors.dockerImage}
-                className="font-mono"
-                {...register('dockerImage', {
-                  validate: (value) =>
-                    value.trim() ? true : 'Enter the image to run.',
-                })}
-              />
-              <FieldError errors={[errors.dockerImage]} className="mt-1.5" />
-            </SettingRow>
+            {source ? (
+              <>
+                <RepositoryHeader repository={source.repository} />
+                <InlineRow
+                  label="Branch"
+                  htmlFor="workload-config-branch"
+                  hint="Deploy builds its latest commit."
+                >
+                  <div className="w-44 sm:w-56">
+                    <GithubBranchSelect
+                      id="workload-config-branch"
+                      appId={source.github_app_id}
+                      repository={source.repository}
+                      value={branch.value}
+                      onChange={branch.onChange}
+                      disabled={isLocked}
+                    />
+                  </div>
+                </InlineRow>
+                <AutoDeployRow branch={source.branch} />
+              </>
+            ) : (
+              <>
+                <SettingRow
+                  label="Image"
+                  htmlFor="workload-config-image"
+                  hint="Tag or digest."
+                >
+                  <Input
+                    id="workload-config-image"
+                    autoComplete="off"
+                    spellCheck={false}
+                    placeholder="nginx:latest"
+                    aria-invalid={!!errors.dockerImage}
+                    className="font-mono"
+                    {...register('dockerImage', {
+                      validate: (value) =>
+                        value.trim() ? true : 'Enter the image to run.',
+                    })}
+                  />
+                  <FieldError
+                    errors={[errors.dockerImage]}
+                    className="mt-1.5"
+                  />
+                </SettingRow>
 
-            <SettingRow
-              label="Entrypoint"
-              htmlFor="workload-config-entrypoint"
-              hint="Replaces ENTRYPOINT."
-            >
-              <Input
-                id="workload-config-entrypoint"
-                autoComplete="off"
-                spellCheck={false}
-                placeholder="Image default"
-                aria-invalid={!!errors.entrypoint}
-                className="font-mono"
-                {...register('entrypoint', { validate: validateArgs })}
-              />
-              <FieldError errors={[errors.entrypoint]} className="mt-1.5" />
-            </SettingRow>
+                <SettingRow
+                  label="Entrypoint"
+                  htmlFor="workload-config-entrypoint"
+                  hint="Replaces ENTRYPOINT."
+                >
+                  <Input
+                    id="workload-config-entrypoint"
+                    autoComplete="off"
+                    spellCheck={false}
+                    placeholder="Image default"
+                    aria-invalid={!!errors.entrypoint}
+                    className="font-mono"
+                    {...register('entrypoint', { validate: validateArgs })}
+                  />
+                  <FieldError errors={[errors.entrypoint]} className="mt-1.5" />
+                </SettingRow>
 
-            <SettingRow
-              label="Command"
-              htmlFor="workload-config-command"
-              hint="Replaces CMD."
-            >
-              <Input
-                id="workload-config-command"
-                autoComplete="off"
-                spellCheck={false}
-                placeholder="Image default"
-                aria-invalid={!!errors.command}
-                aria-describedby="workload-config-command-help"
-                className="font-mono"
-                {...register('command', { validate: validateArgs })}
-              />
-              <p
-                id="workload-config-command-help"
-                className="mt-1.5 text-xs leading-5 text-fg-tertiary"
-              >
-                Split like a shell line. Quote arguments that contain spaces.
-              </p>
-              <FieldError errors={[errors.command]} className="mt-1.5" />
-            </SettingRow>
+                <SettingRow
+                  label="Command"
+                  htmlFor="workload-config-command"
+                  hint="Replaces CMD."
+                >
+                  <Input
+                    id="workload-config-command"
+                    autoComplete="off"
+                    spellCheck={false}
+                    placeholder="Image default"
+                    aria-invalid={!!errors.command}
+                    aria-describedby="workload-config-command-help"
+                    className="font-mono"
+                    {...register('command', { validate: validateArgs })}
+                  />
+                  <p
+                    id="workload-config-command-help"
+                    className="mt-1.5 text-xs leading-5 text-fg-tertiary"
+                  >
+                    Split like a shell line. Quote arguments that contain
+                    spaces.
+                  </p>
+                  <FieldError errors={[errors.command]} className="mt-1.5" />
+                </SettingRow>
+              </>
+            )}
           </div>
         </DetailSection>
 

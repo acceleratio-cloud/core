@@ -15,6 +15,9 @@ export class WorkloadStatusDeriverRegistry {
     for (const deriver of [dockerWorkloadStatusDeriver]) {
       this.derivers.set(deriver.type, deriver);
     }
+
+    // A GitHub service runs as a Docker service once its image is built.
+    this.derivers.set('github', dockerWorkloadStatusDeriver);
   }
 
   get(

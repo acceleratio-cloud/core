@@ -2,6 +2,7 @@ import type { WorkloadConfig, WorkloadPosition } from '@acceleratio/shared';
 import { sql } from 'drizzle-orm';
 import {
   type AnyPgColumn,
+  boolean,
   index,
   jsonb,
   pgEnum,
@@ -52,6 +53,9 @@ export const workload = pgTable(
     internal_hostname: varchar('internal_hostname', { length: 63 }),
     // Storage profile of an `s3_bucket` workload; null for other types. A
     // profile cannot be deleted while a bucket uses it.
+    // `github` workloads: a push to the followed branch deploys it. Applies at
+    // once, outside versions. Other types ignore it.
+    auto_deploy: boolean('auto_deploy').notNull().default(true),
     storage_class_id: uuid('storage_class_id').references(
       () => storageClass.id,
       { onDelete: 'restrict' },

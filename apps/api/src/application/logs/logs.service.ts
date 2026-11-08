@@ -23,6 +23,7 @@ import {
   type ProjectLogStreamEvent,
   type ProjectLogsPage,
 } from '@acceleratio/shared';
+import { isContainerWorkload } from '@acceleratio/shared';
 import { projectNamespace } from '@/common/naming';
 import { ProjectService } from '@/application/project/project.service';
 import { WorkloadService } from '@/application/workload/workload.service';
@@ -268,7 +269,7 @@ export class LogsService implements OnModuleDestroy {
 
     // Every Docker service is listed, even before it has written a line.
     for (const workload of workloads) {
-      if (workload.type === 'docker') {
+      if (isContainerWorkload(workload.type)) {
         workloadOf(workload.id).name = workload.name;
       }
     }

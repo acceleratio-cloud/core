@@ -44,6 +44,7 @@ const namespace = `project-${projectId}`;
 
 const row = (overrides: Partial<WorkloadRow> = {}): WorkloadRow => ({
   id: workloadId,
+  auto_deploy: true,
   project_id: projectId,
   name: 'demo-assets',
   type: 's3_bucket',

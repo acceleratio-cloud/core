@@ -9,12 +9,15 @@ import type {
   UpdateInternalHostnamePayload,
   UpdateWorkloadPayload,
   Workload,
+  WorkloadBuild,
+  WorkloadBuildLog,
   WorkloadEnv,
   WorkloadVersion,
   WorkloadVersionDiff,
 } from '@acceleratio/shared';
 import { ProjectService } from '@/application/project/project.service';
 import { DockerWorkloadService } from './docker/docker-workload.service';
+import { GithubWorkloadService } from './github/github-workload.service';
 import { S3BucketWorkloadService } from './s3-bucket/s3-bucket.service';
 import type { WorkloadTypeService } from './workload-type-service';
 import type { VersionAuthorInput } from './workload-version.service';
@@ -42,20 +45,61 @@ export class WorkloadService {
     private readonly resolver: WorkloadTypeResolver,
     private readonly projectService: ProjectService,
     private readonly s3Buckets: S3BucketWorkloadService,
-    private readonly docker: DockerWorkloadService,
   ) {}
 
   /** Environment variables of a Docker service, values included. */
   async env(projectId: string, id: string): Promise<WorkloadEnv> {
-    const type = await this.resolver.resolve(projectId, id);
+    const service = this.registry.get(
+      await this.resolver.resolve(projectId, id),
+    );
 
-    if (type !== this.docker.type) {
+    if (!(service instanceof DockerWorkloadService)) {
       throw new BadRequestException(
         'Only Docker services have environment variables',
       );
     }
 
-    return this.docker.getEnv(projectId, id);
+    return service.getEnv(projectId, id);
+  }
+
+  /** Recent builds of a GitHub service, newest first. */
+  async builds(projectId: string, id: string): Promise<WorkloadBuild[]> {
+    return (await this.github(projectId, id)).listBuilds(projectId, id);
+  }
+
+  async buildLog(
+    projectId: string,
+    id: string,
+    buildId: string,
+  ): Promise<WorkloadBuildLog> {
+    return (await this.github(projectId, id)).buildLog(projectId, id, buildId);
+  }
+
+  async cancelBuild(
+    projectId: string,
+    id: string,
+    buildId: string,
+  ): Promise<WorkloadBuild> {
+    return (await this.github(projectId, id)).cancelBuild(
+      projectId,
+      id,
+      buildId,
+    );
+  }
+
+  private async github(
+    projectId: string,
+    id: string,
+  ): Promise<GithubWorkloadService> {
+    const service = this.registry.get(
+      await this.resolver.resolve(projectId, id),
+    );
+
+    if (!(service instanceof GithubWorkloadService)) {
+      throw new BadRequestException('Only GitHub services have builds');
+    }
+
+    return service;
   }
 
   /** Renames the private `<hostname>.internal` name of a Docker service. */
@@ -64,15 +108,17 @@ export class WorkloadService {
     id: string,
     payload: UpdateInternalHostnamePayload,
   ): Promise<Workload> {
-    const type = await this.resolver.resolve(projectId, id);
+    const service = this.registry.get(
+      await this.resolver.resolve(projectId, id),
+    );
 
-    if (type !== this.docker.type) {
+    if (!(service instanceof DockerWorkloadService)) {
       throw new BadRequestException(
         'Only Docker services have a private hostname',
       );
     }
 
-    return this.docker.updateInternalHostname(projectId, id, payload);
+    return service.updateInternalHostname(projectId, id, payload);
   }
 
   /** Endpoint and keys of an S3 bucket, including the secret key. */

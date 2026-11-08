@@ -148,7 +148,8 @@ survives restarts; stop it with `make db-down`.
 
 Settings → Integrations creates a GitHub App with no extra setup: GitHub sends
 your browser back to the API, so `localhost` works. GitHub can only deliver
-webhooks (uninstall and suspend events) to an HTTPS address. To receive them
+webhooks (uninstall, suspend and the pushes that deploy GitHub services) to an
+HTTPS address. To receive them
 locally, tunnel the API with ngrok (a free account includes one static domain,
 so the App's URLs survive restarts):
 

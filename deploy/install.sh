@@ -73,6 +73,15 @@ ACCELERATIO_VERSION="${ACCELERATIO_VERSION:-0.1.9}"
 ACCELERATIO_API_IMAGE="${ACCELERATIO_API_IMAGE:-ghcr.io/acceleratio-cloud/api:${ACCELERATIO_VERSION}}"
 ACCELERATIO_CONSOLE_IMAGE="${ACCELERATIO_CONSOLE_IMAGE:-ghcr.io/acceleratio-cloud/console:${ACCELERATIO_VERSION}}"
 POSTGRES_IMAGE="${POSTGRES_IMAGE:-postgres:17-alpine}"
+# Image registry for services built from GitHub. Nodes pull through a mirror
+# in /etc/rancher/k3s/registries.yaml: containerd runs on the host network and
+# cannot resolve cluster DNS, so the Service has a fixed ClusterIP.
+REGISTRY_IMAGE="${REGISTRY_IMAGE:-ghcr.io/project-zot/zot:v2.1.23}"
+REGISTRY_SIZE="${REGISTRY_SIZE:-50Gi}"
+REGISTRY_CLUSTER_IP="${REGISTRY_CLUSTER_IP:-}"
+# Image references in workloads use this name; only the mirror resolves it.
+# Keep in step with REGISTRY_PULL_HOST in the API.
+readonly REGISTRY_HOST="registry.acceleratio.internal"
 ACCELERATIO_DATA_DIR="${ACCELERATIO_DATA_DIR:-/var/lib/acceleratio}"
 POSTGRES_DATA_DIR="${POSTGRES_DATA_DIR:-${ACCELERATIO_DATA_DIR}/postgres}"
 # The console and API are published on these node ports (30000-32767).
@@ -280,6 +289,9 @@ Common variables (environment or --config):
   ACCELERATIO_API_IMAGE       default ghcr.io/acceleratio-cloud/api:<version>
   ACCELERATIO_CONSOLE_IMAGE   default ghcr.io/acceleratio-cloud/console:<version>
   POSTGRES_IMAGE              default postgres:17-alpine
+  REGISTRY_IMAGE              default ghcr.io/project-zot/zot:v2.1.23
+  REGISTRY_SIZE               default 50Gi (volume for built images)
+  REGISTRY_CLUSTER_IP         default <service CIDR>.50 (fixed registry ClusterIP)
   POSTGRES_DATA_DIR           default /var/lib/acceleratio/postgres
   ACCELERATIO_CONSOLE_NODE_PORT default 30300
   ACCELERATIO_API_NODE_PORT   default 30080
@@ -806,19 +818,43 @@ build_k3s_config() {
   } >"$destination"
 }
 
+resolve_registry_cluster_ip() {
+  [ -n "$REGISTRY_CLUSTER_IP" ] && return 0
+  # shortcut: assumes an IPv4 service CIDR of /24 or wider; set
+  # REGISTRY_CLUSTER_IP for anything else.
+  local base="${K3S_SERVICE_CIDR%/*}"
+  REGISTRY_CLUSTER_IP="${base%.*}.50"
+}
+
+# Same mirror the console writes on joined nodes (node-join-script.ts).
+build_k3s_registries() {
+  cat >"$1" <<EOF
+# ${MANAGED_BY} - manual edits will be overwritten.
+mirrors:
+  "${REGISTRY_HOST}":
+    endpoint:
+      - "http://${REGISTRY_CLUSTER_IP}:5000"
+EOF
+}
+
 install_k3s() {
   local installed_version=""
   local install_needed=1
   local config_tmp
+  local registries_tmp
   local install_script
 
   config_tmp="$(mktemp)"
   build_k3s_config "$config_tmp"
+  registries_tmp="$(mktemp)"
+  build_k3s_registries "$registries_tmp"
 
   if (( DRY_RUN )); then
     log_info "DRY-RUN: k3s config:"
     sed 's/^/    /' "$config_tmp"
-    rm -f "$config_tmp"
+    log_info "DRY-RUN: k3s registries.yaml:"
+    sed 's/^/    /' "$registries_tmp"
+    rm -f "$config_tmp" "$registries_tmp"
     log_info "DRY-RUN: would install k3s ${K3S_VERSION:-latest from ${K3S_CHANNEL}}"
     return 0
   fi
@@ -836,6 +872,15 @@ install_k3s() {
     install -m 0600 "$config_tmp" /etc/rancher/k3s/config.yaml
   fi
   rm -f "$config_tmp"
+
+  # k3s reads registries.yaml only at start, so a change needs a restart too.
+  if ! cmp -s "$registries_tmp" /etc/rancher/k3s/registries.yaml 2>/dev/null; then
+    if [ -x /usr/local/bin/k3s ]; then
+      K3S_CONFIG_CHANGED=1
+    fi
+    install -m 0644 "$registries_tmp" /etc/rancher/k3s/registries.yaml
+  fi
+  rm -f "$registries_tmp"
 
   if [ -x /usr/local/bin/k3s ]; then
     installed_version="$(/usr/local/bin/k3s --version 2>/dev/null | awk 'NR == 1 {print $3}')"
@@ -1909,6 +1954,11 @@ spec:
               value: "${VICTORIALOGS_RELEASE}.${VICTORIALOGS_NAMESPACE}:9428"
             - name: PLATFORM_STORAGE_CLASS_NAME
               value: "${STORAGE_CLASS_NAME}"
+            # Where build Jobs push images; nodes pull them as ${REGISTRY_HOST}.
+            - name: BUILD_REGISTRY
+              value: "registry.${ns}.svc.cluster.local:5000"
+            - name: REGISTRY_CLUSTER_IP
+              value: "${REGISTRY_CLUSTER_IP}"
             # Shown in the DNS instructions when an admin sets a custom domain.
             - name: ACCELERATIO_PUBLIC_IP
               value: "${K3S_PUBLIC_IP}"
@@ -2016,6 +2066,135 @@ spec:
       port: 3000
       targetPort: http
       nodePort: ${ACCELERATIO_CONSOLE_NODE_PORT}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: registry
+  namespace: ${ns}
+data:
+  # dedupe hardlinks blobs, which the SeaweedFS FUSE mount does not support.
+  # Retention keeps the build cache and the 20 newest images per service.
+  config.json: |
+    {
+      "distSpecVersion": "1.1.1",
+      "storage": {
+        "rootDirectory": "/var/lib/registry",
+        "dedupe": false,
+        "gc": true,
+        "gcDelay": "1h",
+        "gcInterval": "24h",
+        "retention": {
+          "delay": "24h",
+          "policies": [
+            {
+              "repositories": ["**"],
+              "deleteReferrers": true,
+              "deleteUntagged": true,
+              "keepTags": [
+                { "patterns": ["^buildcache\$"] },
+                { "mostRecentlyPushedCount": 20 }
+              ]
+            }
+          ]
+        }
+      },
+      "http": { "address": "0.0.0.0", "port": "5000" },
+      "log": { "level": "info" }
+    }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: registry
+  namespace: ${ns}
+  labels:
+    app.kubernetes.io/name: registry
+    app.kubernetes.io/part-of: acceleratio
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: ${STORAGE_CLASS_NAME}
+  resources:
+    requests:
+      storage: ${REGISTRY_SIZE}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: registry
+  namespace: ${ns}
+  labels:
+    app.kubernetes.io/name: registry
+    app.kubernetes.io/part-of: acceleratio
+spec:
+  replicas: 1
+  # One writer on a ReadWriteOnce volume.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: registry
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: registry
+        app.kubernetes.io/part-of: acceleratio
+    spec:
+      containers:
+        - name: registry
+          image: ${REGISTRY_IMAGE}
+          imagePullPolicy: IfNotPresent
+          args: ["serve", "/etc/zot/config.json"]
+          ports:
+            - name: http
+              containerPort: 5000
+          readinessProbe:
+            httpGet:
+              path: /v2/
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /v2/
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/zot
+            - name: data
+              mountPath: /var/lib/registry
+      volumes:
+        - name: config
+          configMap:
+            name: registry
+        - name: data
+          persistentVolumeClaim:
+            claimName: registry
+---
+# Not exposed outside the cluster and without auth: project pods cannot reach
+# it (their CiliumNetworkPolicy), build pods may only push to it.
+apiVersion: v1
+kind: Service
+metadata:
+  name: registry
+  namespace: ${ns}
+  labels:
+    app.kubernetes.io/name: registry
+spec:
+  clusterIP: ${REGISTRY_CLUSTER_IP}
+  selector:
+    app.kubernetes.io/name: registry
+  ports:
+    - name: http
+      port: 5000
+      targetPort: http
 EOF
 }
 
@@ -2148,6 +2327,14 @@ install_acceleratio() {
     die "The API did not become ready."
   fi
 
+  log_info "Waiting for the image registry"
+  if ! k3s kubectl -n "$ns" rollout status deployment/registry --timeout=300s; then
+    k3s kubectl -n "$ns" describe pod -l app.kubernetes.io/name=registry || true
+    die "The image registry did not become ready."
+  fi
+  # The address containerd pulls from, checked from the host network.
+  wait_for_http "http://${REGISTRY_CLUSTER_IP}:5000/v2/" "The image registry"
+
   log_info "Waiting for the console"
   if ! k3s kubectl -n "$ns" rollout status deployment/console --timeout=600s; then
     k3s kubectl -n "$ns" describe pod -l app.kubernetes.io/name=console || true
@@ -2275,6 +2462,7 @@ main() {
   log_info "Acceleratio installer ${SCRIPT_NAME} starting"
   validate_cni_paths
   preflight
+  resolve_registry_cluster_ip
 
   if (( RESET )); then
     reset_installation

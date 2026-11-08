@@ -29,7 +29,7 @@ import { WorkloadVersions } from '../workload-versions';
 import type { WorkloadDetailView } from './workload-detail-view';
 
 /** What sets a version apart besides its image, or nothing at the defaults. */
-const configSummary = (config: DockerWorkloadConfig) =>
+export const configSummary = (config: DockerWorkloadConfig) =>
   [
     config.cpu_max === null
       ? 'no CPU limit'

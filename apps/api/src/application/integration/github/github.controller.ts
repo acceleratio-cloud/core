@@ -33,6 +33,10 @@ import {
   GithubService,
   INVALID_STATE_MESSAGE,
 } from './github.service';
+import {
+  type GithubPushPayload,
+  GithubWorkloadService,
+} from '@/application/workload/github/github-workload.service';
 import { verifyWebhookSignature } from './github-webhook';
 
 const INVALID_SIGNATURE_MESSAGE = 'Invalid webhook signature';
@@ -44,7 +48,10 @@ const INVALID_SIGNATURE_MESSAGE = 'Invalid webhook signature';
  */
 @Controller('integrations/github')
 export class GithubController {
-  constructor(private readonly github: GithubService) {}
+  constructor(
+    private readonly github: GithubService,
+    private readonly githubWorkloads: GithubWorkloadService,
+  ) {}
 
   @Get()
   list(): Promise<GithubIntegration> {
@@ -101,6 +108,14 @@ export class GithubController {
     return this.github.repositories(id);
   }
 
+  @Get('apps/:id/branches')
+  branches(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('repository') repository: string | undefined,
+  ): Promise<string[]> {
+    return this.github.branches(id, repository ?? '');
+  }
+
   @Delete('apps/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
   remove(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
@@ -115,11 +130,17 @@ export class GithubController {
     @Req() req: Request & { rawBody?: Buffer },
     @Headers('x-hub-signature-256') signature: string | undefined,
     @Headers('x-github-event') event: string | undefined,
-    @Body() body: InstallationPayload,
+    @Body() body: InstallationPayload & GithubPushPayload,
   ): Promise<void> {
     const secret = await this.github.webhookSecret(id);
     if (!verifyWebhookSignature(secret, req.rawBody, signature)) {
       throw new BadRequestException(INVALID_SIGNATURE_MESSAGE);
+    }
+    if (event === 'push') {
+      // GitHub gives up on a delivery after 10 s; checkout and Job creation
+      // can take longer, so the deploys run after the answer.
+      void this.githubWorkloads.handlePush(id, body);
+      return;
     }
     await this.github.handleWebhook(id, event, body);
   }

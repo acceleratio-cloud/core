@@ -50,7 +50,10 @@ export const DockerVersionConfig = ({
     <DetailStack>
       <DetailSection title="Image and command">
         <PropertyList>
-          <CopyableProperty label="Image" value={config.docker_image} />
+          {/* A GitHub service's draft has no image before its first build. */}
+          {config.docker_image ? (
+            <CopyableProperty label="Image" value={config.docker_image} />
+          ) : null}
           <PropertyRow label="Entrypoint" mono>
             <Args args={config.entrypoint} />
           </PropertyRow>

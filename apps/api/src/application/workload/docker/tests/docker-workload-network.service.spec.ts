@@ -49,6 +49,7 @@ const ip = '203.0.113.10';
 
 const workloadRow = (overrides: Partial<WorkloadRow> = {}): WorkloadRow => ({
   id: workloadId,
+  auto_deploy: true,
   project_id: projectId,
   name: 'My API',
   type: 'docker',

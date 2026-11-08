@@ -162,6 +162,13 @@ describe('install script', () => {
     expect(commandLines[0]).toContain("INSTALL_K3S_VERSION='v1.31.4+k3s1'");
     expect(commandLines[0]).toContain('INSTALL_K3S_EXEC=agent');
   });
+
+  it('mirrors the image registry on the new node', () => {
+    // The service CIDR 10.43.0.0/16 places the registry at .50, as install.sh does.
+    expect(installScript(options)).toContain(
+      '"registry.acceleratio.internal":\n    endpoint:\n      - "http://10.43.0.50:5000"',
+    );
+  });
 });
 
 describe('NodeJoinService', () => {

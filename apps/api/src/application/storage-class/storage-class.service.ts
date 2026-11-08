@@ -17,7 +17,15 @@ import type {
   StorageEnvironment,
   UpdateStorageClassPayload,
 } from '@acceleratio/shared';
-import { and, asc, count as countRows, desc, eq, sql } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  count as countRows,
+  desc,
+  eq,
+  inArray,
+  sql,
+} from 'drizzle-orm';
 import {
   CONFLICT_ID_PREFIX_LENGTH,
   storageClassExternalName,
@@ -588,7 +596,7 @@ export class StorageClassService {
       )
       .where(
         and(
-          eq(workload.type, 'docker'),
+          inArray(workload.type, ['docker', 'github']),
           sql`(${workload.draft_config} -> 'volumes' @> ${reference}::jsonb or ${workloadVersion.config} -> 'volumes' @> ${reference}::jsonb)`,
         ),
       );

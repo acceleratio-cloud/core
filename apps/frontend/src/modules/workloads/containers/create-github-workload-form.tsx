@@ -26,6 +26,7 @@ import {
   FieldLabel,
 } from '@/shared/components/ui/field';
 import { Input } from '@/shared/components/ui/input';
+import { GithubBranchSelect } from './github-branch-select';
 import {
   Select,
   SelectContent,
@@ -142,7 +143,8 @@ export const CreateGithubWorkloadForm = ({
       <DialogHeader>
         <DialogTitle>Create GitHub service</DialogTitle>
         <DialogDescription>
-          Connect a repository branch. Deploying from it is not available yet.
+          Connect a repository branch. Each deploy builds the Dockerfile at its
+          root, or detects the stack with Railpack when there is none.
         </DialogDescription>
       </DialogHeader>
 
@@ -222,14 +224,21 @@ export const CreateGithubWorkloadForm = ({
 
               <Field>
                 <FieldLabel htmlFor="github-branch">Branch</FieldLabel>
-                <Input
-                  id="github-branch"
-                  autoComplete="off"
-                  spellCheck={false}
-                  className="font-mono"
-                  value={branch}
-                  onChange={(event) => setBranch(event.target.value)}
-                />
+                {appId && repository ? (
+                  <GithubBranchSelect
+                    id="github-branch"
+                    appId={appId}
+                    repository={repository.full_name}
+                    value={branch}
+                    onChange={setBranch}
+                  />
+                ) : (
+                  <Input
+                    id="github-branch"
+                    disabled
+                    placeholder="Choose a repository first"
+                  />
+                )}
               </Field>
 
               <Field>

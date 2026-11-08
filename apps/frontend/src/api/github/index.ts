@@ -33,6 +33,13 @@ export const githubApi = {
     );
     return data;
   },
+  branches: async (id: string, repository: string) => {
+    const { data } = await api.get<string[]>(
+      `/integrations/github/apps/${id}/branches`,
+      { params: { repository } },
+    );
+    return data;
+  },
   remove: async (id: string) => {
     await api.delete(`/integrations/github/apps/${id}`);
   },

@@ -204,6 +204,9 @@ Invariants:
 
 - `(project_id, external_name)` is unique. `external_name` becomes the Kubernetes Deployment name,
   is generated once on create, and never changes.
+- `auto_deploy` (migration `0025`, default true) lets a push to the followed branch deploy a `github`
+  workload that was deployed before. It applies at once and is not part of versions; other types
+  ignore it.
 - `internal_hostname` is the private DNS label of a `docker` workload (`<label>.internal` inside the
   project) and names its headless Service. `(project_id, internal_hostname)` is unique; the API also
   keeps it apart from every `external_name` of the project, since that is the name of the domain
@@ -212,7 +215,7 @@ Invariants:
   `0019_workload_internal_hostname` leaves existing Docker rows null; the API names them on startup
   and on their next deploy, never with their `external_name`.
 - `type` selects the shape of every config of the workload (`draft_config` and its versions). The
-  values are `docker`, `s3_bucket` and `github`. A `github` workload is creation-only for now: its `draft_config` holds `github_app_id`, `repository` and `branch`, and nothing is deployed. A `docker` config carries the image reference (`docker_image`) and optional
+  values are `docker`, `s3_bucket` and `github`. A `github` config is a `docker` config plus `github_app_id`, `repository` and `branch` (the App and repository are fixed after creation; the branch can be changed, and the API checks that it exists on GitHub); its `docker_image` and `commit_sha` are written only by a successful build (`workload_build`) and are absent until the first one. A `docker` config carries the image reference (`docker_image`) and optional
   `cpu_max` (vCPU, default 1), `ram_max` (MiB, default 1024), `entrypoint` and `command` (string
   arrays that replace the image's ENTRYPOINT and CMD). An absent limit means the default and a null
   limit means no limit. New services are created with both limits null; configs stored before that
@@ -270,6 +273,18 @@ Invariants:
 - Workloads that were deployed before versions existed were backfilled with v1 holding their config at
   `last_deployed_at`; workloads never deployed got that config as their draft (migration `0007`).
   Migration `0008` then dropped `workload.config`.
+
+### `workload_build`
+
+One image build of a `github` workload (migration `0024`). A deploy inserts a row with the branch head
+`commit_sha` when the current image was not built from it, and starts a BuildKit Job named
+`external_name` in the builds namespace (`acceleratio-builds`). The API polls `building` rows, also
+after a restart: on success it stores `image` (the registry reference by digest), writes it with
+`commit_sha` into the workload's draft and deploys it as `author` (the deploying user, kept so a build
+finishing after a restart still credits them). `log` keeps the last 64 KiB of the builder output once
+the build ends, because the Job and its pod are deleted an hour later. A build cancelled from the
+console or superseded by a newer push ends as `cancelled` (migration `0025`) and is never deployed,
+even when its Job finished first. Rows go with their workload.
 
 ### `workload_domain`
 
@@ -437,6 +452,7 @@ library; do not repurpose them.
 | `storage_benchmark_status` | `pending`, `running`, `succeeded`, `failed` | `storage_benchmark.status` |
 | `storage_class_volume_binding_mode` | `Immediate`, `WaitForFirstConsumer` | `storage_class.volume_binding_mode` |
 | `control_plane_change_status` | `awaiting_dns`, `provisioning`, `failed` | `system_setting.pending_status` |
+| `workload_build_status` | `building`, `succeeded`, `failed`, `cancelled` | `workload_build.status` |
 | `workload_domain_kind` | `generated`, `custom` | `workload_domain.kind` |
 | `workload_domain_status` | `generated`, `verification`, `success`, `failed` | `workload_domain.status` |
 | `workload_domain_certificate_status` | `pending`, `issued`, `failed` | `workload_domain.certificate_status` |

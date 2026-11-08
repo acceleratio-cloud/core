@@ -169,6 +169,27 @@
       "when": 1794139798973,
       "tag": "0023_github_workload_type",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1794141193404,
+      "tag": "0024_workload_build",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1794147303393,
+      "tag": "0025_github_push_deploy",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1794148111810,
+      "tag": "0026_version_github_author",
+      "breakpoints": true
     }
   ]
 }
