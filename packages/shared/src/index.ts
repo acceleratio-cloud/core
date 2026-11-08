@@ -9,3 +9,4 @@ export * from './types/logs';
 export * from './types/terminal';
 export * from './types/network';
 export * from './types/platform-update';
+export * from './types/github';

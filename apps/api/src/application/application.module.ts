@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { AuthController } from '@/application/auth/auth.controller';
 import { PasswordAttemptLimiter } from '@/application/auth/password-attempt-limiter';
 import { HealthController } from '@/application/health/health.controller';
+import { GithubController } from '@/application/integration/github/github.controller';
+import { GithubService } from '@/application/integration/github/github.service';
 import { LogsController } from '@/application/logs/logs.controller';
 import { LogsService } from '@/application/logs/logs.service';
 import { MetricsController } from '@/application/metrics/metrics.controller';
@@ -48,6 +50,7 @@ import { WorkloadTypeResolver } from '@/application/workload/workload-type.resol
 import { WorkloadVersionService } from '@/application/workload/workload-version.service';
 import { SeaweedfsFilerClient } from '@/vendor/seaweedfs/seaweedfs-filer.client';
 import { TraefikClient } from '@/vendor/traefik/traefik.client';
+import { GithubClient } from '@/vendor/github/github.client';
 import { VictoriaLogsClient } from '@/vendor/victorialogs/victorialogs.client';
 import { VictoriaMetricsClient } from '@/vendor/victoriametrics/victoriametrics.client';
 
@@ -61,6 +64,7 @@ import { VictoriaMetricsClient } from '@/vendor/victoriametrics/victoriametrics.
 @Module({
   controllers: [
     AuthController,
+    GithubController,
     HealthController,
     LogsController,
     MetricsController,
@@ -75,6 +79,8 @@ import { VictoriaMetricsClient } from '@/vendor/victoriametrics/victoriametrics.
   ],
   providers: [
     PasswordAttemptLimiter,
+    GithubClient,
+    GithubService,
     NodeService,
     NodeDrainService,
     NodeJoinService,

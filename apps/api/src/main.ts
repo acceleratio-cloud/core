@@ -5,7 +5,10 @@ import { HttpExceptionFilter } from '@/common/http-exception.filter';
 import { isTrustedOrigin } from '@/vendor/auth/trusted-origins';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, {
+    // GitHub webhook signatures are computed over the exact request bytes.
+    rawBody: true,
+  });
 
   app.useGlobalFilters(new HttpExceptionFilter());
 
