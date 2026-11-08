@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   BadRequestException,
   Inject,
@@ -71,6 +72,26 @@ const canonical = (value: unknown): unknown => {
   }
 
   return value;
+};
+
+/**
+ * The id of the version an apply will create, derived from what it applies
+ * and what it replaces. A retry of the same apply gets the same id, so it
+ * writes the same Secret and Deployment and records the same row instead of
+ * rolling out a second time.
+ */
+export const deterministicVersionId = (
+  workloadId: string,
+  parentVersionId: string | null,
+  config: WorkloadConfig,
+): string => {
+  const hex = createHash('sha256')
+    .update(JSON.stringify([workloadId, parentVersionId, canonical(config)]))
+    .digest('hex');
+  const variant = '89ab'[parseInt(hex[16], 16) % 4];
+
+  // Shaped like a random v4 UUID, so every id check that accepts one accepts this.
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-${variant}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
 };
 
 export const sameConfig = (
@@ -216,7 +237,7 @@ export class WorkloadVersionService {
         .select({ latest: max(workloadVersion.number) })
         .from(workloadVersion)
         .where(eq(workloadVersion.workload_id, input.workloadId));
-      const [version] = await tx
+      const [inserted] = await tx
         .insert(workloadVersion)
         .values({
           id: input.id,
@@ -228,7 +249,17 @@ export class WorkloadVersionService {
           created_by_name: input.author?.name ?? null,
           created_by_email: input.author?.email ?? null,
         })
+        .onConflictDoNothing({ target: workloadVersion.id })
         .returning();
+      // An apply that already recorded this id is being retried: finish it.
+      const version =
+        inserted ??
+        (
+          await tx
+            .select()
+            .from(workloadVersion)
+            .where(eq(workloadVersion.id, input.id))
+        )[0];
       const clearDraft =
         input.appliedDraft !== undefined &&
         sameConfig(locked.draft_config, input.appliedDraft);

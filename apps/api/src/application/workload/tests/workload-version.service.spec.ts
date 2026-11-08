@@ -2,6 +2,7 @@ import type { WorkloadConfig } from '@acceleratio/shared';
 import type { Database } from '@/vendor/db/database.constants';
 import type { WorkloadVersionRow } from '../schemas/workload-version.schema';
 import {
+  deterministicVersionId,
   sameConfig,
   toWorkloadVersion,
   WorkloadVersionService,
@@ -17,21 +18,29 @@ const versionId = '5a6b7c8d-9e0f-4a1b-8c2d-3e4f5a6b7c8d';
 const createDatabase = ({
   draft,
   latest,
+  existing,
 }: {
   draft: WorkloadConfig | null;
   latest: number | null;
+  /** A row with the same id is already there, so the insert does nothing. */
+  existing?: Record<string, unknown>;
 }) => {
   const forUpdate = jest.fn().mockResolvedValue([{ draft_config: draft }]);
   const latestWhere = jest.fn().mockResolvedValue([{ latest }]);
   const where = jest
     .fn()
     .mockReturnValueOnce({ for: forUpdate })
-    .mockImplementationOnce(latestWhere);
+    .mockImplementationOnce(latestWhere)
+    .mockResolvedValueOnce(existing === undefined ? [] : [existing]);
   const select = jest.fn().mockReturnValue({ from: () => ({ where }) });
   const insertValues = jest.fn((values: Record<string, unknown>) => ({
-    returning: jest
-      .fn()
-      .mockResolvedValue([{ ...values, created_at: new Date() }]),
+    onConflictDoNothing: () => ({
+      returning: jest
+        .fn()
+        .mockResolvedValue(
+          existing === undefined ? [{ ...values, created_at: new Date() }] : [],
+        ),
+    }),
   }));
   const set = jest.fn().mockReturnValue({ where: jest.fn() });
   const tx = {
@@ -62,8 +71,65 @@ describe('sameConfig', () => {
   });
 });
 
+describe('deterministicVersionId', () => {
+  const config: WorkloadConfig = { docker_image: 'nginx:1.26' };
+  const parent = '6b7c8d9e-0f1a-4b2c-9d3e-4f5a6b7c8d9e';
+
+  it('gives a retry of the same apply the same id, whatever the key order', () => {
+    const reordered = { a: 1, docker_image: 'nginx:1.26' } as WorkloadConfig;
+    const sameKeys = { docker_image: 'nginx:1.26', a: 1 } as WorkloadConfig;
+
+    expect(deterministicVersionId(workloadId, parent, config)).toBe(
+      deterministicVersionId(workloadId, parent, { ...config }),
+    );
+    expect(deterministicVersionId(workloadId, parent, reordered)).toBe(
+      deterministicVersionId(workloadId, parent, sameKeys),
+    );
+  });
+
+  it('differs when the config, the parent or the workload differs', () => {
+    const base = deterministicVersionId(workloadId, parent, config);
+
+    expect(
+      deterministicVersionId(workloadId, parent, {
+        docker_image: 'nginx:1.27',
+      }),
+    ).not.toBe(base);
+    expect(deterministicVersionId(workloadId, null, config)).not.toBe(base);
+    expect(deterministicVersionId(versionId, parent, config)).not.toBe(base);
+  });
+
+  it('looks like a UUID', () => {
+    expect(deterministicVersionId(workloadId, null, config)).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+  });
+});
+
 describe('WorkloadVersionService.record', () => {
   const applied: WorkloadConfig = { docker_image: 'nginx:1.26' };
+
+  it('finishes a retried apply instead of failing on the existing version', async () => {
+    const existing = { id: versionId, workload_id: workloadId, number: 3 };
+    const { db, set } = createDatabase({
+      draft: applied,
+      latest: 3,
+      existing,
+    });
+
+    const version = await new WorkloadVersionService(db).record({
+      id: versionId,
+      workloadId,
+      config: applied,
+      appliedDraft: applied,
+    });
+
+    expect(version).toBe(existing);
+    expect(set).toHaveBeenCalledWith({
+      active_version_id: versionId,
+      draft_config: null,
+    });
+  });
 
   it('numbers the version after the latest one and clears the applied draft', async () => {
     const { db, insertValues, set, forUpdate } = createDatabase({

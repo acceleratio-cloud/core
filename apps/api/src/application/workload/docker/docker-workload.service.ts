@@ -61,6 +61,7 @@ import {
   normalizeWorkloadPosition,
 } from '@/application/workload/workload-position';
 import {
+  deterministicVersionId,
   sameConfig,
   toWorkloadVersion,
   type VersionAuthorInput,
@@ -629,7 +630,11 @@ export class DockerWorkloadService
       ) {
         return this.applyNow(row, {
           config: draft,
-          versionId: randomUUID(),
+          versionId: deterministicVersionId(
+            row.id,
+            row.active_version_id,
+            draft,
+          ),
           newVersion: true,
           appliedDraft: draft,
           author,
@@ -693,9 +698,15 @@ export class DockerWorkloadService
 
       const active = await this.activeVersion(row);
 
+      const config = this.rollbackConfig(target, active);
+
       return this.applyNow(row, {
-        config: this.rollbackConfig(target, active),
-        versionId: randomUUID(),
+        config,
+        versionId: deterministicVersionId(
+          row.id,
+          row.active_version_id,
+          config,
+        ),
         newVersion: true,
         sourceVersionId: target.id,
         author,
