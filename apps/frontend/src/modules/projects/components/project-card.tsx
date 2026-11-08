@@ -11,6 +11,7 @@ import { Skeleton } from '@/shared/components/ui/skeleton';
 import { bucketStatusLabel } from '@/modules/workloads/utils/s3-bucket';
 import { BucketIcon } from '@/shared/icons/bucket-icon';
 import { DockerIcon } from '@/shared/icons/docker-icon';
+import { GithubIcon } from '@/shared/icons/github-icon';
 
 /** Tiles in the preview grid. Past this, the last tile counts the rest. */
 const PREVIEW_SLOTS = 6;
@@ -79,6 +80,8 @@ const WorkloadTile = ({ workload }: { workload: Workload }) => (
     <div className="flex min-w-0 items-center gap-1.5">
       {workload.type === 's3_bucket' ? (
         <BucketIcon className="size-3.5 shrink-0" />
+      ) : workload.type === 'github' ? (
+        <GithubIcon className="size-3.5 shrink-0" />
       ) : (
         <DockerIcon className="size-3.5 shrink-0" />
       )}

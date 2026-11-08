@@ -19,6 +19,7 @@ import { workloadVersion } from './workload-version.schema';
 export const workloadTypeEnum = pgEnum('workload_type', [
   'docker',
   's3_bucket',
+  'github',
 ]);
 
 export const workload = pgTable(

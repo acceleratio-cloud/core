@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import type { WorkloadType } from '@acceleratio/shared';
 import { DockerWorkloadService } from './docker/docker-workload.service';
+import { GithubWorkloadService } from './github/github-workload.service';
 import { S3BucketWorkloadService } from './s3-bucket/s3-bucket.service';
 import type { WorkloadTypeService } from './workload-type-service';
 
@@ -18,8 +19,13 @@ export class WorkloadTypeRegistry {
   constructor(
     dockerWorkloadService: DockerWorkloadService,
     s3BucketWorkloadService: S3BucketWorkloadService,
+    githubWorkloadService: GithubWorkloadService,
   ) {
-    for (const service of [dockerWorkloadService, s3BucketWorkloadService]) {
+    for (const service of [
+      dockerWorkloadService,
+      s3BucketWorkloadService,
+      githubWorkloadService,
+    ]) {
       this.services.set(service.type, service);
     }
   }

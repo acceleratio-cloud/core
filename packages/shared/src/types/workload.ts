@@ -1,4 +1,4 @@
-export type WorkloadType = 'docker' | 's3_bucket';
+export type WorkloadType = 'docker' | 's3_bucket' | 'github';
 
 export type WorkloadStatus =
   'draft' | 'deploying' | 'running' | 'stopped' | 'failed';
@@ -86,7 +86,19 @@ export interface S3BucketConfig {
   storage_class_id: string;
 }
 
-export type WorkloadConfig = DockerWorkloadConfig | S3BucketConfig;
+/** A repository branch connected through a GitHub App of the integration. */
+export interface GithubWorkloadConfig {
+  /** `GithubApp.id` the repository is read through. */
+  github_app_id: string;
+  /** `owner/name`. */
+  repository: string;
+  branch: string;
+}
+
+export type WorkloadConfig =
+  | DockerWorkloadConfig
+  | S3BucketConfig
+  | GithubWorkloadConfig;
 
 /** How a project workload reaches an S3 bucket. The secret key is separate. */
 export interface S3BucketAccess {

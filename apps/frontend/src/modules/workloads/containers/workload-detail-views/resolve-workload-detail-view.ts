@@ -1,5 +1,6 @@
 import type { Workload } from '@acceleratio/shared';
 import { getDockerDetailView } from './docker-detail-view';
+import { getGithubDetailView } from './github-detail-view';
 import { getGenericDetailView } from './generic-detail-view';
 import { getS3BucketDetailView } from './s3-bucket-detail-view';
 import type { WorkloadDetailView } from './workload-detail-view';
@@ -19,6 +20,8 @@ export const resolveWorkloadDetailView = (
       return getDockerDetailView(workload);
     case 's3_bucket':
       return getS3BucketDetailView(workload);
+    case 'github':
+      return getGithubDetailView(workload);
     default:
       workload.type satisfies never;
       return getGenericDetailView(workload);

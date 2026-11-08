@@ -33,6 +33,7 @@ import { SystemService } from '@/application/system/system.service';
 import { DockerWorkloadStatusDeriver } from '@/application/workload/docker/docker-workload.deriver';
 import { DockerWorkloadNetworkService } from '@/application/workload/docker/docker-workload-network.service';
 import { DockerWorkloadService } from '@/application/workload/docker/docker-workload.service';
+import { GithubWorkloadService } from '@/application/workload/github/github-workload.service';
 import { S3BucketObjectsController } from '@/application/workload/s3-bucket/s3-bucket-objects.controller';
 import { S3BucketObjectsService } from '@/application/workload/s3-bucket/s3-bucket-objects.service';
 import { S3BucketWorkloadService } from '@/application/workload/s3-bucket/s3-bucket.service';
@@ -101,6 +102,7 @@ import { VictoriaMetricsClient } from '@/vendor/victoriametrics/victoriametrics.
     DockerWorkloadService,
     DockerWorkloadNetworkService,
     S3BucketWorkloadService,
+    GithubWorkloadService,
     S3BucketObjectsService,
     SeaweedfsFilerClient,
     TraefikClient,

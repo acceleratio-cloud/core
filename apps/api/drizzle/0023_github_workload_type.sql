@@ -1,0 +1,1 @@
+ALTER TYPE "public"."workload_type" ADD VALUE 'github';

@@ -27,11 +27,12 @@ import {
   DialogTrigger,
 } from '@/shared/components/ui/dialog';
 import { CreateDockerWorkloadForm } from './create-docker-workload-form';
+import { CreateGithubWorkloadForm } from './create-github-workload-form';
 import { CreateS3BucketForm } from './create-s3-bucket-form';
 
 /**
- * Types offered in the create dialog. Only `docker` exists in the API
- * contract today; the rest are shown as "coming soon".
+ * Types offered in the create dialog. `comingSoon` options are shown but
+ * cannot be chosen.
  */
 export type WorkloadKind = 'docker' | 'github' | 's3-bucket';
 
@@ -44,11 +45,11 @@ type WorkloadOption = {
 
 const workloadOptions: WorkloadOption[] = [
   { value: 'docker', label: 'Docker', icon: Container },
-  { value: 'github', label: 'GitHub', icon: GitBranch, comingSoon: true },
+  { value: 'github', label: 'GitHub', icon: GitBranch },
   { value: 's3-bucket', label: 'S3 bucket', icon: Database },
 ];
 
-type Step = 'type' | 'docker' | 's3-bucket';
+type Step = 'type' | WorkloadKind;
 
 export const CreateWorkloadDialog = () => {
   const { project, addWorkload } = useProject();
@@ -66,9 +67,7 @@ export const CreateWorkloadDialog = () => {
   };
 
   const handleContinue = () => {
-    if (selected === 'docker' || selected === 's3-bucket') {
-      setStep(selected);
-    }
+    setStep(selected);
   };
 
   const handleCreated = (workload: Workload) => {
@@ -122,6 +121,12 @@ export const CreateWorkloadDialog = () => {
           </>
         ) : step === 'docker' ? (
           <CreateDockerWorkloadForm
+            projectId={project.id}
+            onCreated={handleCreated}
+            onBack={() => setStep('type')}
+          />
+        ) : step === 'github' ? (
+          <CreateGithubWorkloadForm
             projectId={project.id}
             onCreated={handleCreated}
             onBack={() => setStep('type')}
