@@ -208,6 +208,7 @@ describe('Secrets', () => {
       bucket: 'demo-assets',
       endpoint: 'http://s3:8333',
       keys,
+      phase: 'provisioning',
     });
 
     expect(secret.metadata).toMatchObject({

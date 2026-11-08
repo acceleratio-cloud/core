@@ -13,7 +13,7 @@ const HEARTBEAT: MessageEvent = {
 
 /**
  * Fan-out for workload changes. The controller exposes `toSse` per project;
- * the status writer, the type services and the action paths publish into the
+ * the status service, the type services and the action paths publish into the
  * same subject.
  */
 @Injectable()

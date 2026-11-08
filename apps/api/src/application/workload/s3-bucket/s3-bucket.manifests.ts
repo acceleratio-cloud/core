@@ -12,6 +12,15 @@ import {
  */
 export const BUCKET_WORKLOAD_LABEL = 'acceleratio.io/s3-bucket-workload-id';
 export const BUCKET_OPERATION_LABEL = 'acceleratio.io/s3-bucket-operation';
+/**
+ * Where a bucket stands is kept on its project Secret, next to the keys it
+ * describes, so the cluster holds the state and the database does not. A
+ * Secret without the annotation predates it and belongs to a ready bucket.
+ */
+export const BUCKET_PHASE_ANNOTATION = 'acceleratio.io/bucket-phase';
+export const BUCKET_MESSAGE_ANNOTATION = 'acceleratio.io/bucket-message';
+
+export type BucketPhase = 'provisioning' | 'ready' | 'failed';
 
 export const SHELL_CONTAINER = 'weed-shell';
 /** Matches the SeaweedFS chart in deploy/install.sh (4.51.0 ships 4.51). */
@@ -289,6 +298,7 @@ export const buildProjectSecret = (input: {
   bucket: string;
   endpoint: string;
   keys: BucketKeys;
+  phase: BucketPhase;
 }): V1Secret => ({
   apiVersion: 'v1',
   kind: 'Secret',
@@ -296,6 +306,7 @@ export const buildProjectSecret = (input: {
     name: projectSecretName(input.bucket),
     namespace: input.namespace,
     labels: labels(input),
+    annotations: { [BUCKET_PHASE_ANNOTATION]: input.phase },
   },
   type: 'Opaque',
   stringData: {

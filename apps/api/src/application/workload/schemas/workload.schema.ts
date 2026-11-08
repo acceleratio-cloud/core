@@ -6,7 +6,6 @@ import {
   jsonb,
   pgEnum,
   pgTable,
-  text,
   timestamp,
   unique,
   uniqueIndex,
@@ -20,14 +19,6 @@ import { workloadVersion } from './workload-version.schema';
 export const workloadTypeEnum = pgEnum('workload_type', [
   'docker',
   's3_bucket',
-]);
-
-export const workloadStatusEnum = pgEnum('workload_status', [
-  'draft',
-  'deploying',
-  'running',
-  'stopped',
-  'failed',
 ]);
 
 export const workload = pgTable(
@@ -64,10 +55,8 @@ export const workload = pgTable(
       () => storageClass.id,
       { onDelete: 'restrict' },
     ),
-    status: workloadStatusEnum('status').notNull().default('draft'),
-    status_message: text('status_message'),
-    // When the observer last derived the stored status from the cluster.
-    status_observed_at: timestamp('status_observed_at'),
+    // When a deploy action last ran, not when the rollout finished. The
+    // status itself is not stored: it is derived from the cluster on read.
     last_deployed_at: timestamp('last_deployed_at'),
     created_at: timestamp('created_at').defaultNow().notNull(),
     // Use the database clock (same timezone as `defaultNow`) and never move

@@ -9,7 +9,7 @@ export interface WorkloadStatusSnapshot {
 
 /**
  * Maps one cluster snapshot to a workload status. Each workload type owns a
- * deriver; the observer and the writer stay type-agnostic.
+ * deriver; the observer and the status service stay type-agnostic.
  */
 export interface WorkloadStatusDeriver {
   readonly type: WorkloadType;

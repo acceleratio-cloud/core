@@ -36,10 +36,9 @@ import { S3BucketObjectsService } from '@/application/workload/s3-bucket/s3-buck
 import { S3BucketWorkloadService } from '@/application/workload/s3-bucket/s3-bucket.service';
 import { WorkloadInstancesService } from '@/application/workload/instances/workload-instances.service';
 import { WorkloadEventsService } from '@/application/workload/observer/workload-events.service';
-import { WorkloadMutationGuard } from '@/application/workload/observer/workload-mutation-guard';
 import { WorkloadObserverService } from '@/application/workload/observer/workload-observer.service';
 import { WorkloadSnapshotStore } from '@/application/workload/observer/workload-snapshot.store';
-import { WorkloadStatusWriter } from '@/application/workload/observer/workload-status.writer';
+import { WorkloadStatusService } from '@/application/workload/observer/workload-status.service';
 import { WorkloadTerminalService } from '@/application/workload/terminal/workload-terminal.service';
 import { WorkloadController } from '@/application/workload/workload.controller';
 import { WorkloadService } from '@/application/workload/workload.service';
@@ -107,9 +106,8 @@ import { VictoriaMetricsClient } from '@/vendor/victoriametrics/victoriametrics.
     WorkloadEventsService,
     WorkloadInstancesService,
     WorkloadTerminalService,
-    WorkloadMutationGuard,
     WorkloadSnapshotStore,
-    WorkloadStatusWriter,
+    WorkloadStatusService,
     WorkloadObserverService,
     WorkloadTypeRegistry,
     WorkloadTypeResolver,

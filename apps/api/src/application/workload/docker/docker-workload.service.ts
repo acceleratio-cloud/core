@@ -22,7 +22,6 @@ import type {
   Workload,
   WorkloadConfig,
   WorkloadPosition,
-  WorkloadStatus,
   WorkloadVersionDiff,
 } from '@acceleratio/shared';
 import { and, asc, eq, inArray } from 'drizzle-orm';
@@ -46,7 +45,11 @@ import {
 } from '@/vendor/kubernetes/kubernetes-error';
 import { KubernetesService } from '@/vendor/kubernetes/kubernetes.service';
 import { WorkloadEventsService } from '@/application/workload/observer/workload-events.service';
-import { WorkloadMutationGuard } from '@/application/workload/observer/workload-mutation-guard';
+import {
+  DRAFT_STATUS,
+  WorkloadStatusService,
+  type WorkloadStatusView,
+} from '@/application/workload/observer/workload-status.service';
 import {
   workload,
   type WorkloadRow,
@@ -128,12 +131,6 @@ interface ApplyPlan {
   appliedDraft?: DockerWorkloadConfig;
 }
 
-interface WorkloadState {
-  status: WorkloadStatus;
-  status_message: string | null;
-  last_deployed_at?: Date;
-}
-
 /**
  * Drizzle wraps driver failures, so the PostgreSQL error code and constraint
  * name can sit on the error or on one of its causes.
@@ -187,8 +184,9 @@ const describeError = (error: unknown): string =>
  * Complete Docker workload type: rows, external names, manifests, Deployment
  * lifecycle and the mapping to the API contract.
  *
- * Reads are pure database queries. The observer owns status derivation and
- * writes; lifecycle actions here only record the optimistic state.
+ * The database holds the operator's intent. The status is never stored: reads
+ * derive it from the cluster through `WorkloadStatusService`, and lifecycle
+ * actions put the Deployment they applied into its snapshot.
  *
  * Every query is scoped to `type = 'docker'`; other types own their own
  * services and never pass through this one.
@@ -212,7 +210,7 @@ export class DockerWorkloadService
     private readonly projectService: ProjectService,
     private readonly isolation: ProjectIsolationService,
     private readonly kubernetes: KubernetesService,
-    private readonly guard: WorkloadMutationGuard,
+    private readonly status: WorkloadStatusService,
     private readonly events: WorkloadEventsService,
     private readonly versions: WorkloadVersionService,
     private readonly network: DockerWorkloadNetworkService,
@@ -398,12 +396,15 @@ export class DockerWorkloadService
       ),
     );
 
+    const statuses = await this.status.resolveAll(rows);
+
     return rows.map((row) =>
       this.toWorkload(
         row,
         row.active_version_id === null
           ? null
           : (active.get(row.active_version_id) ?? null),
+        statuses.get(row.id) ?? DRAFT_STATUS,
       ),
     );
   }
@@ -471,7 +472,7 @@ export class DockerWorkloadService
     try {
       const [row] = await this.db.insert(workload).values(values).returning();
 
-      return this.toWorkload(row, null);
+      return this.toWorkload(row, null, DRAFT_STATUS);
     } catch (error) {
       if (!isExternalNameConflict(error)) {
         throw error;
@@ -492,7 +493,7 @@ export class DockerWorkloadService
         })
         .returning();
 
-      return this.toWorkload(row, null);
+      return this.toWorkload(row, null, DRAFT_STATUS);
     } catch (error) {
       if (isExternalNameConflict(error)) {
         throw new ConflictException(
@@ -575,7 +576,7 @@ export class DockerWorkloadService
     }
 
     if (Object.keys(updates).length === 0) {
-      return this.toWorkload(existing, active);
+      return this.presentWith(existing, active);
     }
 
     const [row] = await this.db
@@ -583,7 +584,7 @@ export class DockerWorkloadService
       .set(updates)
       .where(eq(workload.id, existing.id))
       .returning();
-    const updated = this.toWorkload(row, active);
+    const updated = await this.presentWith(row, active);
 
     if (updates.position !== undefined) {
       this.events.publish({
@@ -832,7 +833,7 @@ export class DockerWorkloadService
     }
 
     if (row.draft_config === null) {
-      return this.toWorkload(row, active);
+      return this.presentWith(row, active);
     }
 
     const [updated] = await this.db
@@ -841,7 +842,7 @@ export class DockerWorkloadService
       .where(eq(workload.id, row.id))
       .returning();
 
-    return this.toWorkload(updated, active);
+    return this.presentWith(updated, active);
   }
 
   async stop(projectId: string, id: string): Promise<Workload> {
@@ -862,21 +863,18 @@ export class DockerWorkloadService
     deployment.spec.replicas = 0;
 
     try {
-      await this.kubernetes.appsV1.replaceNamespacedDeployment({
-        name: row.external_name,
-        namespace,
-        body: deployment,
-      });
+      this.status.applyDeployment(
+        await this.kubernetes.appsV1.replaceNamespacedDeployment({
+          name: row.external_name,
+          namespace,
+          body: deployment,
+        }),
+      );
     } catch (error) {
       throw this.mapClusterError(error);
     }
 
-    this.guard.noteMutation(row.id);
-
-    return this.persistState(row.id, {
-      status: 'stopped',
-      status_message: null,
-    });
+    return this.announceAction(row.id, false);
   }
 
   async restart(projectId: string, id: string): Promise<Workload> {
@@ -914,22 +912,18 @@ export class DockerWorkloadService
     };
 
     try {
-      await this.kubernetes.appsV1.replaceNamespacedDeployment({
-        name: row.external_name,
-        namespace,
-        body: deployment,
-      });
+      this.status.applyDeployment(
+        await this.kubernetes.appsV1.replaceNamespacedDeployment({
+          name: row.external_name,
+          namespace,
+          body: deployment,
+        }),
+      );
     } catch (error) {
       throw this.mapClusterError(error);
     }
 
-    this.guard.noteMutation(row.id);
-
-    return this.persistState(row.id, {
-      status: 'deploying',
-      status_message: null,
-      last_deployed_at: new Date(),
-    });
+    return this.announceAction(row.id, true);
   }
 
   async remove(projectId: string, id: string): Promise<void> {
@@ -937,7 +931,7 @@ export class DockerWorkloadService
 
     await this.exclusive(row.id, () => this.removeFromCluster(row));
 
-    this.guard.noteMutation(row.id);
+    this.status.forget(row.id);
 
     await this.db
       .delete(workload)
@@ -1024,12 +1018,10 @@ export class DockerWorkloadService
       await this.ensureEnvSecret(input);
       await this.ensureVolumeClaims(input);
       await this.ensurePrivateName(row);
-      await this.upsertDeployment(input);
+      this.status.applyDeployment(await this.upsertDeployment(input));
     } catch (error) {
       throw this.mapClusterError(error);
     }
-
-    this.guard.noteMutation(row.id);
 
     // Housekeeping: a failure here leaves a stale Secret, not a broken deploy.
     try {
@@ -1073,11 +1065,7 @@ export class DockerWorkloadService
       await this.versions.clearAppliedDraft(row.id, plan.appliedDraft);
     }
 
-    return this.persistState(row.id, {
-      status: 'deploying',
-      status_message: null,
-      last_deployed_at: new Date(),
-    });
+    return this.announceAction(row.id, true);
   }
 
   /**
@@ -1385,18 +1373,18 @@ export class DockerWorkloadService
     }
   }
 
-  private async upsertDeployment(row: WorkloadManifestInput): Promise<void> {
+  private async upsertDeployment(
+    row: WorkloadManifestInput,
+  ): Promise<V1Deployment> {
     const namespace = projectNamespace(row.project_id);
     const existing = await this.readDeployment(row.external_name, namespace);
 
     if (existing !== undefined) {
-      await this.replaceDeployment(row, existing.metadata?.resourceVersion);
-
-      return;
+      return this.replaceDeployment(row, existing.metadata?.resourceVersion);
     }
 
     try {
-      await this.kubernetes.appsV1.createNamespacedDeployment({
+      return await this.kubernetes.appsV1.createNamespacedDeployment({
         namespace,
         body: buildDeployment(row),
       });
@@ -1413,14 +1401,14 @@ export class DockerWorkloadService
         throw error;
       }
 
-      await this.replaceDeployment(row, current.metadata?.resourceVersion);
+      return this.replaceDeployment(row, current.metadata?.resourceVersion);
     }
   }
 
   private async replaceDeployment(
     row: WorkloadManifestInput,
     resourceVersion: string | undefined,
-  ): Promise<void> {
+  ): Promise<V1Deployment> {
     if (resourceVersion === undefined) {
       throw new ConflictException('Cluster resource has no resource version');
     }
@@ -1434,7 +1422,7 @@ export class DockerWorkloadService
       });
 
     try {
-      await replace(resourceVersion);
+      return await replace(resourceVersion);
     } catch (error) {
       if (getKubernetesStatusCode(error) !== 409) {
         throw error;
@@ -1447,7 +1435,7 @@ export class DockerWorkloadService
         throw error;
       }
 
-      await replace(currentVersion);
+      return replace(currentVersion);
     }
   }
 
@@ -1481,33 +1469,36 @@ export class DockerWorkloadService
     }
   }
 
-  private async persistState(
+  /**
+   * Answers an action with the workload as the cluster now shows it and tells
+   * the consoles. `deployed` also records that a deploy action ran.
+   */
+  private async announceAction(
     id: string,
-    state: WorkloadState,
+    deployed: boolean,
   ): Promise<Workload> {
-    const [row] = await this.db
-      .update(workload)
-      .set(state)
-      .where(eq(workload.id, id))
-      .returning();
+    const [row] = deployed
+      ? await this.db
+          .update(workload)
+          .set({ last_deployed_at: new Date() })
+          .where(eq(workload.id, id))
+          .returning()
+      : await this.db
+          .select()
+          .from(workload)
+          .where(eq(workload.id, id))
+          .limit(1);
 
     if (!row) {
       throw new NotFoundException('Workload not found');
     }
 
-    const workloadState = await this.present(row);
+    const [active, view] = await Promise.all([
+      this.activeVersion(row),
+      this.status.announce(row),
+    ]);
 
-    this.events.publish({
-      type: 'status',
-      workload_id: row.id,
-      project_id: row.project_id,
-      status: row.status,
-      status_message: row.status_message,
-      status_observed_at: row.status_observed_at?.toISOString() ?? null,
-      updated_at: row.updated_at.toISOString(),
-    });
-
-    return workloadState;
+    return this.toWorkload(row, active, view);
   }
 
   private mapClusterError(error: unknown): HttpException {
@@ -1582,12 +1573,20 @@ export class DockerWorkloadService
   }
 
   private async present(row: WorkloadRow): Promise<Workload> {
-    return this.toWorkload(row, await this.activeVersion(row));
+    return this.presentWith(row, await this.activeVersion(row));
+  }
+
+  private async presentWith(
+    row: WorkloadRow,
+    active: WorkloadVersionRow | null,
+  ): Promise<Workload> {
+    return this.toWorkload(row, active, await this.status.resolve(row));
   }
 
   private toWorkload(
     row: WorkloadRow,
     active: WorkloadVersionRow | null,
+    view: WorkloadStatusView,
   ): Workload {
     return {
       id: row.id,
@@ -1598,9 +1597,9 @@ export class DockerWorkloadService
       draft_config:
         row.draft_config === null ? null : redactDockerConfig(row.draft_config),
       position: row.position,
-      status: row.status,
-      status_message: row.status_message,
-      status_observed_at: row.status_observed_at?.toISOString() ?? null,
+      status: view.status,
+      status_message: view.status_message,
+      status_observed_at: view.status_observed_at,
       external_name: row.external_name,
       namespace: projectNamespace(row.project_id),
       internal_hostname: row.internal_hostname,

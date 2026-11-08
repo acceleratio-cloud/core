@@ -516,3 +516,55 @@ describe('WorkloadSnapshotStore', () => {
     expect(store.ids()).toEqual([]);
   });
 });
+
+describe('WorkloadSnapshotStore status support', () => {
+  const labelled = (resourceVersion: string, uid = 'uid-1'): V1Deployment => ({
+    metadata: {
+      name: 'my-api',
+      uid,
+      resourceVersion,
+      labels: labels(workloadId),
+    },
+  });
+
+  it('is ready only after a resync listed the cluster', () => {
+    const store = new WorkloadSnapshotStore();
+
+    expect(store.isReady()).toBe(false);
+
+    store.replaceAll([], [], Date.now());
+
+    expect(store.isReady()).toBe(true);
+  });
+
+  it('ignores an older revision of the same Deployment', () => {
+    const store = new WorkloadSnapshotStore();
+
+    store.applyDeployment('update', labelled('12'));
+    store.applyDeployment('update', labelled('10'));
+
+    expect(store.get(workloadId)?.deployment?.metadata?.resourceVersion).toBe(
+      '12',
+    );
+  });
+
+  it('takes a revision of a recreated Deployment even when it is lower', () => {
+    const store = new WorkloadSnapshotStore();
+
+    store.applyDeployment('update', labelled('12', 'uid-1'));
+    store.applyDeployment('add', labelled('5', 'uid-2'));
+
+    expect(store.get(workloadId)?.deployment?.metadata?.resourceVersion).toBe(
+      '5',
+    );
+  });
+
+  it('always applies a delete', () => {
+    const store = new WorkloadSnapshotStore();
+
+    store.applyDeployment('update', labelled('12'));
+    store.applyDeployment('delete', labelled('3'));
+
+    expect(store.get(workloadId)?.deployment).toBeUndefined();
+  });
+});

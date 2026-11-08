@@ -11,7 +11,7 @@ import {
   WORKLOAD_ID_LABEL,
 } from '../docker/docker-workload.manifests';
 import { WorkloadSnapshotStore, workloadIdOf } from './workload-snapshot.store';
-import { WorkloadStatusWriter } from './workload-status.writer';
+import { WorkloadStatusService } from './workload-status.service';
 
 const DEFAULT_RESYNC_MS = 60_000;
 const DEBOUNCE_MS = 250;
@@ -47,11 +47,12 @@ const resyncIntervalMs = (): number => {
 
 /**
  * Watches Deployments and Pods cluster-wide, keeps the in-memory snapshot in
- * sync and hands changed workload ids to the single status writer.
+ * sync and hands changed workload ids to the status service, which publishes
+ * the statuses that moved. Nothing is written to the database.
  *
  * The store's `workloadIdOf` validates the id label, so an object whose label
  * is missing or not a canonical UUID never reaches the snapshot or the
- * writer's batched SQL.
+ * status service's batched query.
  *
  * Watch failures never fail bootstrap: each informer is supervised and
  * restarted with exponential backoff while an independent resync converges
@@ -89,7 +90,7 @@ export class WorkloadObserverService
   constructor(
     private readonly watch: KubernetesWatchService,
     private readonly snapshot: WorkloadSnapshotStore,
-    private readonly writer: WorkloadStatusWriter,
+    private readonly status: WorkloadStatusService,
   ) {}
 
   onApplicationBootstrap(): void {
@@ -425,9 +426,9 @@ export class WorkloadObserverService
     // the next flush instead of being dropped with this batch.
     this.dirty.clear();
 
-    void this.writer.write(ids).catch((error: unknown) => {
+    void this.status.announceChanges(ids).catch((error: unknown) => {
       this.logger.error(
-        `Workload status write failed: ${describeError(error)}`,
+        `Workload status update failed: ${describeError(error)}`,
       );
     });
   }
@@ -459,7 +460,7 @@ export class WorkloadObserverService
         return;
       }
 
-      await this.writer.reconcileAll();
+      await this.status.reconcileAll();
     } catch (error) {
       this.logger.error(
         `Workload observer resync failed: ${describeError(error)}`,

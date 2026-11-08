@@ -4,7 +4,7 @@ import { DockerWorkloadStatusDeriver } from './docker/docker-workload.deriver';
 import type { WorkloadStatusDeriver } from './workload-status-deriver';
 
 /**
- * Maps each workload type to its status deriver. The observer and writer look
+ * Maps each workload type to its status deriver. The status service looks
  * derivers up by type and skip unknown types instead of failing a whole sweep.
  */
 @Injectable()

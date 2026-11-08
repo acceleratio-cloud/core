@@ -19,7 +19,6 @@ import type {
   S3BucketCredentials,
   UpdateWorkloadPayload,
   Workload,
-  WorkloadStatus,
   WorkloadVersion as WorkloadVersionContract,
   WorkloadVersionDiff,
 } from '@acceleratio/shared';
@@ -65,7 +64,10 @@ import {
   bucketJobName,
   buildBucketJob,
   buildJobSecret,
+  BUCKET_MESSAGE_ANNOTATION,
+  BUCKET_PHASE_ANNOTATION,
   buildProjectSecret,
+  type BucketPhase,
   DEFAULT_S3_ENDPOINT,
   DEFAULT_SEAWEEDFS_FILER,
   DEFAULT_SEAWEEDFS_MASTER,
@@ -144,6 +146,43 @@ export const bucketErrorFromLog = (log: string | null): string => {
   );
 };
 
+const phaseOf = (secret: V1Secret): BucketPhase => {
+  const phase = secret.metadata?.annotations?.[BUCKET_PHASE_ANNOTATION];
+
+  // A Secret from before the annotation existed belongs to a ready bucket.
+  return phase === 'provisioning' || phase === 'failed' ? phase : 'ready';
+};
+
+/** A bucket's status, read from its Secret: the cluster is the only record. */
+const bucketStatus = (
+  secret: V1Secret | null,
+): Pick<Workload, 'status' | 'status_message' | 'status_observed_at'> => {
+  const observed = new Date().toISOString();
+
+  if (secret === null) {
+    return {
+      status: 'failed',
+      status_message: 'The bucket keys are missing from the cluster',
+      status_observed_at: observed,
+    };
+  }
+
+  const phase = phaseOf(secret);
+  const message =
+    secret.metadata?.annotations?.[BUCKET_MESSAGE_ANNOTATION] ?? null;
+
+  return {
+    status:
+      phase === 'provisioning'
+        ? 'deploying'
+        : phase === 'failed'
+          ? 'failed'
+          : 'running',
+    status_message: phase === 'failed' ? message : null,
+    status_observed_at: observed,
+  };
+};
+
 const decode = (secret: V1Secret, key: string): string | undefined => {
   const value = secret.data?.[key];
 
@@ -184,14 +223,23 @@ export class S3BucketWorkloadService
   async onModuleInit(): Promise<void> {
     try {
       const rows = await this.db
-        .select({ id: workload.id, updated_at: workload.updated_at })
+        .select({ id: workload.id, project_id: workload.project_id })
         .from(workload)
-        .where(
-          and(eq(workload.type, this.type), eq(workload.status, 'deploying')),
-        );
+        .where(eq(workload.type, this.type));
 
-      for (const row of rows) {
-        this.follow(row.id, row.updated_at.getTime());
+      for (const projectId of new Set(rows.map((row) => row.project_id))) {
+        const secrets = await this.listProjectSecrets(projectId);
+
+        for (const [id, secret] of secrets) {
+          if (phaseOf(secret) === 'provisioning') {
+            this.follow(
+              id,
+              new Date(
+                secret.metadata?.creationTimestamp ?? Date.now(),
+              ).getTime(),
+            );
+          }
+        }
       }
     } catch (error) {
       this.logger.warn(
@@ -300,7 +348,6 @@ export class S3BucketWorkloadService
           position: await nextWorkloadPosition(this.db, projectId),
           external_name: bucket,
           storage_class_id: profile.id,
-          status: 'deploying',
           last_deployed_at: new Date(),
         })
         .returning();
@@ -327,6 +374,7 @@ export class S3BucketWorkloadService
           bucket,
           endpoint: this.endpoint,
           keys,
+          phase: 'provisioning',
         }),
       );
 
@@ -411,10 +459,11 @@ export class S3BucketWorkloadService
   /** The bucket name of a bucket whose contents can be read and written. */
   async readyBucket(projectId: string, id: string): Promise<string> {
     const row = await this.findRow(projectId, id);
+    const { status } = bucketStatus(await this.readProjectSecret(row));
 
-    if (row.status !== 'running') {
+    if (status !== 'running') {
       throw new ConflictException(
-        row.status === 'deploying'
+        status === 'deploying'
           ? 'The bucket is still being created'
           : 'The bucket is not available',
       );
@@ -436,7 +485,7 @@ export class S3BucketWorkloadService
   ): Promise<S3BucketCredentials> {
     const row = await this.findRow(projectId, id);
 
-    if (row.status !== 'running') {
+    if (bucketStatus(await this.readProjectSecret(row)).status !== 'running') {
       throw new ConflictException(
         'Keys can be regenerated once the bucket is ready',
       );
@@ -495,6 +544,7 @@ export class S3BucketWorkloadService
             bucket: row.external_name,
             endpoint: this.endpoint,
             keys,
+            phase: 'ready',
           }),
         );
       } catch (error) {
@@ -823,7 +873,7 @@ export class S3BucketWorkloadService
     }
   }
 
-  /** True once the row left `deploying`, or there is no row to update. */
+  /** True once the bucket left `provisioning`, or there is nothing to follow. */
   private async checkCreate(id: string, startedAt: number): Promise<boolean> {
     const [row] = await this.db
       .select()
@@ -831,7 +881,13 @@ export class S3BucketWorkloadService
       .where(and(eq(workload.id, id), eq(workload.type, this.type)))
       .limit(1);
 
-    if (!row || row.status !== 'deploying') {
+    if (!row) {
+      return true;
+    }
+
+    const secret = await this.readProjectSecret(row);
+
+    if (secret === null || phaseOf(secret) !== 'provisioning') {
       return true;
     }
 
@@ -839,8 +895,9 @@ export class S3BucketWorkloadService
     const job = await this.readJob(name);
 
     if (job === null) {
-      await this.persistState(
+      await this.recordPhase(
         row,
+        secret,
         'failed',
         'The provisioning Job is gone from the cluster',
       );
@@ -851,14 +908,15 @@ export class S3BucketWorkloadService
     const outcome = jobOutcome(job);
 
     if (outcome === 'succeeded') {
-      await this.persistState(row, 'running', null);
+      await this.recordPhase(row, secret, 'ready', null);
 
       return true;
     }
 
     if (outcome === 'failed') {
-      await this.persistState(
+      await this.recordPhase(
         row,
+        secret,
         'failed',
         bucketErrorFromLog(await this.readLog(name)),
       );
@@ -867,8 +925,9 @@ export class S3BucketWorkloadService
     }
 
     if (Date.now() - startedAt > GIVE_UP_AFTER_MS) {
-      await this.persistState(
+      await this.recordPhase(
         row,
+        secret,
         'failed',
         'SeaweedFS did not create the bucket in time',
       );
@@ -879,33 +938,43 @@ export class S3BucketWorkloadService
     return false;
   }
 
-  private async persistState(
+  /**
+   * Writes the outcome of the create Job onto the bucket's Secret and tells
+   * the consoles. The Secret is replaced at the version that was read, so a
+   * concurrent key rotation makes this write fail and be retried instead of
+   * being overwritten.
+   */
+  private async recordPhase(
     row: WorkloadRow,
-    status: WorkloadStatus,
+    secret: V1Secret,
+    phase: BucketPhase,
     message: string | null,
   ): Promise<void> {
-    const [updated] = await this.db
-      .update(workload)
-      .set({
-        status,
-        status_message: message,
-        status_observed_at: new Date(),
-      })
-      .where(and(eq(workload.id, row.id), eq(workload.status, 'deploying')))
-      .returning();
+    const annotations = { ...secret.metadata?.annotations };
 
-    if (!updated) {
-      return;
+    annotations[BUCKET_PHASE_ANNOTATION] = phase;
+
+    if (message === null) {
+      delete annotations[BUCKET_MESSAGE_ANNOTATION];
+    } else {
+      annotations[BUCKET_MESSAGE_ANNOTATION] = message;
     }
+
+    const updated = await this.kubernetes.coreV1.replaceNamespacedSecret({
+      name: secret.metadata!.name!,
+      namespace: secret.metadata!.namespace!,
+      body: { ...secret, metadata: { ...secret.metadata, annotations } },
+    });
+    const view = bucketStatus(updated);
 
     this.events.publish({
       type: 'status',
-      workload_id: updated.id,
-      project_id: updated.project_id,
-      status: updated.status,
-      status_message: updated.status_message,
-      status_observed_at: updated.status_observed_at?.toISOString() ?? null,
-      updated_at: updated.updated_at.toISOString(),
+      workload_id: row.id,
+      project_id: row.project_id,
+      status: view.status,
+      status_message: view.status_message,
+      status_observed_at: view.status_observed_at,
+      updated_at: row.updated_at.toISOString(),
     });
   }
 
@@ -1099,9 +1168,7 @@ export class S3BucketWorkloadService
       active_version: active === null ? null : toWorkloadVersion(active),
       draft_config: null,
       position: row.position,
-      status: row.status,
-      status_message: row.status_message,
-      status_observed_at: row.status_observed_at?.toISOString() ?? null,
+      ...bucketStatus(secret),
       external_name: row.external_name,
       namespace: projectNamespace(row.project_id),
       last_deployed_at: row.last_deployed_at?.toISOString() ?? null,

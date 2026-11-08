@@ -1,7 +1,7 @@
 import { Logger } from '@nestjs/common';
 import type { V1Deployment, V1Pod } from '@kubernetes/client-node';
 import type { KubernetesWatchService } from '@/vendor/kubernetes/kubernetes-watch.service';
-import type { WorkloadStatusWriter } from '../workload-status.writer';
+import type { WorkloadStatusService } from '../workload-status.service';
 import { WORKLOAD_ID_LABEL } from '../../docker/docker-workload.manifests';
 import {
   WorkloadSnapshotStore,
@@ -14,12 +14,12 @@ import {
 } from '../workload-observer.service';
 
 // The real watch service pulls in the ESM-only Kubernetes client and the
-// writer pulls in the database. Both are injected collaborators here.
+// status service pulls in the database. Both are injected collaborators here.
 jest.mock('@/vendor/kubernetes/kubernetes-watch.service', () => ({
   KubernetesWatchService: class KubernetesWatchService {},
 }));
-jest.mock('../workload-status.writer', () => ({
-  WorkloadStatusWriter: class WorkloadStatusWriter {},
+jest.mock('../workload-status.service', () => ({
+  WorkloadStatusService: class WorkloadStatusService {},
 }));
 
 const workloadId = '3f9a1b2c-4d5e-6f70-8192-a3b4c5d6e7f8';
@@ -44,7 +44,7 @@ interface Harness {
     listPods: jest.Mock;
   };
   writer: {
-    write: jest.Mock;
+    announceChanges: jest.Mock;
     reconcileAll: jest.Mock;
   };
   snapshot: WorkloadSnapshotStore;
@@ -91,14 +91,14 @@ const createHarness = (): Harness => {
     listPods: jest.fn().mockResolvedValue([]),
   };
   const writer = {
-    write: jest.fn().mockResolvedValue(undefined),
+    announceChanges: jest.fn().mockResolvedValue(undefined),
     reconcileAll: jest.fn().mockResolvedValue(undefined),
   };
   const snapshot = new WorkloadSnapshotStore();
   const observer = new WorkloadObserverService(
     watch as unknown as KubernetesWatchService,
     snapshot,
-    writer as unknown as WorkloadStatusWriter,
+    writer as unknown as WorkloadStatusService,
   );
 
   return { observer, watch, writer, snapshot, deployments, pods };
@@ -192,12 +192,15 @@ describe('WorkloadObserverService', () => {
 
     jest.advanceTimersByTime(249);
 
-    expect(writer.write).not.toHaveBeenCalled();
+    expect(writer.announceChanges).not.toHaveBeenCalled();
 
     jest.advanceTimersByTime(1);
 
-    expect(writer.write).toHaveBeenCalledTimes(1);
-    expect(writer.write).toHaveBeenCalledWith([workloadId, otherWorkloadId]);
+    expect(writer.announceChanges).toHaveBeenCalledTimes(1);
+    expect(writer.announceChanges).toHaveBeenCalledWith([
+      workloadId,
+      otherWorkloadId,
+    ]);
 
     await observer.stop();
   });
@@ -220,12 +223,12 @@ describe('WorkloadObserverService', () => {
       deployments[0].emit('update', deployment(id));
     }
 
-    expect(writer.write).not.toHaveBeenCalled();
+    expect(writer.announceChanges).not.toHaveBeenCalled();
 
     jest.advanceTimersByTime(200);
 
-    expect(writer.write).toHaveBeenCalledTimes(1);
-    expect(writer.write).toHaveBeenCalledWith(ids);
+    expect(writer.announceChanges).toHaveBeenCalledTimes(1);
+    expect(writer.announceChanges).toHaveBeenCalledWith(ids);
 
     await observer.stop();
   });
@@ -240,7 +243,7 @@ describe('WorkloadObserverService', () => {
     jest.advanceTimersByTime(500);
 
     expect(snapshot.ids()).toEqual([]);
-    expect(writer.write).not.toHaveBeenCalled();
+    expect(writer.announceChanges).not.toHaveBeenCalled();
 
     await observer.stop();
   });
@@ -257,7 +260,7 @@ describe('WorkloadObserverService', () => {
 
     expect(snapshot.ids()).toEqual([]);
     expect(snapshot.deploymentObservedAt(invalidId)).toBe(0);
-    expect(writer.write).not.toHaveBeenCalled();
+    expect(writer.announceChanges).not.toHaveBeenCalled();
 
     await observer.stop();
   });
@@ -559,7 +562,7 @@ describe('WorkloadObserverService', () => {
     let resolveWrite: () => void = () => undefined;
 
     await observer.start();
-    writer.write.mockImplementationOnce(
+    writer.announceChanges.mockImplementationOnce(
       () =>
         new Promise<void>((resolve) => {
           resolveWrite = resolve;
@@ -569,7 +572,7 @@ describe('WorkloadObserverService', () => {
     deployments[0].emit('add', deployment(workloadId));
     jest.advanceTimersByTime(250);
 
-    expect(writer.write).toHaveBeenCalledTimes(1);
+    expect(writer.announceChanges).toHaveBeenCalledTimes(1);
 
     deployments[0].emit('add', deployment(otherWorkloadId));
     resolveWrite();
@@ -577,17 +580,17 @@ describe('WorkloadObserverService', () => {
 
     jest.advanceTimersByTime(250);
 
-    expect(writer.write).toHaveBeenCalledTimes(2);
-    expect(writer.write).toHaveBeenLastCalledWith([otherWorkloadId]);
+    expect(writer.announceChanges).toHaveBeenCalledTimes(2);
+    expect(writer.announceChanges).toHaveBeenLastCalledWith([otherWorkloadId]);
 
     await observer.stop();
   });
 
-  it('logs a writer failure without crashing', async () => {
+  it('logs a status update failure without crashing', async () => {
     const { observer, deployments, writer } = createHarness();
 
     await observer.start();
-    writer.write.mockRejectedValueOnce(new Error('database is down'));
+    writer.announceChanges.mockRejectedValueOnce(new Error('database is down'));
 
     deployments[0].emit('add', deployment(workloadId));
     jest.advanceTimersByTime(250);
@@ -622,7 +625,7 @@ describe('WorkloadObserverService', () => {
     podInformer.emit('add', pod(workloadId));
     await jest.advanceTimersByTimeAsync(60_000);
 
-    expect(writer.write).not.toHaveBeenCalled();
+    expect(writer.announceChanges).not.toHaveBeenCalled();
     expect(watch.listDeployments).toHaveBeenCalledTimes(1);
     expect(writer.reconcileAll).toHaveBeenCalledTimes(1);
   });

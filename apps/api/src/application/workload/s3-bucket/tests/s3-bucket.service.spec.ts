@@ -53,9 +53,6 @@ const row = (overrides: Partial<WorkloadRow> = {}): WorkloadRow => ({
   external_name: 'demo-assets',
   internal_hostname: null,
   storage_class_id: profileId,
-  status: 'deploying',
-  status_message: null,
-  status_observed_at: null,
   last_deployed_at: new Date('2026-11-04T10:00:00.000Z'),
   created_at: new Date('2026-11-04T10:00:00.000Z'),
   updated_at: new Date('2026-11-04T10:00:00.000Z'),
@@ -133,10 +130,22 @@ const job = (status: V1Job['status'] = {}): V1Job => ({
   status,
 });
 
-const projectSecret = () => ({
+/** A Secret without a phase is one written before phases existed: ready. */
+const projectSecret = (phase?: string, message?: string) => ({
   metadata: {
     name: 's3-demo-assets',
+    namespace,
     labels: { [BUCKET_WORKLOAD_LABEL]: workloadId },
+    ...(phase === undefined
+      ? {}
+      : {
+          annotations: {
+            'acceleratio.io/bucket-phase': phase,
+            ...(message === undefined
+              ? {}
+              : { 'acceleratio.io/bucket-message': message }),
+          },
+        }),
   },
   data: {
     AWS_ACCESS_KEY_ID: Buffer.from('ACKEY').toString('base64'),
@@ -152,7 +161,11 @@ const createService = () => {
   const database = createDatabase();
   const coreV1 = {
     createNamespacedSecret: jest.fn().mockResolvedValue({}),
-    replaceNamespacedSecret: jest.fn().mockResolvedValue({}),
+    replaceNamespacedSecret: jest
+      .fn()
+      .mockImplementation(({ body }: { body: unknown }) =>
+        Promise.resolve(body),
+      ),
     deleteNamespacedSecret: jest.fn().mockResolvedValue({}),
     readNamespacedSecret: jest.fn().mockResolvedValue(projectSecret()),
     listNamespacedSecret: jest.fn().mockResolvedValue({ items: [] }),
@@ -226,6 +239,9 @@ describe('S3BucketWorkloadService.create', () => {
 
     results.select.push([], [row()]);
     results.insert.push([row()]);
+    coreV1.readNamespacedSecret.mockResolvedValue(
+      projectSecret('provisioning'),
+    );
 
     const created = await service.create(projectId, {
       name: ' demo-assets ',
@@ -240,8 +256,8 @@ describe('S3BucketWorkloadService.create', () => {
       type: 's3_bucket',
       external_name: 'demo-assets',
       storage_class_id: profileId,
-      status: 'deploying',
     });
+    expect(calls.insertValues[0]).not.toHaveProperty('status');
     const [[recorded]] = context.versions.record.mock.calls as [
       [{ workloadId: string; config: unknown }],
     ];
@@ -254,7 +270,13 @@ describe('S3BucketWorkloadService.create', () => {
 
     expect(projectCall[0]).toMatchObject({
       namespace,
-      body: { metadata: { name: 's3-demo-assets', namespace } },
+      body: {
+        metadata: {
+          name: 's3-demo-assets',
+          namespace,
+          annotations: { 'acceleratio.io/bucket-phase': 'provisioning' },
+        },
+      },
     });
     expect(jobSecretCall[0]).toMatchObject({
       namespace: 'seaweedfs',
@@ -334,28 +356,43 @@ describe('S3BucketWorkloadService.create', () => {
 });
 
 describe('S3BucketWorkloadService provisioning poll', () => {
-  it('marks the bucket running when the Job succeeds', async () => {
-    const { service, results, calls, batchV1, events } = createService();
+  const provisioning = (context: ReturnType<typeof createService>) => {
+    context.results.select.push([row()]);
+    context.coreV1.readNamespacedSecret.mockResolvedValue(
+      projectSecret('provisioning'),
+    );
+  };
 
-    results.select.push([row()]);
-    results.update.push([row({ status: 'running' })]);
+  const writtenAnnotations = (coreV1: { replaceNamespacedSecret: jest.Mock }) =>
+    (
+      (coreV1.replaceNamespacedSecret.mock.calls as unknown[][])[0][0] as {
+        body: { metadata: { annotations: Record<string, string> } };
+      }
+    ).body.metadata.annotations;
+
+  it('marks the bucket ready on its Secret when the Job succeeds', async () => {
+    const context = createService();
+    const { service, batchV1, events, coreV1, results } = context;
+
+    provisioning(context);
     batchV1.readNamespacedJob.mockResolvedValue(job({ succeeded: 1 }));
 
     await expect(checkCreate(service, Date.now())).resolves.toBe(true);
-    expect(calls.updateSet[0]).toMatchObject({
-      status: 'running',
-      status_message: null,
+    expect(writtenAnnotations(coreV1)).toEqual({
+      'acceleratio.io/bucket-phase': 'ready',
     });
+    expect(results.update).toHaveLength(0);
+    expect(context.calls.updateSet).toHaveLength(0);
     expect(events.publish).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'status', status: 'running' }),
     );
   });
 
   it('marks the bucket failed with the error the Job logged', async () => {
-    const { service, results, calls, batchV1, coreV1 } = createService();
+    const context = createService();
+    const { service, batchV1, coreV1, events } = context;
 
-    results.select.push([row()]);
-    results.update.push([row({ status: 'failed' })]);
+    provisioning(context);
     batchV1.readNamespacedJob.mockResolvedValue(job({ failed: 1 }));
     coreV1.readNamespacedPodLog.mockResolvedValue(
       'BUCKET_ERROR bucket demo-assets already exists\n',
@@ -363,44 +400,108 @@ describe('S3BucketWorkloadService provisioning poll', () => {
 
     await checkCreate(service, Date.now());
 
-    expect(calls.updateSet[0]).toMatchObject({
-      status: 'failed',
-      status_message: 'bucket demo-assets already exists',
+    expect(writtenAnnotations(coreV1)).toEqual({
+      'acceleratio.io/bucket-phase': 'failed',
+      'acceleratio.io/bucket-message': 'bucket demo-assets already exists',
     });
+    expect(events.publish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'failed',
+        status_message: 'bucket demo-assets already exists',
+      }),
+    );
   });
 
   it('keeps polling while the Job runs', async () => {
-    const { service, results, calls, batchV1 } = createService();
+    const context = createService();
 
-    results.select.push([row()]);
-    batchV1.readNamespacedJob.mockResolvedValue(job({ active: 1 }));
+    provisioning(context);
+    context.batchV1.readNamespacedJob.mockResolvedValue(job({ active: 1 }));
 
-    await expect(checkCreate(service, Date.now())).resolves.toBe(false);
-    expect(calls.updateSet).toHaveLength(0);
+    await expect(checkCreate(context.service, Date.now())).resolves.toBe(false);
+    expect(context.coreV1.replaceNamespacedSecret).not.toHaveBeenCalled();
   });
 
   it('gives up on a Job that never finishes', async () => {
-    const { service, results, calls, batchV1 } = createService();
+    const context = createService();
 
-    results.select.push([row()]);
-    results.update.push([row({ status: 'failed' })]);
-    batchV1.readNamespacedJob.mockResolvedValue(job({ active: 1 }));
+    provisioning(context);
+    context.batchV1.readNamespacedJob.mockResolvedValue(job({ active: 1 }));
 
-    await checkCreate(service, Date.now() - 60 * 60 * 1000);
+    await checkCreate(context.service, Date.now() - 60 * 60 * 1000);
 
-    expect(calls.updateSet[0]).toMatchObject({
-      status: 'failed',
-      status_message: 'SeaweedFS did not create the bucket in time',
+    expect(writtenAnnotations(context.coreV1)).toEqual({
+      'acceleratio.io/bucket-phase': 'failed',
+      'acceleratio.io/bucket-message':
+        'SeaweedFS did not create the bucket in time',
     });
   });
 
-  it('stops once the row is no longer deploying', async () => {
-    const { service, results, batchV1 } = createService();
+  it('stops once the bucket is no longer provisioning', async () => {
+    const { service, results, batchV1, coreV1 } = createService();
 
-    results.select.push([row({ status: 'running' })]);
+    results.select.push([row()]);
+    coreV1.readNamespacedSecret.mockResolvedValue(projectSecret('ready'));
 
     await expect(checkCreate(service, Date.now())).resolves.toBe(true);
     expect(batchV1.readNamespacedJob).not.toHaveBeenCalled();
+  });
+
+  it('follows buckets that were still provisioning when the API stopped', async () => {
+    const { service, results, coreV1 } = createService();
+    const pending = {
+      ...projectSecret('provisioning'),
+      metadata: {
+        ...projectSecret('provisioning').metadata,
+        creationTimestamp: new Date(),
+      },
+    };
+
+    results.select.push([{ id: workloadId, project_id: projectId }]);
+    coreV1.listNamespacedSecret.mockResolvedValue({ items: [pending] });
+
+    await service.onModuleInit();
+
+    const timers = (service as unknown as { timers: Map<string, unknown> })
+      .timers;
+
+    expect(timers.has(workloadId)).toBe(true);
+    service.onModuleDestroy();
+  });
+});
+
+describe('S3BucketWorkloadService status', () => {
+  it.each([
+    ['provisioning', undefined, 'deploying', null],
+    ['ready', undefined, 'running', null],
+    ['failed', 'filer down', 'failed', 'filer down'],
+    [undefined, undefined, 'running', null],
+  ])(
+    'reads the %s phase from the Secret',
+    async (phase, message, expected, expectedMessage) => {
+      const { service, results, coreV1 } = createService();
+
+      results.select.push([row()]);
+      coreV1.readNamespacedSecret.mockResolvedValue(
+        projectSecret(phase, message),
+      );
+
+      await expect(service.get(projectId, workloadId)).resolves.toMatchObject({
+        status: expected,
+        status_message: expectedMessage,
+      });
+    },
+  );
+
+  it('reports a bucket whose Secret is gone as failed', async () => {
+    const { service, results, coreV1 } = createService();
+
+    results.select.push([row()]);
+    coreV1.readNamespacedSecret.mockRejectedValue(notFound());
+
+    await expect(service.get(projectId, workloadId)).resolves.toMatchObject({
+      status: 'failed',
+    });
   });
 });
 
@@ -408,7 +509,7 @@ describe('S3BucketWorkloadService.remove', () => {
   it('runs the delete Job, then removes the keys and the row', async () => {
     const { service, results, calls, batchV1, coreV1 } = createService();
 
-    results.select.push([row({ status: 'running' })]);
+    results.select.push([row()]);
     batchV1.readNamespacedJob
       // The stale-Job check finds nothing, then the new Job has finished.
       .mockRejectedValueOnce(notFound())
@@ -431,7 +532,7 @@ describe('S3BucketWorkloadService.remove', () => {
   it('keeps the row when SeaweedFS reports an error', async () => {
     const { service, results, calls, batchV1, coreV1 } = createService();
 
-    results.select.push([row({ status: 'running' })]);
+    results.select.push([row()]);
     batchV1.readNamespacedJob
       .mockRejectedValueOnce(notFound())
       .mockResolvedValue(job({ failed: 1 }));
@@ -501,10 +602,7 @@ describe('S3BucketWorkloadService.rotateCredentials', () => {
     const { service, results, coreV1, batchV1 } = createService();
 
     // findRow for the rotation, then for the credentials it returns.
-    results.select.push(
-      [row({ status: 'running' })],
-      [row({ status: 'running' })],
-    );
+    results.select.push([row()], [row()]);
     batchV1.createNamespacedJob.mockResolvedValue(rotateJob({}));
     batchV1.readNamespacedJob
       .mockRejectedValueOnce(notFound())
@@ -542,7 +640,7 @@ describe('S3BucketWorkloadService.rotateCredentials', () => {
   it('keeps the old Secret when SeaweedFS refuses', async () => {
     const { service, results, coreV1, batchV1 } = createService();
 
-    results.select.push([row({ status: 'running' })]);
+    results.select.push([row()]);
     batchV1.createNamespacedJob.mockResolvedValue(rotateJob({}));
     batchV1.readNamespacedJob
       .mockRejectedValueOnce(notFound())
@@ -558,9 +656,12 @@ describe('S3BucketWorkloadService.rotateCredentials', () => {
   });
 
   it('waits until the bucket is ready', async () => {
-    const { service, results, batchV1 } = createService();
+    const { service, results, batchV1, coreV1 } = createService();
 
-    results.select.push([row({ status: 'deploying' })]);
+    results.select.push([row()]);
+    coreV1.readNamespacedSecret.mockResolvedValue(
+      projectSecret('provisioning'),
+    );
 
     await expect(
       service.rotateCredentials(projectId, workloadId),
@@ -571,12 +672,12 @@ describe('S3BucketWorkloadService.rotateCredentials', () => {
 
 describe('S3BucketWorkloadService.readyBucket', () => {
   it('returns the name of a ready bucket and refuses others', async () => {
-    const { service, results } = createService();
+    const { service, results, coreV1 } = createService();
 
-    results.select.push(
-      [row({ status: 'running' })],
-      [row({ status: 'deploying' })],
-    );
+    results.select.push([row()], [row()]);
+    coreV1.readNamespacedSecret
+      .mockResolvedValueOnce(projectSecret('ready'))
+      .mockResolvedValueOnce(projectSecret('provisioning'));
 
     await expect(service.readyBucket(projectId, workloadId)).resolves.toBe(
       'demo-assets',
@@ -591,7 +692,7 @@ describe('S3BucketWorkloadService.credentials', () => {
   it('returns the secret key from the project Secret', async () => {
     const { service, results } = createService();
 
-    results.select.push([row({ status: 'running' })]);
+    results.select.push([row()]);
 
     await expect(service.credentials(projectId, workloadId)).resolves.toEqual({
       bucket: 'demo-assets',
@@ -606,7 +707,7 @@ describe('S3BucketWorkloadService.credentials', () => {
   it('ignores a Secret of that name the bucket did not write', async () => {
     const { service, results, coreV1 } = createService();
 
-    results.select.push([row({ status: 'running' })]);
+    results.select.push([row()]);
     coreV1.readNamespacedSecret.mockResolvedValue({
       ...projectSecret(),
       metadata: { name: 's3-demo-assets', labels: {} },

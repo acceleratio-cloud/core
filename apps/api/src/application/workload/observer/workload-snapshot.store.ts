@@ -48,6 +48,28 @@ const entryObservedAt = (entry: StoredSnapshot): number =>
 const WORKLOAD_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/**
+ * True when `incoming` is an older revision of the same Deployment object
+ * than `current`. Resource versions are opaque to clients, but etcd hands out
+ * increasing integers; when either side does not parse, nothing is ignored.
+ */
+const isOlderVersion = (
+  incoming: V1Deployment,
+  current: V1Deployment | undefined,
+): boolean => {
+  if (
+    current === undefined ||
+    incoming.metadata?.uid !== current.metadata?.uid
+  ) {
+    return false;
+  }
+
+  const next = Number(incoming.metadata?.resourceVersion);
+  const known = Number(current.metadata?.resourceVersion);
+
+  return Number.isInteger(next) && Number.isInteger(known) && next < known;
+};
+
 const emptyEntry = (): StoredSnapshot => ({
   deployment: undefined,
   deploymentObserved: false,
@@ -91,15 +113,22 @@ export const workloadIdOf = (resource: unknown): string | undefined => {
  * In-memory view of the cluster: one entry per workload id, holding its
  * Deployment and Pods. Every applied event refreshes the observation time of
  * the part it changed. `deploymentObservedAt` exposes the Deployment part's
- * clock, which the writer uses to fence status writes against recent user
- * actions: a Pod event must not release that fence while the cached
- * Deployment still predates the action. `retain` drops entries the full sweep
- * no longer backs.
+ * clock, which is also the observation time reported with a status. `retain`
+ * drops entries the full sweep no longer backs.
  */
 export class WorkloadSnapshotStore {
   private readonly workloads = new Map<string, StoredSnapshot>();
   private readonly podChanges = new Subject<string>();
   private nextGeneratedPodKey = 0;
+  private listed = false;
+
+  /**
+   * True once a resync has listed the cluster. From then on the absence of an
+   * entry is an answer ("no such Deployment") and not a gap in the data.
+   */
+  isReady(): boolean {
+    return this.listed;
+  }
 
   /**
    * Emits whenever a watch event changes one of the workload's Pods, so live
@@ -123,6 +152,13 @@ export class WorkloadSnapshotStore {
     }
 
     const current = this.workloads.get(id) ?? emptyEntry();
+
+    // The API writes the Deployment it just applied into the snapshot, so a
+    // watch event that was already in flight for the previous version must not
+    // move the snapshot back.
+    if (event !== 'delete' && isOlderVersion(deployment, current.deployment)) {
+      return;
+    }
 
     // A delete keeps the id with no Deployment and a fresh observation time,
     // so event-driven drift detection can see that the object is gone.
@@ -166,7 +202,7 @@ export class WorkloadSnapshotStore {
    *
    * The list is authoritative for every part it is not beaten on, including
    * absence: an id the list does not contain ends up with no Deployment and
-   * no Pods instead of being dropped, so the writer keeps seeing the drift on
+   * no Pods instead of being dropped, so the status service keeps seeing the drift on
    * the event path as well as on the full sweep.
    */
   replaceAll(
@@ -265,6 +301,8 @@ export class WorkloadSnapshotStore {
 
       this.workloads.set(id, { ...deploymentPart, pods: mergedPods, podsAt });
     }
+
+    this.listed = true;
   }
 
   get(id: string): WorkloadSnapshot | undefined {

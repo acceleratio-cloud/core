@@ -195,8 +195,7 @@ apps/api/src/
       observer/ - workload only: cluster observation, see "Workload observer"
         workload-observer.service.ts - supervised informers, debounce and resync
         workload-snapshot.store.ts - in-memory Deployments and Pods by workload id
-        workload-status.writer.ts - the single observer-driven status writer
-        workload-mutation-guard.ts - fences watch events against lifecycle actions
+        workload-status.service.ts - derives a status from the snapshot on read and publishes changes
         workload-events.service.ts - project-scoped SSE fan-out
         tests/ - unit tests for the observer
       schemas/ - Drizzle tables owned by this submodule (optional)
@@ -234,9 +233,8 @@ registered in `application.module.ts`:
     DockerWorkloadService,
     WorkloadStatusDeriverRegistry,
     WorkloadEventsService,
-    WorkloadMutationGuard,
     WorkloadSnapshotStore,
-    WorkloadStatusWriter,
+    WorkloadStatusService,
     WorkloadObserverService,
     WorkloadTypeRegistry,
     WorkloadTypeResolver,
@@ -417,49 +415,39 @@ calls.
 - A cluster that is unavailable at startup does not fail bootstrap: the API serves database reads, logs
   the failure and keeps retrying.
 
-### Single writer
+### Status is derived, not stored
 
-- Only two paths update `status` and `status_message`: `WorkloadStatusWriter` for observer-derived
-  status, and `persistState` in the type service for an optimistic action status. `list` and `get` are
-  pure database reads and never call Kubernetes.
-- `WorkloadStatusWriter` reads the affected rows in one `SELECT ... WHERE id IN (...)`, picks the
-  deriver by row type and writes only when `status` or `status_message` changes. A changed write sets
-  `status_observed_at`; unchanged rows keep `updated_at` untouched.
-- `reconcileAll()` is the full sweep after every successful resync. It also visits rows with no snapshot
-  entry, which is how a Deployment deleted while the API was down is discovered.
-- Derivation awaits (the namespace probe among others) while a user action or a watch event can land.
-  The writer therefore re-reads the mutation fence and the snapshot entry immediately before the write:
-  a row whose fence is now violated is skipped, and a row whose snapshot moved on (new observation time,
-  different Deployment or Pod set) is re-derived up to three times. A row that keeps changing is dropped
-  because the event that changed it schedules its own write.
-- The final `UPDATE` is conditional on the row still being the one the writer derived from (`id`,
-  `status` and `status_message` with a null-safe comparison, plus the stored wall clock of `updated_at`
-  compared as a millisecond-truncated timestamp string; binding the string instead of a `Date` keeps
-  that comparison independent of the process timezone). An action that commits after the revalidation
-  but before the statement changes one of those columns, even when it writes the same status, so the
-  write matches no row; the writer then skips the row without publishing an event and the action's
-  status stays.
-- `write` and `reconcileAll` are serialized through one promise queue, so two writes cannot persist out
-  of order; a rejected write rejects only its caller and leaves the queue usable.
-- `status_observed_at` marks the last observer write. Action updates leave it alone.
-
-### Drift and fencing
-
-- A missing Deployment is drift only for a deployed row (`last_deployed_at` is set) whose project
-  namespace still exists. The writer stores `failed` with `Deployment is missing from the cluster`; a
-  row that was never deployed stays `draft`.
-- A namespace probe that returns 404 is skipped: the project is being deleted. Other probe errors are
-  logged and the row is skipped. Namespace answers are cached for 5 s; errors are not cached, so the
-  next sweep retries them.
-- A Deployment delete event leaves the workload id in the snapshot with a fresh observation time, so
-  event-driven drift is immediate. A Pod event alone does not imply a missing Deployment; the snapshot
-  records whether a Deployment event or resync has been observed for that id.
-- After every successful Deployment create, replace or delete, the action calls
-  `WorkloadMutationGuard.noteMutation(id)` before the optimistic database update or row delete. The
-  writer skips a row when `snapshot.deploymentObservedAt(id) <= guard.mutatedAt(id)`, so a watch event
-  received before the action cannot undo it. Only the Deployment part's clock releases the fence: a Pod
-  event alone must not release it while the cached Deployment still predates the action. Guard entries
-  expire after 5 minutes.
+- `workload` has no status column. The database holds what the operator asked for; what the cluster is
+  doing is read from the observer's in-memory snapshot of Deployments and Pods. Nothing in the
+  observer writes to PostgreSQL, so there is no second copy to drift and no fence against it.
+- `WorkloadStatusService.resolve(row)` is the one read path. `list` and `get` of the Docker type call
+  it for every row (`resolveAll`), then the type's deriver turns the snapshot into
+  `{ status, status_message }`. `status_observed_at` is the snapshot's Deployment observation time.
+- The answer for "there is no Deployment" depends on what the snapshot knows. A row that was never
+  deployed (`last_deployed_at` is null) is `draft`. After a resync has listed the cluster
+  (`snapshot.isReady()`), or once the workload's own Deployment event was seen, a missing Deployment
+  of a deployed row is `failed` with `Deployment is missing from the cluster`. Before that, and
+  whenever the observer is disabled (`WORKLOAD_OBSERVER_ENABLED=false`), the service reads the
+  Deployment and Pods straight from the cluster; a 404 is the missing case and any other error
+  yields `failed` with `The workload could not be read from the cluster` instead of failing the list.
+- Actions write through. After a successful Deployment create or replace, the type service calls
+  `WorkloadStatusService.applyDeployment()` with the object the API server returned, so the next read
+  already shows `deploying` or `stopped`. The snapshot ignores a watch event whose `resourceVersion`
+  is lower than the stored one for the same Deployment `uid`, so a late event for the previous
+  revision cannot move it back. Deletes and a recreated Deployment (new `uid`) always apply.
+- Events come from the same service. `announceChanges(ids)` (after the observer's debounce) and
+  `reconcileAll()` (after every resync) derive each affected row and publish a `status` event only when
+  `status` or `status_message` differs from the last one announced for that workload. The first sweep
+  after a start remembers statuses without announcing them, because the console loaded them with the
+  list. Actions call `announce(row)`, which publishes unconditionally. Both paths run through one
+  promise queue so events leave in the order they were derived, and `reconcileAll` drops the memory of
+  deleted workloads and trims the snapshot (`retain`).
+- Event `updated_at` is the row's `updated_at`. A status change no longer touches the row, so it stays
+  put; the console accepts an event whose `updated_at` equals its own.
+- The S3 bucket type has no Deployment. Its phase lives on the project Secret
+  (`acceleratio.io/bucket-phase`, `acceleratio.io/bucket-message`) and the create poller writes the
+  outcome there with a replace at the version it read. A Secret without the annotation counts as
+  ready, and a bucket whose Secret is missing reads as `failed`.
 
 ### Status derivation
 
@@ -467,8 +455,9 @@ calls.
   `deploying` for a stale `observedGeneration`, `failed` for a stalled rollout or a failing pod,
   `running` when the rollout is fully available, and `deploying` otherwise.
 - Each type supplies a `WorkloadStatusDeriver` (`docker/docker-workload.deriver.ts` for Docker) and
-  `WorkloadStatusDeriverRegistry` looks it up by `type`. A row whose type has no deriver is skipped with
-  a warning. Adding a type means adding its deriver and registering it.
+  `WorkloadStatusDeriverRegistry` looks it up by `type`. A row whose type has no deriver is not
+  announced by the status service. Adding a type means adding its deriver and registering it, or, for a
+  type without a Deployment, deriving the status in its own service as the S3 bucket type does.
 
 ### SSE
 
@@ -476,7 +465,7 @@ calls.
   `:id` so the path is not parsed as a UUID. It sets `X-Accel-Buffering: no`.
 - Frames are unnamed `data:` messages carrying `WorkloadEvent`: a `WorkloadStatusEvent` with
   `type: 'status'` or a `WorkloadPositionEvent` with `type: 'position'`; a named `heartbeat` event
-  follows every 20 s. The writer publishes status changes, `persistState` publishes action states, and
+  follows every 20 s. `WorkloadStatusService` publishes status changes and action states, and
   `update` publishes the new coordinates when a PATCH changes `position`.
 - Canvas drags are local while the pointer moves and persist once on drop through
   `PATCH /workloads/:id` with `position`; other sessions receive the position frame and move the node
@@ -512,7 +501,8 @@ calls.
 ### RBAC
 
 - The observer needs cluster-wide `get`, `list` and `watch` on `deployments` (`apps`) and `pods`
-  (core). `get` on `namespaces` (core) is the drift probe.
+  (core). The direct-read fallback needs `get` on `deployments` and `list` on `pods` in project
+  namespaces.
 - The workload actions add `get`, `create`, `update` and `delete` on `deployments` (`apps`).
 - Project isolation adds `get`, `create` and `delete` on `namespaces` (core), `get` on
   `customresourcedefinitions` (`apiextensions.k8s.io`) and `get`, `create` and `update` on
@@ -537,8 +527,11 @@ calls.
 
 ### Limitation
 
-The writer assumes one API process. Multiple replicas each observe and write, so they can publish
-duplicate status events; a leader lock is future work.
+The observer and its snapshot assume one API process. Reads stay correct with several replicas
+because each one derives the status from its own snapshot and nothing is written to the database, but
+each replica publishes its own status events to the consoles connected to it, and the S3 create
+poller can run twice (the Secret replace is versioned, so one loses and retries). A leader lock is
+future work.
 
 ## Cluster servers
 
@@ -742,7 +735,8 @@ SSH, with the scripts and requirement checks in `node-join-script.ts`. SSH goes 
   a database. Commit the schema edit, the SQL file, the new snapshot and `_journal.json` together; the
   table reference and data-model invariants live in [DATABASE.md](./DATABASE.md). Migration `0005_*`
   adds `status_observed_at` to `workload`; `0006_*` backfills existing origin positions into the
-  canvas grid.
+  canvas grid; `0021_*` drops `status`, `status_message`, `status_observed_at` and the
+  `workload_status` enum again.
 
 ## Code style
 

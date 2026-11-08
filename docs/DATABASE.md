@@ -91,10 +91,7 @@ erDiagram
         jsonb position
         varchar external_name
         varchar internal_hostname
-        workload_status status
-        text status_message
         timestamp last_deployed_at
-        timestamp status_observed_at
         timestamp created_at
         timestamp updated_at
     }
@@ -200,8 +197,8 @@ Columns: `id`, `name`, `created_at`, `updated_at`.
 One row per deployable node on the project canvas. `project_id` scopes every read and write.
 
 Columns: `id`, `project_id`, `name`, `type`, `active_version_id`, `draft_config`, `position`,
-`external_name`, `internal_hostname`, `storage_class_id`, `status`, `status_message`, `last_deployed_at`,
-`status_observed_at`, `created_at`, `updated_at`.
+`external_name`, `internal_hostname`, `storage_class_id`, `last_deployed_at`, `created_at`,
+`updated_at`.
 
 Invariants:
 
@@ -231,7 +228,9 @@ Invariants:
   once as version 1 and never changed; `storage_class_id` repeats it as a column so the storage
   profile cannot be deleted while a bucket uses it. It has no draft and no Deployment: the API sets
   its status from the provisioning Job (`deploying` until the bucket exists, then `running` or
-  `failed`). The access keys live in the Secret `s3-<bucket>` in the project namespace, never in the
+  `failed`) and keeps it on the project Secret as the annotations `acceleratio.io/bucket-phase`
+  (`provisioning`, `ready`, `failed`) and `acceleratio.io/bucket-message`; a Secret without the
+  annotation predates it and counts as ready. The access keys live in the Secret `s3-<bucket>` in the project namespace, never in the
   database. For other types `storage_class_id` is null.
 - The config lives in versions, not on the row. `active_version_id` points at the
   `workload_version` the cluster runs and is null until the first deploy. `draft_config` holds edits
@@ -241,12 +240,14 @@ Invariants:
   column default is `{ "x": 0, "y": 0 }`, while the API places new workloads in the first free slot of
   the project's four-column canvas grid. Existing rows that still sat at the origin were backfilled
   into the same grid.
-- `status` starts as `draft` and is constrained by the `workload_status` enum. `status_message`
-  carries the operator-facing explanation for the current status; `last_deployed_at` records when a
-  deploy action last ran, not when the deployment finished rolling out. `status_observed_at` records
-  when the workloads observer last wrote the status, so a row's freshness can be judged without
-  reading the cluster; it is stored as `timestamp` without time zone, like the other timestamps, and
-  is not used for ordering.
+- There is no status column. A workload's `status` (`draft`, `deploying`, `running`, `stopped`,
+  `failed`), `status_message` and `status_observed_at` are derived from the cluster on every read, so
+  the database never holds a second copy that can disagree with it (see
+  [FILE_STRUCTURE.md#status-is-derived-not-stored](./FILE_STRUCTURE.md#status-is-derived-not-stored)).
+  `last_deployed_at` records when a deploy action last ran, not when the deployment finished rolling
+  out; it is also what separates a `draft` (never deployed) from a deployed workload whose Deployment
+  has vanished. Migration `0021_drop_workload_status` removed the three columns and the
+  `workload_status` enum.
 - `workload_project_id_idx` covers lookups by project. The unique constraint doubles as the index for
   the project plus deployment name pair.
 
@@ -411,7 +412,6 @@ library; do not repurpose them.
 | Enum | Values | Used by |
 | --- | --- | --- |
 | `workload_type` | `docker` | `workload.type` |
-| `workload_status` | `draft`, `deploying`, `running`, `stopped`, `failed` | `workload.status` |
 | `storage_class_kind` | `platform`, `custom` | `storage_class.kind` |
 | `storage_class_reclaim_policy` | `Delete`, `Retain` | `storage_class.reclaim_policy` |
 | `node_operation_type` | `add`, `drain`, `remove` | `node_operation.type` |
