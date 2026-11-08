@@ -15,6 +15,7 @@
     "@acceleratio/shared": "file:../../packages/shared",
     "@base-ui/react": "^1.9.0",
     "@tanstack/react-virtual": "^3.14.26",
+    "@thesvg/react": "^4.0.4",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
     "@xyflow/react": "^12.12.0",

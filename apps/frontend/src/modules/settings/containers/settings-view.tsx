@@ -1,3 +1,4 @@
+import { IntegrationsCatalog } from '@/modules/integrations/containers/integrations-catalog';
 import { SettingsNav } from '../components/settings-nav';
 import { DEFAULT_SETTINGS_SECTION, type SettingsSectionId } from '../sections';
 import { ProfileSettings } from './profile-settings';
@@ -7,6 +8,7 @@ import { SystemPanel } from './system-panel';
 const PANELS = {
   system: SystemPanel,
   storage: StoragePanel,
+  integrations: IntegrationsCatalog,
   profile: ProfileSettings,
 };
 

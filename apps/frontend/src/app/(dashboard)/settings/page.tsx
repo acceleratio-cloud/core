@@ -19,7 +19,7 @@ export default function SettingsPage({ searchParams }: PageProps<'/settings'>) {
         Settings
       </h1>
       <p className="mt-2.5 text-sm text-muted-foreground">
-        Manage storage, your profile, and the control plane.
+        Manage storage, integrations, your profile, and the control plane.
       </p>
 
       <Suspense fallback={<SettingsSkeleton />}>
