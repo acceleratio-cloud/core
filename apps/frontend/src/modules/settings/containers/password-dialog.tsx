@@ -127,10 +127,17 @@ export const PasswordDialog = ({
 
         <form onSubmit={handleSubmit} noValidate className="mt-5">
           <FieldGroup>
-            <Field data-invalid={errors.current || formError ? true : undefined}>
-              <FieldLabel htmlFor="password-current">Current password</FieldLabel>
+            <Field
+              data-invalid={errors.current || formError ? true : undefined}
+            >
+              <FieldLabel htmlFor="password-current">
+                Current password
+              </FieldLabel>
               <Input
-                {...inputProps('current', errors.current ?? formError ?? undefined)}
+                {...inputProps(
+                  'current',
+                  errors.current ?? formError ?? undefined,
+                )}
                 name="current_password"
                 autoComplete="current-password"
                 autoFocus
@@ -165,7 +172,9 @@ export const PasswordDialog = ({
             </Field>
 
             <Field data-invalid={errors.confirm ? true : undefined}>
-              <FieldLabel htmlFor="password-confirm">Repeat new password</FieldLabel>
+              <FieldLabel htmlFor="password-confirm">
+                Repeat new password
+              </FieldLabel>
               <Input
                 {...inputProps('confirm', errors.confirm)}
                 name="confirm_password"
@@ -204,9 +213,17 @@ export const PasswordDialog = ({
               onClick={() => setReveal((prev) => !prev)}
             >
               {reveal ? (
-                <EyeOff aria-hidden="true" strokeWidth={1.75} data-icon="inline-start" />
+                <EyeOff
+                  aria-hidden="true"
+                  strokeWidth={1.75}
+                  data-icon="inline-start"
+                />
               ) : (
-                <Eye aria-hidden="true" strokeWidth={1.75} data-icon="inline-start" />
+                <Eye
+                  aria-hidden="true"
+                  strokeWidth={1.75}
+                  data-icon="inline-start"
+                />
               )}
               {reveal ? 'Hide passwords' : 'Show passwords'}
             </Button>

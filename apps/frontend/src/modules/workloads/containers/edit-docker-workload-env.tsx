@@ -428,7 +428,6 @@ const EnvEditor = ({
           )}
           <FieldError>{modeError}</FieldError>
         </div>
-
       </DetailStack>
     </form>
   );

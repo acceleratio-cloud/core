@@ -149,7 +149,11 @@ export const AccountCard = () => {
                   }}
                 />
                 {error ? (
-                  <FieldError id="account-name-error" role="alert" className="mt-1.5">
+                  <FieldError
+                    id="account-name-error"
+                    role="alert"
+                    className="mt-1.5"
+                  >
                     {error}
                   </FieldError>
                 ) : null}
@@ -185,7 +189,11 @@ export const AccountCard = () => {
           id="account-password"
           label="Password"
           action={
-            <Button variant="outline" size="sm" onClick={() => setPasswordOpen(true)}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPasswordOpen(true)}
+            >
               Change password
             </Button>
           }
@@ -199,7 +207,10 @@ export const AccountCard = () => {
               Password changed
             </span>
           ) : (
-            <span aria-label="Hidden" className="tracking-widest text-muted-foreground">
+            <span
+              aria-label="Hidden"
+              className="tracking-widest text-muted-foreground"
+            >
               ••••••••••
             </span>
           )}

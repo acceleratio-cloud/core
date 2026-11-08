@@ -47,7 +47,8 @@ export const SessionsList = () => {
         if (active) setSessions(sortSessions(list));
       })
       .catch((err) => {
-        if (active) setError(getApiErrorMessage(err, 'Could not load sessions.'));
+        if (active)
+          setError(getApiErrorMessage(err, 'Could not load sessions.'));
       });
 
     return () => {
@@ -108,9 +109,17 @@ export const SessionsList = () => {
             >
               <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-surface-muted text-muted-foreground">
                 {sessionDeviceKind(item.user_agent) === 'mobile' ? (
-                  <Smartphone aria-hidden="true" strokeWidth={1.75} className="size-4" />
+                  <Smartphone
+                    aria-hidden="true"
+                    strokeWidth={1.75}
+                    className="size-4"
+                  />
                 ) : (
-                  <Laptop aria-hidden="true" strokeWidth={1.75} className="size-4" />
+                  <Laptop
+                    aria-hidden="true"
+                    strokeWidth={1.75}
+                    className="size-4"
+                  />
                 )}
               </span>
               <div className="min-w-0 flex-1">
@@ -118,7 +127,10 @@ export const SessionsList = () => {
                   {describeSessionClient(item.user_agent)}
                   {item.current ? (
                     <span className="inline-flex items-center gap-1.5 text-[13px] font-normal text-status-success">
-                      <span aria-hidden="true" className="size-1.5 rounded-full bg-status-success" />
+                      <span
+                        aria-hidden="true"
+                        className="size-1.5 rounded-full bg-status-success"
+                      />
                       This device
                     </span>
                   ) : null}
@@ -140,7 +152,9 @@ export const SessionsList = () => {
                   size="sm"
                   loading={busyId === item.id}
                   aria-label={`Sign out ${describeSessionClient(item.user_agent)}`}
-                  onClick={() => run(item.id, () => authApi.revokeSession(item.id))}
+                  onClick={() =>
+                    run(item.id, () => authApi.revokeSession(item.id))
+                  }
                 >
                   Sign out
                 </Button>

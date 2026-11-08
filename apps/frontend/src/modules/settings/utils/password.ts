@@ -7,7 +7,9 @@ export type PasswordFormValues = {
   confirm: string;
 };
 
-export type PasswordFormErrors = Partial<Record<keyof PasswordFormValues, string>>;
+export type PasswordFormErrors = Partial<
+  Record<keyof PasswordFormValues, string>
+>;
 
 export const validatePasswordForm = ({
   current,
@@ -38,33 +40,45 @@ export const describeSessionClient = (userAgent: string | null): string => {
     return 'Unknown device';
   }
 
-  const browser =
-    /Edg\//.test(userAgent) ? 'Edge'
-    : /Firefox\//.test(userAgent) ? 'Firefox'
-    : /Chrome\//.test(userAgent) ? 'Chrome'
-    : /Safari\//.test(userAgent) ? 'Safari'
-    : 'Browser';
-  const os =
-    /Windows/.test(userAgent) ? 'Windows'
-    : /iPhone|iPad/.test(userAgent) ? 'iOS'
-    : /Android/.test(userAgent) ? 'Android'
-    : /Mac OS X/.test(userAgent) ? 'macOS'
-    : /Linux/.test(userAgent) ? 'Linux'
-    : null;
+  const browser = /Edg\//.test(userAgent)
+    ? 'Edge'
+    : /Firefox\//.test(userAgent)
+      ? 'Firefox'
+      : /Chrome\//.test(userAgent)
+        ? 'Chrome'
+        : /Safari\//.test(userAgent)
+          ? 'Safari'
+          : 'Browser';
+  const os = /Windows/.test(userAgent)
+    ? 'Windows'
+    : /iPhone|iPad/.test(userAgent)
+      ? 'iOS'
+      : /Android/.test(userAgent)
+        ? 'Android'
+        : /Mac OS X/.test(userAgent)
+          ? 'macOS'
+          : /Linux/.test(userAgent)
+            ? 'Linux'
+            : null;
 
   return os ? `${browser} on ${os}` : browser;
 };
 
 export type SessionDeviceKind = 'mobile' | 'desktop';
 
-export const sessionDeviceKind = (userAgent: string | null): SessionDeviceKind =>
+export const sessionDeviceKind = (
+  userAgent: string | null,
+): SessionDeviceKind =>
   userAgent && /iPhone|iPad|Android|Mobile/.test(userAgent)
     ? 'mobile'
     : 'desktop';
 
 /** "just now", "5 minutes ago", "3 days ago"; falls back to a date after a month. */
 export const formatRelativeTime = (iso: string, now = Date.now()): string => {
-  const seconds = Math.max(0, Math.round((now - new Date(iso).getTime()) / 1000));
+  const seconds = Math.max(
+    0,
+    Math.round((now - new Date(iso).getTime()) / 1000),
+  );
 
   if (seconds < 60) return 'just now';
 
