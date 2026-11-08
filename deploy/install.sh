@@ -69,7 +69,7 @@ VICTORIALOGS_RETENTION="${VICTORIALOGS_RETENTION:-7d}"
 VICTORIALOGS_MAX_DISK="${VICTORIALOGS_MAX_DISK:-2GiB}"
 
 ACCELERATIO_NAMESPACE="${ACCELERATIO_NAMESPACE:-acceleratio}"
-ACCELERATIO_VERSION="${ACCELERATIO_VERSION:-0.1.9}"
+ACCELERATIO_VERSION="${ACCELERATIO_VERSION:-0.2.0}"
 ACCELERATIO_API_IMAGE="${ACCELERATIO_API_IMAGE:-ghcr.io/acceleratio-cloud/api:${ACCELERATIO_VERSION}}"
 ACCELERATIO_CONSOLE_IMAGE="${ACCELERATIO_CONSOLE_IMAGE:-ghcr.io/acceleratio-cloud/console:${ACCELERATIO_VERSION}}"
 POSTGRES_IMAGE="${POSTGRES_IMAGE:-postgres:17-alpine}"
@@ -285,7 +285,7 @@ Common variables (environment or --config):
   VICTORIALOGS_RETENTION      default 7d
   VICTORIALOGS_MAX_DISK       default 2GiB (oldest logs are dropped beyond it)
   ACCELERATIO_NAMESPACE       default acceleratio
-  ACCELERATIO_VERSION         default 0.1.9 (image tag for API and console)
+  ACCELERATIO_VERSION         default 0.2.0 (image tag for API and console)
   ACCELERATIO_API_IMAGE       default ghcr.io/acceleratio-cloud/api:<version>
   ACCELERATIO_CONSOLE_IMAGE   default ghcr.io/acceleratio-cloud/console:<version>
   POSTGRES_IMAGE              default postgres:17-alpine

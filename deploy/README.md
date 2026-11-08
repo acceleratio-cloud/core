@@ -24,9 +24,9 @@ other hardware. It provisions a single-node Kubernetes cluster:
 and then deploys Acceleratio into the `acceleratio` namespace:
 
 - PostgreSQL (`postgres:17-alpine`), stored on the server's own disk
-- the API (`ghcr.io/acceleratio-cloud/api:0.1.9`), which migrates the database on
+- the API (`ghcr.io/acceleratio-cloud/api:0.2.0`), which migrates the database on
   every start through an init container
-- the console (`ghcr.io/acceleratio-cloud/console:0.1.9`)
+- the console (`ghcr.io/acceleratio-cloud/console:0.2.0`)
 
 When it finishes, the installer prints the dashboard URL.
 
@@ -189,7 +189,7 @@ Every variable can be set in the environment or in a file passed to
 | `VICTORIALOGS_RETENTION` | `7d` | how long logs are kept |
 | `VICTORIALOGS_MAX_DISK` | `2GiB` | disk cap; the oldest logs go first beyond it |
 | `ACCELERATIO_NAMESPACE` | `acceleratio` | namespace for PostgreSQL, the API and the console |
-| `ACCELERATIO_VERSION` | `0.1.9` | image tag for the API and the console |
+| `ACCELERATIO_VERSION` | `0.2.0` | image tag for the API and the console |
 | `ACCELERATIO_API_IMAGE` | `ghcr.io/acceleratio-cloud/api:<version>` | API image |
 | `ACCELERATIO_CONSOLE_IMAGE` | `ghcr.io/acceleratio-cloud/console:<version>` | console image |
 | `POSTGRES_IMAGE` | `postgres:17-alpine` | PostgreSQL image |
