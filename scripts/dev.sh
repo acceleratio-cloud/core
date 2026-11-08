@@ -115,10 +115,18 @@ generate_secret() {
 if [[ ! -f apps/api/.env ]]; then
   log "Creating apps/api/.env from apps/api/.env.example"
   secret="$(generate_secret)"
-  awk -v secret="$secret" '
+  integrations_key="$(generate_secret)"
+  awk -v secret="$secret" -v key="$integrations_key" '
     /^BETTER_AUTH_SECRET=/ { print "BETTER_AUTH_SECRET=" secret; next }
+    /^INTEGRATIONS_ENCRYPTION_KEY=/ { print "INTEGRATIONS_ENCRYPTION_KEY=" key; next }
     { print }
   ' apps/api/.env.example > apps/api/.env
+fi
+
+# Existing .env files from before integrations lack the encryption key.
+if ! dotenv_value INTEGRATIONS_ENCRYPTION_KEY apps/api/.env >/dev/null; then
+  log "Adding INTEGRATIONS_ENCRYPTION_KEY to apps/api/.env"
+  printf '\nINTEGRATIONS_ENCRYPTION_KEY=%s\n' "$(generate_secret)" >> apps/api/.env
 fi
 
 API_PORT="$(dotenv_value PORT apps/api/.env || true)"

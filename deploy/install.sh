@@ -1690,14 +1690,19 @@ prepare_acceleratio_secrets() {
 
   POSTGRES_PASSWORD="$(read_env_value "$env_file" POSTGRES_PASSWORD)"
   BETTER_AUTH_SECRET="$(read_env_value "$env_file" BETTER_AUTH_SECRET)"
+  INTEGRATIONS_ENCRYPTION_KEY="$(read_env_value "$env_file" INTEGRATIONS_ENCRYPTION_KEY)"
   [ -n "$POSTGRES_PASSWORD" ] || POSTGRES_PASSWORD="$(generate_secret)"
   [ -n "$BETTER_AUTH_SECRET" ] || BETTER_AUTH_SECRET="$(generate_secret)"
+  # Encrypts integration credentials (GitHub App keys) in the database. Losing
+  # it makes them unreadable, so it is kept across re-runs and updates.
+  [ -n "$INTEGRATIONS_ENCRYPTION_KEY" ] || INTEGRATIONS_ENCRYPTION_KEY="$(generate_secret)"
 
   # Kept so a re-run reuses the same database password and session secret.
   write_file "$env_file" 0600 <<EOF
 # ${MANAGED_BY} - contains secrets, do not commit.
 POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
 BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}
+INTEGRATIONS_ENCRYPTION_KEY=${INTEGRATIONS_ENCRYPTION_KEY}
 EOF
 }
 
@@ -1743,6 +1748,7 @@ type: Opaque
 stringData:
   DATABASE_URL: "${db_url}"
   BETTER_AUTH_SECRET: "${BETTER_AUTH_SECRET}"
+  INTEGRATIONS_ENCRYPTION_KEY: "${INTEGRATIONS_ENCRYPTION_KEY}"
   K3S_JOIN_URL: "${join_url}"
   K3S_JOIN_TOKEN: "${join_token}"
   K3S_CLUSTER_CIDR: "${K3S_CLUSTER_CIDR}"
