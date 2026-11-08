@@ -19,7 +19,6 @@ import type {
   ProjectLogHistogram,
 } from '@acceleratio/shared';
 import type { LogFilterQuery, LogWindowQuery } from '@/api/logs';
-import type { LogsRequest } from '@/modules/projects/providers/project-tabs-provider';
 import { cn } from '@/lib/utils';
 import {
   assignSeriesTones,
@@ -46,6 +45,7 @@ import {
   RANGE_LABELS,
 } from '../utils/constants';
 import { toLogFile } from '../utils/entries';
+import { setLogsTargetParams } from '../utils/links';
 import { formatExactCount, formatWindow, logTimeMs } from '../utils/format';
 import { LEVEL_STYLES } from '../utils/level';
 
@@ -90,7 +90,10 @@ const onlyLevels = (
   return { ...histogram, buckets, total };
 };
 
-const setOf = (value: string | null) => new Set<string>(value ? [value] : []);
+/** `?service=` and `?pod=` hold the selection as a comma-separated list. */
+const setOf = (value: string | null | undefined) =>
+  new Set<string>(value ? value.split(',') : []);
+const listOf = (values: ReadonlySet<string>) => [...values].join(',');
 
 /**
  * The Logs tab: every service of the project in one stream, ordered by time,
@@ -98,14 +101,7 @@ const setOf = (value: string | null) => new Set<string>(value ? [value] : []);
  * from the log store, so deploys and restarts never cut it. The tab only
  * loads and streams while `active`.
  */
-export const LogsView = ({
-  active,
-  request,
-}: {
-  active: boolean;
-  /** A "View logs" link pressed inside the page; applied once per `id`. */
-  request: LogsRequest | null;
-}) => {
+export const LogsView = ({ active }: { active: boolean }) => {
   const { project, workloads, isLoadingWorkloads } = useProject();
   const terminal = useTerminal();
   const searchParams = useSearchParams();
@@ -135,32 +131,44 @@ export const LogsView = ({
   const atTop = useRef(true);
   const searchRef = useRef<HTMLInputElement>(null);
 
-  // A link such as "View logs" on a service opens the tab already filtered;
-  // this is the "adjust state while rendering" pattern.
+  // A link such as "View logs" on a service rewrites `?service=`/`?pod=`; one
+  // that differs from the current filter applies it. This is the "adjust state
+  // while rendering" pattern. The effect below mirrors the filter into the URL,
+  // so that write matches the state and changes nothing.
   const linkKey = `${urlService ?? ''}|${urlPod ?? ''}`;
   const [lastLinkKey, setLastLinkKey] = useState(linkKey);
-
-  const [lastRequestId, setLastRequestId] = useState(request?.id ?? 0);
-
-  const applyTarget = (service?: string | null, pod?: string | null) => {
-    setWorkloadIds(setOf(service ?? null));
-    setPods(setOf(pod ?? null));
-    setLevels(new Set());
-  };
 
   if (linkKey !== lastLinkKey) {
     setLastLinkKey(linkKey);
 
-    if (urlService || urlPod) {
-      applyTarget(urlService, urlPod);
+    if (
+      (urlService || urlPod) &&
+      linkKey !== `${listOf(workloadIds)}|${listOf(pods)}`
+    ) {
+      setWorkloadIds(setOf(urlService));
+      setPods(setOf(urlPod));
+      setLevels(new Set());
     }
   }
 
-  // The same link pressed again applies again, even after the filters moved.
-  if (request && request.id !== lastRequestId) {
-    setLastRequestId(request.id);
-    applyTarget(request.service, request.pod);
-  }
+  // The visible tab keeps the URL in step with its filter, so a reload or a
+  // copied link opens the same logs, and a cleared filter leaves no stale query.
+  useEffect(() => {
+    if (!active) {
+      return;
+    }
+
+    const url = new URL(window.location.href);
+
+    setLogsTargetParams(url.searchParams, {
+      service: listOf(workloadIds),
+      pod: listOf(pods),
+    });
+
+    if (url.href !== window.location.href) {
+      window.history.replaceState(null, '', url);
+    }
+  }, [active, workloadIds, pods]);
 
   useEffect(() => {
     const timer = window.setTimeout(

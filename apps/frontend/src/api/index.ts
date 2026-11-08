@@ -34,7 +34,25 @@ export const api = axios.create({
   },
 });
 
-api.interceptors.request.use((config) => {
+let runtimeConfigLoad: Promise<void> | undefined;
+
+/**
+ * The root layout's beforeInteractive script is aborted when the server streams
+ * a redirect (e.g. a signed-out visit to "/" landing on /auth), and the shared
+ * layout never loads it again; load it once before the first request instead.
+ */
+const loadRuntimeConfig = () =>
+  (runtimeConfigLoad ??= new Promise<void>((resolve) => {
+    const script = document.createElement("script");
+    script.src = "/runtime-config.js";
+    script.onload = script.onerror = () => resolve();
+    document.head.append(script);
+  }));
+
+api.interceptors.request.use(async (config) => {
+  if (typeof window !== "undefined" && !window.__ACCELERATIO_CONFIG__) {
+    await loadRuntimeConfig();
+  }
   config.baseURL ??= getApiBaseUrl();
   return config;
 });

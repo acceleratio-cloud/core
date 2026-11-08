@@ -8,9 +8,6 @@ export type LogsTarget = {
   pod?: string;
 };
 
-/** A request to open the Logs tab; `id` grows so a repeated link applies. */
-export type LogsRequest = LogsTarget & { id: number };
-
 type ProjectTabsContextValue = {
   /** Selects the Logs tab filtered to `target`, from any tab of the page. */
   openLogs: (target: LogsTarget) => void;
@@ -19,9 +16,9 @@ type ProjectTabsContextValue = {
 const ProjectTabsContext = createContext<ProjectTabsContextValue | null>(null);
 
 /**
- * Lets content inside a project tab switch tabs. The tab bar writes `?tab=`
- * with `history.replaceState`, which `useSearchParams` does not see, so a
- * plain link to `?tab=logs` cannot be relied on to switch from inside the page.
+ * Lets content inside a project tab switch tabs in place: it rewrites `?tab=`
+ * and the Logs filter with `history.replaceState`, so the page keeps its
+ * mounted panels instead of navigating.
  */
 export const ProjectTabsProvider = ({
   value,

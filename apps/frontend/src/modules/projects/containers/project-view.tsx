@@ -10,7 +10,6 @@ import { ObservabilityView } from '@/modules/observability/containers/observabil
 import { ProjectHeader } from '../components/project-header';
 import {
   ProjectTabsProvider,
-  type LogsRequest,
   type LogsTarget,
 } from '../providers/project-tabs-provider';
 import {
@@ -28,13 +27,12 @@ import { ProjectSettings } from './project-settings';
 type Direction = 'forward' | 'backward' | null;
 
 /**
- * The project page: one route, four tabs. The selected tab is local state,
- * mirrored into `?tab=` (Architecture omits it) with `history.replaceState` so a
- * reload or a shared link opens the same tab without a server round trip.
- * The URL is storage, not the source of truth: with Cache Components on,
- * `replaceState` does not re-render `useSearchParams` consumers. A real
- * navigation to another `?tab=` (a link, the project switcher) still changes
- * `useSearchParams`, and that is applied to the state.
+ * The project page: one route, four tabs. `?tab=` (Architecture omits it) is
+ * the source of truth, so a reload or a shared link opens the same tab. The tab
+ * bar writes it with `history.replaceState(null, …)`: Next syncs that into
+ * `useSearchParams` without a server round trip. Passing the current history
+ * state instead would carry Next's own marker, and Next would skip the sync and
+ * later restore the old URL.
  *
  * Panels mount on first visit and then stay mounted while hidden: the canvas
  * keeps its viewport, selection and status stream, and the dashboard keeps
@@ -42,22 +40,12 @@ type Direction = 'forward' | 'backward' | null;
  * replays each time it is shown again.
  */
 export const ProjectView = () => {
-  const urlTab = toProjectTabId(useSearchParams().get(PROJECT_TAB_PARAM));
-  const [activeTab, setActiveTab] = useState(urlTab);
-  const [lastUrlTab, setLastUrlTab] = useState(urlTab);
+  const activeTab = toProjectTabId(useSearchParams().get(PROJECT_TAB_PARAM));
   const [visited, setVisited] = useState<ReadonlySet<ProjectTabId>>(
     () => new Set([activeTab]),
   );
   const [direction, setDirection] = useState<Direction>(null);
   const [previousTab, setPreviousTab] = useState(activeTab);
-  const [logsRequest, setLogsRequest] = useState<LogsRequest | null>(null);
-
-  // A navigation that changed `?tab=` (not the tab bar) selects that tab;
-  // this is the "adjust state while rendering" pattern.
-  if (urlTab !== lastUrlTab) {
-    setLastUrlTab(urlTab);
-    setActiveTab(urlTab);
-  }
 
   if (!visited.has(activeTab)) {
     setVisited(new Set([...visited, activeTab]));
@@ -73,36 +61,29 @@ export const ProjectView = () => {
     setPreviousTab(activeTab);
   }
 
-  const selectTab = useCallback(
-    (tab: ProjectTabId) => {
-      if (tab === activeTab) {
-        return;
-      }
+  const selectTab = useCallback((tab: ProjectTabId) => {
+    const url = new URL(window.location.href);
 
-      const url = new URL(window.location.href);
+    if (tab === DEFAULT_PROJECT_TAB) {
+      url.searchParams.delete(PROJECT_TAB_PARAM);
+    } else {
+      url.searchParams.set(PROJECT_TAB_PARAM, tab);
+    }
 
-      if (tab === DEFAULT_PROJECT_TAB) {
-        url.searchParams.delete(PROJECT_TAB_PARAM);
-      } else {
-        url.searchParams.set(PROJECT_TAB_PARAM, tab);
-      }
+    // The Logs tab writes its filter back when it is shown again.
+    if (tab !== 'logs') {
+      setLogsTargetParams(url.searchParams, {});
+    }
 
-      setActiveTab(tab);
-      window.history.replaceState(window.history.state, '', url);
-    },
-    [activeTab],
-  );
+    window.history.replaceState(null, '', url);
+  }, []);
 
-  // "View logs" links switch here rather than through `?tab=`, which the tab
-  // bar's `replaceState` hides from `useSearchParams`.
   const openLogs = useCallback((target: LogsTarget) => {
     const url = new URL(window.location.href);
 
     url.searchParams.set(PROJECT_TAB_PARAM, 'logs');
     setLogsTargetParams(url.searchParams, target);
-    setLogsRequest((previous) => ({ ...target, id: (previous?.id ?? 0) + 1 }));
-    setActiveTab('logs');
-    window.history.replaceState(window.history.state, '', url);
+    window.history.replaceState(null, '', url);
   }, []);
   const tabsContext = useMemo(() => ({ openLogs }), [openLogs]);
 
@@ -141,7 +122,7 @@ export const ProjectView = () => {
           visited={visited}
           direction={direction}
         >
-          <LogsView active={activeTab === 'logs'} request={logsRequest} />
+          <LogsView active={activeTab === 'logs'} />
         </TabPanel>
 
         <TabPanel

@@ -14,13 +14,15 @@ import {
  */
 const VERSION = 'v1';
 export const KEY_MISSING_MESSAGE =
-  'INTEGRATIONS_ENCRYPTION_KEY is not set. Set it to a base64-encoded 32-byte value and restart the API.';
+  'INTEGRATIONS_ENCRYPTION_KEY is not set. Set it to a 32-byte value (base64 or 64 hex characters) and restart the API.';
 
-export const getEncryptionKey = (): Buffer => {
-  const key = Buffer.from(
-    process.env.INTEGRATIONS_ENCRYPTION_KEY ?? '',
-    'base64',
-  );
+export const getEncryptionKey = (
+  value = process.env.INTEGRATIONS_ENCRYPTION_KEY ?? '',
+): Buffer => {
+  // deploy/install.sh writes 64 hex characters; scripts/dev.sh writes base64.
+  const key = /^[0-9a-f]{64}$/i.test(value)
+    ? Buffer.from(value, 'hex')
+    : Buffer.from(value, 'base64');
   if (key.length !== 32) {
     throw new Error(KEY_MISSING_MESSAGE);
   }

@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import {
   decryptSecret,
   encryptSecret,
+  getEncryptionKey,
   signState,
   verifyState,
 } from '../secret-box';
@@ -31,5 +32,12 @@ describe('secret-box', () => {
     expect(verifyState(token, randomBytes(32))).toBeNull();
     expect(verifyState(`${token}x`, key)).toBeNull();
     expect(verifyState(signState({ a: 1 }, -1, key), key)).toBeNull();
+  });
+
+  it('reads a 32-byte key written as base64 or as hex', () => {
+    expect(getEncryptionKey(key.toString('base64'))).toEqual(key);
+    expect(getEncryptionKey(key.toString('hex'))).toEqual(key);
+    expect(() => getEncryptionKey('')).toThrow();
+    expect(() => getEncryptionKey('short')).toThrow();
   });
 });
