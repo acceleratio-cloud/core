@@ -144,6 +144,24 @@ survives restarts; stop it with `make db-down`.
 
 `./scripts/dev.sh` is equivalent to `make dev` if you prefer not to use Make.
 
+#### GitHub integration locally
+
+Settings → Integrations creates a GitHub App with no extra setup: GitHub sends
+your browser back to the API, so `localhost` works. GitHub can only deliver
+webhooks (uninstall and suspend events) to an HTTPS address. To receive them
+locally, tunnel the API with ngrok (a free account includes one static domain,
+so the App's URLs survive restarts):
+
+```bash
+ngrok http --url=<your-static-domain> 8080
+```
+
+Then set `GITHUB_CALLBACK_BASE_URL=https://<your-static-domain>` in
+`apps/api/.env`, restart the API and create the App. The free ngrok plan shows a
+warning page once when GitHub sends your browser back; choose Visit Site to continue. An App created without an
+HTTPS address has its webhook switched off; turn it on in the App's settings on
+github.com once the server has one.
+
 The Compose database is bound to `127.0.0.1:5433` so it does not collide with a
 PostgreSQL already running on the default port and is not reachable from other
 machines. If you change it with `POSTGRES_PORT`, update `DATABASE_URL` in

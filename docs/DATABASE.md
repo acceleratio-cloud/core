@@ -212,7 +212,7 @@ Invariants:
   `0019_workload_internal_hostname` leaves existing Docker rows null; the API names them on startup
   and on their next deploy, never with their `external_name`.
 - `type` selects the shape of every config of the workload (`draft_config` and its versions). The
-  values are `docker` and `s3_bucket`. A `docker` config carries the image reference (`docker_image`) and optional
+  values are `docker`, `s3_bucket` and `github`. A `github` workload is creation-only for now: its `draft_config` holds `github_app_id`, `repository` and `branch`, and nothing is deployed. A `docker` config carries the image reference (`docker_image`) and optional
   `cpu_max` (vCPU, default 1), `ram_max` (MiB, default 1024), `entrypoint` and `command` (string
   arrays that replace the image's ENTRYPOINT and CMD). An absent limit means the default and a null
   limit means no limit. New services are created with both limits null; configs stored before that
@@ -399,6 +399,23 @@ in progress lives in `pending_control_plane_url` with `pending_status` going `aw
 HTTPS certificate to ten minutes. The URL lives in the database rather than the installer's
 environment so a re-run of the installer does not undo it.
 
+### `github_app`
+
+A GitHub App created from Settings → Integrations; several can exist so access can later be granted
+per App. `id` is generated before GitHub creates the App because the webhook and setup URLs in the
+manifest contain it. `github_app_id` is GitHub's own id. `client_secret_enc`, `webhook_secret_enc`
+and `private_key_enc` are AES-256-GCM ciphertext (`v1:<iv>:<tag>:<data>`) made with
+`INTEGRATIONS_ENCRYPTION_KEY`, which lives in the API's environment and never in the database; losing
+it makes them unreadable, and the App must be created again. `created_by` is the better-auth user id,
+without a foreign key.
+
+### `github_installation`
+
+One install of a `github_app` on a GitHub account or organization. `installation_id` is GitHub's id and
+unique across Apps. Rows are removed with their App (`ON DELETE CASCADE`) and kept in step by the
+App's `installation` and `installation_repositories` webhooks. Repositories are not stored: they are
+read from GitHub on demand.
+
 ### better-auth tables
 
 `user`, `session`, `account`, and `verification` are written by better-auth, not by application code.
@@ -411,7 +428,7 @@ library; do not repurpose them.
 
 | Enum | Values | Used by |
 | --- | --- | --- |
-| `workload_type` | `docker` | `workload.type` |
+| `workload_type` | `docker`, `s3_bucket`, `github` | `workload.type` |
 | `storage_class_kind` | `platform`, `custom` | `storage_class.kind` |
 | `storage_class_reclaim_policy` | `Delete`, `Retain` | `storage_class.reclaim_policy` |
 | `node_operation_type` | `add`, `drain`, `remove` | `node_operation.type` |
