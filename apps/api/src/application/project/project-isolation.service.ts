@@ -10,6 +10,12 @@ import {
   toNestException,
 } from '@/vendor/kubernetes/kubernetes-error';
 import { KubernetesService } from '@/vendor/kubernetes/kubernetes.service';
+import {
+  CILIUM_GROUP,
+  CILIUM_POLICY_PLURAL,
+  CILIUM_VERSION,
+  NAMESPACE_LABEL,
+} from './cilium';
 import { ProjectDnsService } from './project-dns.service';
 
 export const ISOLATION_POLICY_NAME = 'acceleratio-project-isolation';
@@ -17,10 +23,6 @@ export const ISOLATION_POLICY_NAME = 'acceleratio-project-isolation';
 const MANAGED_BY_LABEL = 'app.kubernetes.io/managed-by';
 const MANAGED_BY_VALUE = 'acceleratio';
 const PROJECT_ID_LABEL = 'acceleratio.io/project-id';
-const NAMESPACE_LABEL = 'k8s:io.kubernetes.pod.namespace';
-const CILIUM_GROUP = 'cilium.io';
-const CILIUM_VERSION = 'v2';
-const CILIUM_POLICY_PLURAL = 'ciliumnetworkpolicies';
 const CILIUM_CRD_NAME = `${CILIUM_POLICY_PLURAL}.${CILIUM_GROUP}`;
 const CRD_GROUP = 'apiextensions.k8s.io';
 const CRD_VERSION = 'v1';

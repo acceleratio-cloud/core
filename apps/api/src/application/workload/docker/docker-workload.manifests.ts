@@ -169,8 +169,8 @@ export const memoryQuantity = (mib: number): string =>
  * A null limit leaves that resource unlimited; the request stays at its
  * default so the scheduler still reserves a baseline.
  */
-const containerResources = (
-  config: DockerWorkloadConfig,
+export const containerResources = (
+  config: Pick<DockerWorkloadConfig, 'cpu_max' | 'ram_max'>,
 ): V1ResourceRequirements => {
   const cpuLimit =
     config.cpu_max === null

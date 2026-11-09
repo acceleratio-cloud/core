@@ -44,7 +44,7 @@ type ArgsField = 'entrypoint' | 'command';
  * vCPU kept to millicore precision, the finest Kubernetes resolves. Null
  * removes the limit; absent keeps the default.
  */
-const normalizeCpuMax = (value: unknown): number | null | undefined => {
+export const normalizeCpuMax = (value: unknown): number | null | undefined => {
   if (value === undefined || value === null) {
     return value;
   }
@@ -64,7 +64,7 @@ const normalizeCpuMax = (value: unknown): number | null | undefined => {
 };
 
 /** MiB. Null removes the limit; absent keeps the default. */
-const normalizeRamMax = (value: unknown): number | null | undefined => {
+export const normalizeRamMax = (value: unknown): number | null | undefined => {
   if (value === undefined || value === null) {
     return value;
   }

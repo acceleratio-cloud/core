@@ -1,6 +1,6 @@
 import http from 'node:http';
 import https from 'node:https';
-import type { Readable, Writable } from 'node:stream';
+import { Writable, type Readable } from 'node:stream';
 import { Injectable, Logger } from '@nestjs/common';
 import {
   AppsV1Api,
@@ -106,6 +106,87 @@ export class KubernetesService {
       true,
       request.onStatus,
     );
+  }
+
+  /**
+   * Runs a command without a TTY and returns its stdout. Rejects with the
+   * command's stderr when it exits non-zero, and closes it once `timeoutMs`
+   * passes or stdout grows past `maxBytes`.
+   */
+  async runInPod(request: {
+    namespace: string;
+    pod: string;
+    container: string;
+    command: string[];
+    timeoutMs: number;
+    maxBytes: number;
+  }): Promise<string> {
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+    let size = 0;
+    let fail: (error: Error) => void = () => undefined;
+    const sink = (chunks: Buffer[], limited: boolean) =>
+      new Writable({
+        write(chunk: Buffer, _encoding, callback) {
+          size += limited ? chunk.length : 0;
+
+          if (size > request.maxBytes) {
+            fail(new Error('Command output is too large'));
+          } else {
+            chunks.push(chunk);
+          }
+
+          callback();
+        },
+      });
+
+    return new Promise<string>((resolve, reject) => {
+      let socket: { close(): void } | undefined;
+      const timer = setTimeout(
+        () => fail(new Error('Command timed out')),
+        request.timeoutMs,
+      );
+      const settle = () => {
+        clearTimeout(timer);
+        socket?.close();
+      };
+
+      fail = (error) => {
+        settle();
+        reject(error);
+      };
+
+      new Exec(this.config)
+        .exec(
+          request.namespace,
+          request.pod,
+          request.container,
+          request.command,
+          sink(stdout, true),
+          sink(stderr, false),
+          null,
+          false,
+          (status) => {
+            settle();
+
+            if (status.status === 'Success') {
+              resolve(Buffer.concat(stdout).toString('utf8'));
+            } else {
+              reject(
+                new Error(
+                  Buffer.concat(stderr).toString('utf8').trim() ||
+                    status.message ||
+                    'Command failed',
+                ),
+              );
+            }
+          },
+        )
+        .then((opened) => {
+          socket = opened;
+        })
+        .catch(fail);
+    });
   }
 
   get coreV1(): CoreV1Api {
