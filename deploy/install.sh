@@ -68,6 +68,11 @@ VICTORIALOGS_DATA_DIR="${VICTORIALOGS_DATA_DIR:-/var/lib/victoria-logs}"
 VICTORIALOGS_RETENTION="${VICTORIALOGS_RETENTION:-7d}"
 VICTORIALOGS_MAX_DISK="${VICTORIALOGS_MAX_DISK:-2GiB}"
 
+# CloudNativePG operator: runs the PostgreSQL workloads' Cluster resources.
+CNPG_CHART_VERSION="${CNPG_CHART_VERSION:-0.29.1}"
+CNPG_NAMESPACE="${CNPG_NAMESPACE:-cnpg-system}"
+CNPG_RELEASE="${CNPG_RELEASE:-cnpg}"
+
 ACCELERATIO_NAMESPACE="${ACCELERATIO_NAMESPACE:-acceleratio}"
 ACCELERATIO_VERSION="${ACCELERATIO_VERSION:-0.2.1}"
 ACCELERATIO_API_IMAGE="${ACCELERATIO_API_IMAGE:-ghcr.io/acceleratio-cloud/api:${ACCELERATIO_VERSION}}"
@@ -237,6 +242,7 @@ Installs on any Ubuntu/Debian server (bare metal, private server, any hardware):
     for the console's Observability tab
   - VictoriaLogs (single node) with Vector collecting project container logs
     for the console's Logs tab
+  - CloudNativePG operator for PostgreSQL workloads
   - Acceleratio in namespace "acceleratio": PostgreSQL, API and console,
     then prints the dashboard URL
 
@@ -284,6 +290,9 @@ Common variables (environment or --config):
   VICTORIALOGS_DATA_DIR       default /var/lib/victoria-logs
   VICTORIALOGS_RETENTION      default 7d
   VICTORIALOGS_MAX_DISK       default 2GiB (oldest logs are dropped beyond it)
+  CNPG_CHART_VERSION          default 0.29.1
+  CNPG_NAMESPACE              default cnpg-system
+  CNPG_RELEASE                default cnpg
   ACCELERATIO_NAMESPACE       default acceleratio
   ACCELERATIO_VERSION         default 0.2.1 (image tag for API and console)
   ACCELERATIO_API_IMAGE       default ghcr.io/acceleratio-cloud/api:<version>
@@ -1016,7 +1025,7 @@ prepare_helm_environment() {
 
 prepare_helm_repos() {
   if (( DRY_RUN )); then
-    log_info "DRY-RUN: would add SeaweedFS and VictoriaMetrics Helm repositories (VictoriaMetrics and VictoriaLogs charts)"
+    log_info "DRY-RUN: would add SeaweedFS, VictoriaMetrics (VictoriaMetrics and VictoriaLogs charts) and CloudNativePG Helm repositories"
     return 0
   fi
   log_info "Adding Helm repositories"
@@ -1026,6 +1035,8 @@ prepare_helm_repos() {
   "$HELM_BIN" repo add --force-update victoria-metrics https://victoriametrics.github.io/helm-charts/ >/dev/null
   "$HELM_BIN" repo update seaweedfs-csi-driver >/dev/null
   "$HELM_BIN" repo update victoria-metrics >/dev/null
+  "$HELM_BIN" repo add --force-update cnpg https://cloudnative-pg.github.io/charts >/dev/null
+  "$HELM_BIN" repo update cnpg >/dev/null
 }
 
 # ---------------------------------------------------------------------------
@@ -1405,6 +1416,25 @@ install_victoriametrics() {
 }
 
 # ---------------------------------------------------------------------------
+# CloudNativePG operator.
+# ---------------------------------------------------------------------------
+install_cnpg() {
+  if (( DRY_RUN )); then
+    log_info "DRY-RUN: would install CloudNativePG operator ${CNPG_CHART_VERSION} in namespace ${CNPG_NAMESPACE}"
+    return 0
+  fi
+
+  log_info "Installing CloudNativePG operator ${CNPG_CHART_VERSION}"
+  ensure_namespace "$CNPG_NAMESPACE"
+
+  "$HELM_BIN" upgrade --install "$CNPG_RELEASE" cnpg/cloudnative-pg \
+    --version "$CNPG_CHART_VERSION" \
+    --namespace "$CNPG_NAMESPACE" \
+    --wait --timeout 10m
+  log_ok "CloudNativePG operator is ready"
+}
+
+# ---------------------------------------------------------------------------
 # VictoriaLogs and Vector.
 # ---------------------------------------------------------------------------
 
@@ -1602,6 +1632,8 @@ verify_installation() {
   k3s kubectl -n "$VICTORIAMETRICS_NAMESPACE" get pods -o wide
   log_info "VictoriaLogs pods:"
   k3s kubectl -n "$VICTORIALOGS_NAMESPACE" get pods -o wide
+  log_info "CloudNativePG pods:"
+  k3s kubectl -n "$CNPG_NAMESPACE" get pods -o wide
   log_info "Cilium status:"
   k3s kubectl -n kube-system get daemonset/cilium deployment/cilium-operator
 
@@ -2426,6 +2458,7 @@ print_summary() {
   printf '    SeaweedFS     %s (namespace %s)\n' "$SEAWEEDFS_CHART_VERSION" "$SEAWEEDFS_NAMESPACE"
   printf '    VictoriaMetrics %s (namespace %s)\n' "$VICTORIAMETRICS_CHART_VERSION" "$VICTORIAMETRICS_NAMESPACE"
   printf '    VictoriaLogs  %s with Vector (namespace %s)\n' "$VICTORIALOGS_CHART_VERSION" "$VICTORIALOGS_NAMESPACE"
+  printf '    CloudNativePG %s (namespace %s)\n' "$CNPG_CHART_VERSION" "$CNPG_NAMESPACE"
   printf '    Storage       %s (default StorageClass)\n' "${default_sc:-$STORAGE_CLASS_NAME}"
   printf '\n'
 
@@ -2479,6 +2512,7 @@ main() {
   install_csi
   install_victoriametrics
   install_victorialogs
+  install_cnpg
   verify_installation
   resolve_acceleratio_urls
   configure_traefik

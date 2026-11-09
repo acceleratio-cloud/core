@@ -4,7 +4,8 @@
 #
 # Updates an installation made by deploy/install.sh to the versions pinned in
 # the target install.sh: k3s, Helm, Cilium, SeaweedFS, the SeaweedFS CSI
-# driver, VictoriaMetrics and Acceleratio (API and console).
+# driver, VictoriaMetrics, VictoriaLogs, the CloudNativePG operator and
+# Acceleratio (API and console).
 #
 # It prints a plan, takes a backup, runs the target install.sh (which is
 # idempotent and owns the order of the steps), verifies the result and rolls
@@ -175,7 +176,8 @@ Acceleratio updater
 
 Updates an installation made by deploy/install.sh to the versions pinned in
 the target install.sh: k3s, Helm, Cilium, SeaweedFS, the SeaweedFS CSI driver,
-VictoriaMetrics and Acceleratio (API and console).
+VictoriaMetrics, VictoriaLogs, the CloudNativePG operator and Acceleratio
+(API and console).
 
 It prints the plan (current -> target version), backs up the database and the
 cluster state, runs the target install.sh, verifies the result and, if the
@@ -503,7 +505,7 @@ postgres_major() {
 }
 
 collect_plan() {
-  local ns seaweed_ns seaweed_rel csi_rel vm_ns vm_rel vl_ns vl_rel
+  local ns seaweed_ns seaweed_rel csi_rel vm_ns vm_rel vl_ns vl_rel cnpg_ns cnpg_rel
   local target api_image console_image pg_image cur
   local version
 
@@ -515,6 +517,8 @@ collect_plan() {
   vm_rel="$(target_of VICTORIAMETRICS_RELEASE)"
   vl_ns="$(target_of VICTORIALOGS_NAMESPACE)"
   vl_rel="$(target_of VICTORIALOGS_RELEASE)"
+  cnpg_ns="$(target_of CNPG_NAMESPACE)"
+  cnpg_rel="$(target_of CNPG_RELEASE)"
 
   # Where the pieces live, for the steps that follow.
   NAMESPACE="$ns"
@@ -524,6 +528,7 @@ collect_plan() {
     "${csi_rel}|${seaweed_ns}"
     "${vm_rel}|${vm_ns}"
     "${vl_rel}|${vl_ns}"
+    "${cnpg_rel}|${cnpg_ns}"
   )
 
   target="$(target_of K3S_VERSION)"
@@ -538,6 +543,7 @@ collect_plan() {
   add_row "SeaweedFS CSI" "$(helm_chart_version "$csi_rel" "$seaweed_ns")" "$(target_of SEAWEEDFS_CSI_CHART_VERSION)"
   add_row "VictoriaMetrics" "$(helm_chart_version "$vm_rel" "$vm_ns")" "$(target_of VICTORIAMETRICS_CHART_VERSION)"
   add_row "VictoriaLogs" "$(helm_chart_version "$vl_rel" "$vl_ns")" "$(target_of VICTORIALOGS_CHART_VERSION)"
+  add_row "CloudNativePG" "$(helm_chart_version "$cnpg_rel" "$cnpg_ns")" "$(target_of CNPG_CHART_VERSION)"
 
   version="$(target_of ACCELERATIO_VERSION)"
   api_image="${ACCELERATIO_API_IMAGE:-ghcr.io/acceleratio-cloud/api:${version}}"
