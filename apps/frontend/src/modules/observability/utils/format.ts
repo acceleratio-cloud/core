@@ -50,6 +50,14 @@ export const formatCores: ValueFormatter = (cores) => {
   return `${value} ${value === '1' ? 'core' : 'cores'}`;
 };
 
+/** A plain count, such as connections; small values keep one decimal. */
+export const formatCount: ValueFormatter = (value) =>
+  String(Number(value.toFixed(Math.abs(value) < 10 ? 1 : 0)));
+
+/** Events per second, such as transactions. */
+export const formatPerSecond: ValueFormatter = (value) =>
+  `${formatCount(value)}/s`;
+
 export const formatPercent = (ratio: number) => {
   const percent = ratio * 100;
 

@@ -67,6 +67,20 @@ export interface ClusterCapacity {
   memory_bytes: number;
 }
 
+/**
+ * PostgreSQL databases of the project, from their CloudNativePG exporter:
+ * one series per database. Empty lists when the project has none.
+ */
+export interface PostgresMetrics {
+  /** Client connections, the exporter's own left out. */
+  connections: MetricsSeries[];
+  transactions_per_second: MetricsSeries[];
+  /** Share of block reads served from shared buffers, 0 to 1. */
+  cache_hit_ratio: MetricsSeries[];
+  /** Size of the application database, in bytes. */
+  database_size_bytes: MetricsSeries[];
+}
+
 export interface ProjectMetrics {
   range: MetricsRange;
   /** Window of the series, in unix seconds. */
@@ -85,4 +99,5 @@ export interface ProjectMetrics {
     disk_write_bytes_per_second: MetricsSignal;
   };
   workloads: WorkloadMetrics[];
+  postgres: PostgresMetrics;
 }

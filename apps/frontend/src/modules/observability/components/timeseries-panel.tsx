@@ -43,6 +43,8 @@ type TimeseriesPanelProps = {
   format: ValueFormatter;
   /** Stacks the series so the top edge is the project total. */
   stacked?: boolean;
+  /** Top of the value axis for bounded signals, such as 1 for a ratio. */
+  maxValue?: number;
   className?: string;
 };
 
@@ -59,6 +61,7 @@ export const TimeseriesPanel = ({
   end,
   format,
   stacked = true,
+  maxValue,
   className,
 }: TimeseriesPanelProps) => {
   const gradientId = useId().replace(/:/g, '');
@@ -130,7 +133,10 @@ export const TimeseriesPanel = ({
               width={84}
               tickCount={5}
               // An all-zero series still gets a readable 0–1 scale.
-              domain={[0, (max: number) => (max > 0 ? max * 1.15 : 1)]}
+              domain={[
+                0,
+                (max: number) => maxValue ?? (max > 0 ? max * 1.15 : 1),
+              ]}
               allowDecimals
             />
             <Tooltip

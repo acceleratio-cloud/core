@@ -3,7 +3,11 @@
 import { useMemo, useState } from 'react';
 import { Activity, CloudOff, RefreshCw } from 'lucide-react';
 
-import type { MetricsRange, ProjectMetrics } from '@acceleratio/shared';
+import type {
+  MetricsRange,
+  MetricsSeries,
+  ProjectMetrics,
+} from '@acceleratio/shared';
 import { useProject } from '@/modules/projects/providers/project-provider';
 import { Button } from '@/shared/components/ui/button';
 import { Skeleton } from '@/shared/components/ui/skeleton';
@@ -19,6 +23,9 @@ import {
   formatByteRate,
   formatBytes,
   formatCores,
+  formatCount,
+  formatPercent,
+  formatPerSecond,
   type ValueFormatter,
 } from '../utils/format';
 import {
@@ -148,6 +155,22 @@ const Dashboard = ({
       write: toServiceSeries(series.disk_write_bytes_per_second, tones),
     }),
     [series, tones],
+  );
+
+  // One line per database, coloured like the service everywhere else.
+  const databases = useMemo(() => {
+    const perDatabase = (byWorkload: MetricsSeries[]) =>
+      toServiceSeries({ total: [], by_workload: byWorkload }, tones);
+
+    return {
+      connections: perDatabase(metrics.postgres.connections),
+      transactions: perDatabase(metrics.postgres.transactions_per_second),
+      cacheHit: perDatabase(metrics.postgres.cache_hit_ratio),
+      size: perDatabase(metrics.postgres.database_size_bytes),
+    };
+  }, [metrics.postgres, tones]);
+  const hasDatabases = workloads.some(
+    (workload) => workload.type === 'postgres',
   );
 
   const memorySlices = useMemo(() => {
@@ -358,6 +381,41 @@ const Dashboard = ({
           {...timeWindow}
         />
       </PanelRow>
+
+      {hasDatabases ? (
+        <PanelRow title="PostgreSQL" panelCount={4} className="lg:grid-cols-2">
+          <TimeseriesPanel
+            title="Connections"
+            hint="clients · by database"
+            series={databases.connections}
+            format={formatCount}
+            {...timeWindow}
+          />
+          <TimeseriesPanel
+            title="Transactions"
+            hint="commits and rollbacks/s · by database"
+            series={databases.transactions}
+            format={formatPerSecond}
+            {...timeWindow}
+          />
+          <TimeseriesPanel
+            title="Cache hit ratio"
+            hint="reads served from memory · by database"
+            series={databases.cacheHit}
+            format={formatPercent}
+            stacked={false}
+            maxValue={1}
+            {...timeWindow}
+          />
+          <TimeseriesPanel
+            title="Database size"
+            hint="app database · by database"
+            series={databases.size}
+            format={formatBytes}
+            {...timeWindow}
+          />
+        </PanelRow>
+      ) : null}
 
       <PanelRow title="Services" panelCount={2} className="xl:grid-cols-3">
         <DonutPanel

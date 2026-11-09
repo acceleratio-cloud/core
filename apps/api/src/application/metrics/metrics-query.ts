@@ -82,6 +82,25 @@ export const projectQueries = (namespace: string, rateWindow: string) => {
   } as const;
 };
 
+/**
+ * PromQL for the CloudNativePG exporter of every database in a namespace,
+ * one series per pod. The exporter's Services carry the scrape annotation
+ * too, so only the per-pod job counts.
+ */
+export const postgresQueries = (namespace: string, rateWindow: string) => {
+  const pods = `namespace=${quote(namespace)},job="kubernetes-pods"`;
+  const database = `${pods},datname="app"`;
+  const rate = (metric: string) =>
+    `sum by (pod) (rate(${metric}{${database}}[${rateWindow}]))`;
+
+  return {
+    connections: `sum by (pod) (cnpg_backends_total{${pods},application_name!="cnpg_metrics_exporter"})`,
+    transactions_per_second: `${rate('cnpg_pg_stat_database_xact_commit')} + ${rate('cnpg_pg_stat_database_xact_rollback')}`,
+    cache_hit_ratio: `${rate('cnpg_pg_stat_database_blks_hit')} / (${rate('cnpg_pg_stat_database_blks_hit')} + ${rate('cnpg_pg_stat_database_blks_read')})`,
+    database_size_bytes: `sum by (pod) (cnpg_pg_database_size_bytes{${database}})`,
+  } as const;
+};
+
 /** Escapes a value for use inside a PromQL regular expression matcher. */
 const escapeRegex = (value: string): string =>
   value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

@@ -5,13 +5,14 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import type { V1PersistentVolumeClaim, V1Pod } from '@kubernetes/client-node';
-import type {
-  ClusterCapacity,
-  MetricsRange,
-  ProjectMetrics,
-  ProjectMetricsSummary,
-  Workload,
-  WorkloadMetrics,
+import {
+  OTHER_METRICS_SERIES_KEY,
+  type ClusterCapacity,
+  type MetricsRange,
+  type ProjectMetrics,
+  type ProjectMetricsSummary,
+  type Workload,
+  type WorkloadMetrics,
 } from '@acceleratio/shared';
 import { projectNamespace } from '@/common/naming';
 import { ProjectService } from '@/application/project/project.service';
@@ -21,6 +22,7 @@ import { getKubernetesStatusCode } from '@/vendor/kubernetes/kubernetes-error';
 import { KubernetesService } from '@/vendor/kubernetes/kubernetes.service';
 import { isActivePod, listNamespacePods } from '@/vendor/kubernetes/pods';
 import {
+  type PromSeries,
   VictoriaMetricsClient,
   VictoriaMetricsUnavailableError,
 } from '@/vendor/victoriametrics/victoriametrics.client';
@@ -31,6 +33,7 @@ import {
   lastValues,
   metricsWindow,
   parseQuantity,
+  postgresQueries,
   projectQueries,
   scalarValue,
   volumeQueries,
@@ -39,8 +42,6 @@ import {
 
 export const METRICS_UNAVAILABLE_MESSAGE =
   'Metrics are unavailable: VictoriaMetrics is not reachable in the cluster';
-
-type SignalName = keyof ProjectMetrics['series'];
 
 interface PodUsage {
   ready: number;
@@ -126,18 +127,28 @@ export class MetricsService {
     const namespace = projectNamespace(projectId);
     const window = metricsWindow(range, now);
     const queries = projectQueries(namespace, window.rateWindow);
+    const databaseQueries = postgresQueries(namespace, window.rateWindow);
     const volumes = volumeQueries(namespace);
 
-    const [workloads, pods, claims, cluster, signals, diskUsed, diskCapacity] =
-      await Promise.all([
-        this.workloadService.list(projectId),
-        this.listPods(namespace),
-        this.listClaims(namespace),
-        this.clusterCapacity(),
-        this.querySignals(queries, window),
-        this.queryScalar(volumes.used, window.end),
-        this.queryScalar(volumes.capacity, window.end),
-      ]);
+    const [
+      workloads,
+      pods,
+      claims,
+      cluster,
+      signals,
+      databaseSignals,
+      diskUsed,
+      diskCapacity,
+    ] = await Promise.all([
+      this.workloadService.list(projectId),
+      this.listPods(namespace),
+      this.listClaims(namespace),
+      this.clusterCapacity(),
+      this.querySignals(queries, window),
+      this.querySignals(databaseQueries, window),
+      this.queryScalar(volumes.used, window.end),
+      this.queryScalar(volumes.capacity, window.end),
+    ]);
 
     const refs: WorkloadRef[] = workloads.map((workload) => ({
       id: workload.id,
@@ -182,6 +193,18 @@ export class MetricsService {
         foldSignal(result, refs, resolvePod),
       ]),
     ) as ProjectMetrics['series'];
+    const byDatabase = (result: PromSeries[]) =>
+      foldSignal(result, refs, resolvePod).by_workload.filter(
+        (item) => item.key !== OTHER_METRICS_SERIES_KEY,
+      );
+    const postgres: ProjectMetrics['postgres'] = {
+      connections: byDatabase(databaseSignals.connections),
+      transactions_per_second: byDatabase(
+        databaseSignals.transactions_per_second,
+      ),
+      cache_hit_ratio: byDatabase(databaseSignals.cache_hit_ratio),
+      database_size_bytes: byDatabase(databaseSignals.database_size_bytes),
+    };
 
     const claimCapacity = claims.reduce(
       (sum, claim) => sum + pvcCapacity(claim),
@@ -216,6 +239,7 @@ export class MetricsService {
       summary,
       series,
       workloads: this.workloadMetrics(workloads, usageByWorkload, series),
+      postgres,
     };
   }
 
@@ -250,13 +274,13 @@ export class MetricsService {
     });
   }
 
-  private async querySignals(
-    queries: Record<SignalName, string>,
+  private async querySignals<Name extends string>(
+    queries: Record<Name, string>,
     window: { start: number; end: number; step: number },
   ) {
     try {
       const entries = await Promise.all(
-        (Object.entries(queries) as [SignalName, string][]).map(
+        (Object.entries(queries) as [Name, string][]).map(
           async ([name, promql]) =>
             [
               name,
@@ -271,7 +295,7 @@ export class MetricsService {
       );
 
       return Object.fromEntries(entries) as Record<
-        SignalName,
+        Name,
         Awaited<ReturnType<VictoriaMetricsClient['queryRange']>>
       >;
     } catch (error) {

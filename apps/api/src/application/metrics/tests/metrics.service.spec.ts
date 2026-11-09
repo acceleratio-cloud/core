@@ -12,6 +12,7 @@ import {
   METRICS_UNAVAILABLE_MESSAGE,
   MetricsService,
 } from '../metrics.service';
+import { postgresQueries } from '../metrics-query';
 
 // These pull the ESM-only Kubernetes client or the database; every instance
 // here is faked.
@@ -114,14 +115,49 @@ const build = (
   return { service, coreV1, queryRange };
 };
 
+describe('postgresQueries', () => {
+  it('reads the per-pod scrape of the app database and leaves the exporter out', () => {
+    const queries = postgresQueries('project-x', '60s');
+
+    expect(queries.connections).toContain('job="kubernetes-pods"');
+    expect(queries.connections).toContain(
+      'application_name!="cnpg_metrics_exporter"',
+    );
+    expect(queries.transactions_per_second).toContain('datname="app"');
+    expect(queries.cache_hit_ratio).toContain('blks_read');
+  });
+});
+
 describe('MetricsService', () => {
+  it('folds PostgreSQL exporter series per database and drops unknown pods', async () => {
+    const { service } = build({
+      queryRange: (promql) =>
+        Promise.resolve<PromSeries[]>(
+          promql.includes('cnpg_backends_total')
+            ? [
+                { metric: { pod: 'api-1-a' }, values: [[60, '3']] },
+                { metric: { pod: 'stray-0' }, values: [[60, '9']] },
+              ]
+            : [],
+        ),
+    });
+
+    const metrics = await service.getProjectMetrics(projectId, '1h', 3600);
+
+    expect(metrics.postgres.connections).toEqual([
+      { key: 'w-api', label: 'api', points: [[60, 3]] },
+    ]);
+    expect(metrics.postgres.transactions_per_second).toEqual([]);
+  });
+
   it('folds series by workload and adds live pod state', async () => {
     const { service, coreV1, queryRange } = build();
 
     const metrics = await service.getProjectMetrics(projectId, '1h', 3600);
 
     expect(coreV1.listNamespacedPod).toHaveBeenCalledWith({ namespace });
-    expect(queryRange).toHaveBeenCalledTimes(6);
+    // Six resource signals and four PostgreSQL ones.
+    expect(queryRange).toHaveBeenCalledTimes(10);
     expect(metrics.summary).toMatchObject({
       cpu_cores: expect.closeTo(0.3) as number,
       cpu_limit_cores: 1,
