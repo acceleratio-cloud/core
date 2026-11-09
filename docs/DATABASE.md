@@ -215,7 +215,7 @@ Invariants:
   `0019_workload_internal_hostname` leaves existing Docker rows null; the API names them on startup
   and on their next deploy, never with their `external_name`.
 - `type` selects the shape of every config of the workload (`draft_config` and its versions). The
-  values are `docker`, `s3_bucket` and `github`. A `github` config is a `docker` config plus `github_app_id`, `repository` and `branch` (the App and repository are fixed after creation; the branch can be changed, and the API checks that it exists on GitHub); its `docker_image` and `commit_sha` are written only by a successful build (`workload_build`) and are absent until the first one. A `docker` config carries the image reference (`docker_image`) and optional
+  values are `docker`, `s3_bucket`, `github` and `postgres` (migration `0027`). A `github` config is a `docker` config plus `github_app_id`, `repository` and `branch` (the App and repository are fixed after creation; the branch can be changed, and the API checks that it exists on GitHub); its `docker_image` and `commit_sha` are written only by a successful build (`workload_build`) and are absent until the first one. A `docker` config carries the image reference (`docker_image`) and optional
   `cpu_max` (vCPU, default 1), `ram_max` (MiB, default 1024), `entrypoint` and `command` (string
   arrays that replace the image's ENTRYPOINT and CMD). An absent limit means the default and a null
   limit means no limit. New services are created with both limits null; configs stored before that
@@ -235,6 +235,16 @@ Invariants:
   (`provisioning`, `ready`, `failed`) and `acceleratio.io/bucket-message`; a Secret without the
   annotation predates it and counts as ready. The access keys live in the Secret `s3-<bucket>` in the project namespace, never in the
   database. For other types `storage_class_id` is null.
+- A `postgres` workload is a single-instance CloudNativePG `Cluster` named `external_name`. Its
+  config is `{ postgres_version, size_gb, storage_class_id, cpu_max?, ram_max? }`; the version and storage
+  profile are fixed after creation, `size_gb` can only grow (and only on a StorageClass that allows
+  volume expansion; the claim grows in place and `max_wal_size` follows at a quarter of the disk), and
+  every change is applied at once and recorded as a new version (there is no draft, deploy or rollback). `storage_class_id` stays in the
+  config and the column stays null, so the bucket name index never applies. Like a bucket it has no
+  Deployment: the API reads its status from the Cluster. The password lives only in the Secret
+  `<external_name>-credentials`, never in the database. The API reads it only on request
+  (`GET …/postgres/credentials`, the console's show button) and returns a new one once from regeneration. External access is not stored either: the NodePort Service `<external_name>-external`
+  exists while the port is open and carries the allowed networks as `acceleratio.io/allowed-cidrs`.
 - The config lives in versions, not on the row. `active_version_id` points at the
   `workload_version` the cluster runs and is null until the first deploy. `draft_config` holds edits
   the next deploy applies and is null when there are none. At least one of the two is set: a new
