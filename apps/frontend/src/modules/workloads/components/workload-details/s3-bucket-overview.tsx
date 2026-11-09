@@ -147,7 +147,7 @@ export const S3BucketOverview = ({ workload }: { workload: Workload }) => {
   const config = workload.active_version?.config;
   const profileId =
     config && 'storage_class_id' in config
-      ? config.storage_class_id
+      ? (config.storage_class_id ?? undefined)
       : undefined;
   const profile = useStorageProfile(profileId);
 

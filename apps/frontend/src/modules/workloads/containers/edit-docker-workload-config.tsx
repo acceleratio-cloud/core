@@ -178,7 +178,7 @@ const validateArgs = (value: string) => {
  * One setting: label and a line of help on the left, the control on the
  * right. Stacks on narrow panels.
  */
-const SettingRow = ({
+export const SettingRow = ({
   label,
   htmlFor,
   labelId,
@@ -224,7 +224,7 @@ const SliderValue = ({ children }: { children: ReactNode }) => (
 );
 
 /** Range ends under a slider, so its scale reads at a glance. */
-const SliderScale = ({ min, max }: { min: string; max: string }) => (
+export const SliderScale = ({ min, max }: { min: string; max: string }) => (
   <div
     aria-hidden="true"
     className="mt-1.5 flex justify-between font-mono text-[11px] leading-4 text-fg-tertiary tabular-nums"
