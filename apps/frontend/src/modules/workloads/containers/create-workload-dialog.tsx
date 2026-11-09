@@ -5,6 +5,7 @@ import { Radio } from '@base-ui/react/radio';
 import { RadioGroup } from '@base-ui/react/radio-group';
 import {
   Check,
+  Archive,
   Container,
   Database,
   GitBranch,
@@ -28,13 +29,14 @@ import {
 } from '@/shared/components/ui/dialog';
 import { CreateDockerWorkloadForm } from './create-docker-workload-form';
 import { CreateGithubWorkloadForm } from './create-github-workload-form';
+import { CreatePostgresForm } from './create-postgres-form';
 import { CreateS3BucketForm } from './create-s3-bucket-form';
 
 /**
  * Types offered in the create dialog. `comingSoon` options are shown but
  * cannot be chosen.
  */
-export type WorkloadKind = 'docker' | 'github' | 's3-bucket';
+export type WorkloadKind = 'docker' | 'github' | 'postgres' | 's3-bucket';
 
 type WorkloadOption = {
   value: WorkloadKind;
@@ -46,7 +48,8 @@ type WorkloadOption = {
 const workloadOptions: WorkloadOption[] = [
   { value: 'docker', label: 'Docker', icon: Container },
   { value: 'github', label: 'GitHub', icon: GitBranch },
-  { value: 's3-bucket', label: 'S3 bucket', icon: Database },
+  { value: 'postgres', label: 'PostgreSQL', icon: Database },
+  { value: 's3-bucket', label: 'S3 bucket', icon: Archive },
 ];
 
 type Step = 'type' | WorkloadKind;
@@ -127,6 +130,12 @@ export const CreateWorkloadDialog = () => {
           />
         ) : step === 'github' ? (
           <CreateGithubWorkloadForm
+            projectId={project.id}
+            onCreated={handleCreated}
+            onBack={() => setStep('type')}
+          />
+        ) : step === 'postgres' ? (
+          <CreatePostgresForm
             projectId={project.id}
             onCreated={handleCreated}
             onBack={() => setStep('type')}

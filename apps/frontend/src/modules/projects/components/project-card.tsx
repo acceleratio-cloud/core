@@ -12,6 +12,7 @@ import { bucketStatusLabel } from '@/modules/workloads/utils/s3-bucket';
 import { BucketIcon } from '@/shared/icons/bucket-icon';
 import { DockerIcon } from '@/shared/icons/docker-icon';
 import { GithubIcon } from '@/shared/icons/github-icon';
+import { PostgresIcon } from '@/shared/icons/postgres-icon';
 
 /** Tiles in the preview grid. Past this, the last tile counts the rest. */
 const PREVIEW_SLOTS = 6;
@@ -82,6 +83,8 @@ const WorkloadTile = ({ workload }: { workload: Workload }) => (
         <BucketIcon className="size-3.5 shrink-0" />
       ) : workload.type === 'github' ? (
         <GithubIcon className="size-3.5 shrink-0" />
+      ) : workload.type === 'postgres' ? (
+        <PostgresIcon className="size-3.5 shrink-0" />
       ) : (
         <DockerIcon className="size-3.5 shrink-0" />
       )}
