@@ -1,4 +1,4 @@
-export type WorkloadType = 'docker' | 's3_bucket' | 'github';
+export type WorkloadType = 'docker' | 's3_bucket' | 'github' | 'postgres';
 
 /**
  * Types that run as a Deployment with Docker service settings: instances,
@@ -144,8 +144,143 @@ export interface WorkloadBuildLog {
   log: string;
 }
 
+/** Major PostgreSQL versions a `postgres` workload can be created with. */
+export const POSTGRES_VERSIONS = ['17', '16'] as const;
+export type PostgresVersion = (typeof POSTGRES_VERSIONS)[number];
+
+/**
+ * A single-instance PostgreSQL database run by CloudNativePG. The version,
+ * disk size and storage profile are fixed after creation; CPU and memory can
+ * change.
+ */
+export interface PostgresConfig {
+  postgres_version: PostgresVersion;
+  /** Disk size in GiB, 1 to 100. */
+  size_gb: number;
+  /** Storage profile; null uses the platform profile. */
+  storage_class_id: string | null;
+  /** CPU limit in vCPU. Absent means 1 vCPU, null no limit. */
+  cpu_max?: number | null;
+  /** Memory limit in MiB. Absent means 1024 MiB, null no limit. */
+  ram_max?: number | null;
+}
+
 export type WorkloadConfig =
-  DockerWorkloadConfig | S3BucketConfig | GithubWorkloadConfig;
+  | DockerWorkloadConfig
+  | S3BucketConfig
+  | GithubWorkloadConfig
+  | PostgresConfig;
+
+/**
+ * How project services reach a `postgres` workload. The password stays in
+ * the Kubernetes Secret `secret_name` (keys `username` and `password`) and is
+ * never returned by the API.
+ */
+export interface PostgresConnection {
+  /** Read-write service inside the project namespace. */
+  host: string;
+  port: number;
+  database: string;
+  username: string;
+  secret_name: string;
+}
+
+/**
+ * `GET`/`PUT …/postgres/exposure`: the database's port opened outside the
+ * cluster. Closed by default. Outside the pod network the server accepts
+ * TLS connections only (`sslmode=require`).
+ */
+export interface PostgresExposure {
+  enabled: boolean;
+  /** Source networks allowed to connect; `0.0.0.0/0` is everyone. */
+  allowed_cidrs: string[];
+  /** Node port, 30000 to 32767; null while closed. */
+  node_port: number | null;
+  /**
+   * Address of the node that runs the database, which is the only node that
+   * answers on the port. Null while closed or while no instance runs.
+   */
+  host: string | null;
+}
+
+export interface UpdatePostgresExposurePayload {
+  enabled: boolean;
+  /** Required and non-empty when `enabled`; at most 20 networks. */
+  allowed_cidrs?: string[];
+  /** A fixed node port; absent or null lets Kubernetes pick one. */
+  node_port?: number | null;
+}
+
+/**
+ * `POST …/postgres/credentials/rotate`: the new password, returned once and
+ * never again. The database applies it within seconds; the old one stops
+ * working then.
+ */
+export interface PostgresCredentials {
+  username: string;
+  password: string;
+  secret_name: string;
+}
+
+export interface PostgresConnectionStats {
+  active: number;
+  idle: number;
+  max: number;
+}
+
+export interface PostgresLongQuery {
+  pid: number;
+  state: string | null;
+  /** Seconds since the query started. */
+  duration_seconds: number;
+  /** First 500 characters of the statement. */
+  query: string;
+}
+
+/** `GET …/postgres/overview`: state and load of the running database. */
+export interface PostgresOverview {
+  version: string;
+  started_at: string;
+  /** Size of the application database, in bytes. */
+  database_size_bytes: number;
+  connections: PostgresConnectionStats;
+  /** Commits plus rollbacks per second since statistics were reset. */
+  transactions_per_second: number;
+  /** Share of block reads served from shared buffers, 0 to 1; null before any read. */
+  cache_hit_ratio: number | null;
+  /** Locks other sessions are waiting for. */
+  waiting_locks: number;
+  /** Statements running longer than 30 seconds, longest first. */
+  long_queries: PostgresLongQuery[];
+}
+
+export interface PostgresIndex {
+  name: string;
+  definition: string;
+  size_bytes: number;
+}
+
+/** One table of the application database. */
+export interface PostgresTable {
+  schema: string;
+  name: string;
+  /** Table plus its indexes and TOAST, in bytes. */
+  size_bytes: number;
+  /** The planner's estimate; -1 when the table was never analyzed. */
+  row_estimate: number;
+  indexes: PostgresIndex[];
+}
+
+/** `GET …/postgres/tables/:schema/:table/rows`: one read-only page. */
+export interface PostgresRows {
+  columns: string[];
+  /** Values as PostgreSQL prints them; null for SQL NULL. */
+  rows: (string | null)[][];
+  page: number;
+  page_size: number;
+  /** True when more rows follow this page. */
+  has_more: boolean;
+}
 
 /** How a project workload reaches an S3 bucket. The secret key is separate. */
 export interface S3BucketAccess {
@@ -328,6 +463,8 @@ export interface Workload {
   auto_deploy?: boolean;
   /** Set for `s3_bucket` workloads once their keys exist. */
   s3?: S3BucketAccess | null;
+  /** Set for `postgres` workloads. */
+  postgres?: PostgresConnection | null;
   created_at: string;
   updated_at: string;
 }

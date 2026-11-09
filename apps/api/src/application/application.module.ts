@@ -34,6 +34,10 @@ import { DockerWorkloadStatusDeriver } from '@/application/workload/docker/docke
 import { DockerWorkloadNetworkService } from '@/application/workload/docker/docker-workload-network.service';
 import { DockerWorkloadService } from '@/application/workload/docker/docker-workload.service';
 import { GithubWorkloadService } from '@/application/workload/github/github-workload.service';
+import { PostgresAccessService } from '@/application/workload/postgres/postgres-access.service';
+import { PostgresOverviewService } from '@/application/workload/postgres/postgres-overview.service';
+import { PostgresController } from '@/application/workload/postgres/postgres.controller';
+import { PostgresWorkloadService } from '@/application/workload/postgres/postgres.service';
 import { S3BucketObjectsController } from '@/application/workload/s3-bucket/s3-bucket-objects.controller';
 import { S3BucketObjectsService } from '@/application/workload/s3-bucket/s3-bucket-objects.service';
 import { S3BucketWorkloadService } from '@/application/workload/s3-bucket/s3-bucket.service';
@@ -77,6 +81,7 @@ import { VictoriaMetricsClient } from '@/vendor/victoriametrics/victoriametrics.
     SystemController,
     WorkloadController,
     S3BucketObjectsController,
+    PostgresController,
   ],
   providers: [
     PasswordAttemptLimiter,
@@ -102,6 +107,9 @@ import { VictoriaMetricsClient } from '@/vendor/victoriametrics/victoriametrics.
     DockerWorkloadService,
     DockerWorkloadNetworkService,
     S3BucketWorkloadService,
+    PostgresWorkloadService,
+    PostgresOverviewService,
+    PostgresAccessService,
     GithubWorkloadService,
     S3BucketObjectsService,
     SeaweedfsFilerClient,
