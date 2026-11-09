@@ -74,7 +74,7 @@ CNPG_NAMESPACE="${CNPG_NAMESPACE:-cnpg-system}"
 CNPG_RELEASE="${CNPG_RELEASE:-cnpg}"
 
 ACCELERATIO_NAMESPACE="${ACCELERATIO_NAMESPACE:-acceleratio}"
-ACCELERATIO_VERSION="${ACCELERATIO_VERSION:-0.2.1}"
+ACCELERATIO_VERSION="${ACCELERATIO_VERSION:-0.2.2}"
 ACCELERATIO_API_IMAGE="${ACCELERATIO_API_IMAGE:-ghcr.io/acceleratio-cloud/api:${ACCELERATIO_VERSION}}"
 ACCELERATIO_CONSOLE_IMAGE="${ACCELERATIO_CONSOLE_IMAGE:-ghcr.io/acceleratio-cloud/console:${ACCELERATIO_VERSION}}"
 POSTGRES_IMAGE="${POSTGRES_IMAGE:-postgres:17-alpine}"
@@ -294,7 +294,7 @@ Common variables (environment or --config):
   CNPG_NAMESPACE              default cnpg-system
   CNPG_RELEASE                default cnpg
   ACCELERATIO_NAMESPACE       default acceleratio
-  ACCELERATIO_VERSION         default 0.2.1 (image tag for API and console)
+  ACCELERATIO_VERSION         default 0.2.2 (image tag for API and console)
   ACCELERATIO_API_IMAGE       default ghcr.io/acceleratio-cloud/api:<version>
   ACCELERATIO_CONSOLE_IMAGE   default ghcr.io/acceleratio-cloud/console:<version>
   POSTGRES_IMAGE              default postgres:17-alpine
