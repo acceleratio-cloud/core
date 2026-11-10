@@ -20,16 +20,17 @@ website: https://grafana.com
 resources:
   cpu: 0.5
   memory_mib: 512
-inputs:
-  - name: DOMAIN
-    label: Domain
-    placeholder: app.example.com
 services:
   - name: grafana
-    image: grafana/grafana-oss:11.3.0
+    image: grafana/grafana-oss:13.0.2
     icon: grafana
     port: 3000
     public: true
-    volume:
-      path: /var/lib/grafana
-      size_gib: 5
+    volumes:
+      - path: /var/lib/grafana
+        size_gib: 5
+    env:
+      GF_SERVER_ROOT_URL: '${{ app.url }}'
+      GF_SERVER_DOMAIN: '${{ app.host }}'
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: '${{ password.admin }}'

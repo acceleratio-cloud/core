@@ -30,7 +30,8 @@ const valid = () => ({
       name: 'postgres',
       image: 'postgres:17.2-alpine',
       icon: 'postgres',
-      volume: { path: '/data', size_gib: 5 },
+      volumes: [{ path: '/data', size_gib: 5 }],
+      env: { PASSWORD: '${{ password.db }}' } as Record<string, unknown>,
     },
   ],
 });
@@ -45,7 +46,10 @@ describe('readTemplate', () => {
     const app = readTemplate('demo', valid(), icons);
     expect(app.slug).toBe('demo');
     expect(app.inputs).toEqual([]);
-    expect(app.services[1].volume).toEqual({ path: '/data', size_gib: 5 });
+    expect(app.services[1].volumes).toEqual([{ path: '/data', size_gib: 5 }]);
+    expect(app.services[1].env).toEqual([
+      { key: 'PASSWORD', value: '${{ password.db }}' },
+    ]);
   });
 
   it('rejects fields the schema does not name', () => {
@@ -86,12 +90,22 @@ describe('readTemplate', () => {
 
   it('rejects host-escaping volume paths, bad URLs, versions and missing icons', () => {
     rejects(
-      (raw) => ((raw.services[1].volume!.path = '/data/../etc'), raw),
-      /volume\.path/,
+      (raw) => ((raw.services[1].volumes![0].path = '/data/../etc'), raw),
+      /volumes\[0\]\.path/,
     );
     rejects(
-      (raw) => ((raw.services[1].volume!.path = 'data'), raw),
-      /volume\.path/,
+      (raw) => ((raw.services[1].volumes![0].path = 'data'), raw),
+      /volumes\[0\]\.path/,
+    );
+    for (const bad of ['/data:ro', '/data/./x', '//data']) {
+      rejects(
+        (raw) => ((raw.services[1].volumes![0].path = bad), raw),
+        /volumes\[0\]\.path/,
+      );
+    }
+    rejects(
+      (raw) => ((raw.services[1].volumes![0].size_gib = 500), raw),
+      /size_gib: must be a whole number from 1 to 100/,
     );
     rejects(
       (raw) => ((raw.repository = 'http://github.com/x'), raw),
@@ -117,6 +131,33 @@ describe('readTemplate', () => {
       Object.assign(raw.services[1], { public: true, port: 5432 });
       return raw;
     }, /may have one public service/);
+  });
+
+  it('checks every placeholder against what the template declares', () => {
+    const env = (value: unknown) => (raw: ReturnType<typeof valid>) => (
+      (raw.services[1].env = { VALUE: value }),
+      raw
+    );
+    rejects(env('${{ input.DOMAIN }}'), /uses undeclared input/);
+    rejects(env('${{ service.redis.host }}'), /uses unknown service\.redis/);
+    rejects(env('${{ secret.x }}'), /unknown placeholder/);
+    rejects(env('${{ password.db }'), /unclosed/);
+    rejects(env({ nested: true }), /must be text, a number or a boolean/);
+    rejects(
+      (raw) => ((raw.services[0].public = false), env('${{ app.url }}')(raw)),
+      /app\.url without a public service/,
+    );
+    rejects(
+      (raw) => ((raw.services[1].env = { 'BAD-KEY': 'x' }), raw),
+      /BAD-KEY: is not a valid name/,
+    );
+    expect(() =>
+      readTemplate(
+        'demo',
+        env('${{ service.demo.host }}:${{ app.host }}:${{ hex.k }}')(valid()),
+        icons,
+      ),
+    ).not.toThrow();
   });
 
   it('throws TemplateError for a non-mapping', () => {

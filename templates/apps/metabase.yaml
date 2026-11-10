@@ -19,20 +19,30 @@ website: https://www.metabase.com
 resources:
   cpu: 1
   memory_mib: 2048
-inputs:
-  - name: DOMAIN
-    label: Domain
-    placeholder: app.example.com
 services:
   - name: metabase
-    image: metabase/metabase:v0.51.5
+    image: metabase/metabase:v0.65.3.7
     icon: metabase
     port: 3000
     public: true
+    env:
+      MB_SITE_URL: '${{ app.url }}'
+      MB_DB_TYPE: postgres
+      MB_DB_HOST: '${{ service.postgres.host }}'
+      MB_DB_PORT: 5432
+      MB_DB_DBNAME: metabase
+      MB_DB_USER: metabase
+      MB_DB_PASS: '${{ password.postgres }}'
   - name: postgres
-    image: postgres:17.2-alpine
+    image: postgres:17.11-alpine
     icon: postgres
     port: 5432
-    volume:
-      path: /var/lib/postgresql/data
-      size_gib: 5
+    volumes:
+      - path: /var/lib/postgresql/data
+        size_gib: 5
+    env:
+      POSTGRES_USER: metabase
+      POSTGRES_PASSWORD: '${{ password.postgres }}'
+      POSTGRES_DB: metabase
+      # A subfolder, so initdb never meets a non-empty volume root.
+      PGDATA: /var/lib/postgresql/data/pgdata

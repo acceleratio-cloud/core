@@ -20,29 +20,50 @@ resources:
   cpu: 1
   memory_mib: 1024
 inputs:
-  - name: DOMAIN
-    label: Domain
-    placeholder: app.example.com
   - name: ADMIN_EMAIL
     label: Admin email
     placeholder: you@example.com
 services:
   - name: directus
-    image: directus/directus:11.3.5
+    image: directus/directus:12.6.1
     icon: directus
     port: 8055
     public: true
-    volume:
-      path: /directus/uploads
-      size_gib: 10
+    volumes:
+      - path: /directus/uploads
+        size_gib: 10
+      - path: /directus/extensions
+        size_gib: 1
+    env:
+      PUBLIC_URL: '${{ app.url }}'
+      KEY: '${{ base64.key }}'
+      SECRET: '${{ base64.secret }}'
+      ADMIN_EMAIL: '${{ input.ADMIN_EMAIL }}'
+      ADMIN_PASSWORD: '${{ password.admin }}'
+      DB_CLIENT: pg
+      DB_HOST: '${{ service.postgres.host }}'
+      DB_PORT: 5432
+      DB_DATABASE: directus
+      DB_USER: directus
+      DB_PASSWORD: '${{ password.postgres }}'
+      REDIS: 'redis://${{ service.redis.host }}:6379'
+      CACHE_ENABLED: true
+      CACHE_STORE: redis
+      WEBSOCKETS_ENABLED: true
   - name: postgres
-    image: postgres:17.2-alpine
+    image: postgres:17.11-alpine
     icon: postgres
     port: 5432
-    volume:
-      path: /var/lib/postgresql/data
-      size_gib: 10
+    volumes:
+      - path: /var/lib/postgresql/data
+        size_gib: 10
+    env:
+      POSTGRES_USER: directus
+      POSTGRES_PASSWORD: '${{ password.postgres }}'
+      POSTGRES_DB: directus
+      # A subfolder, so initdb never meets a non-empty volume root.
+      PGDATA: /var/lib/postgresql/data/pgdata
   - name: redis
-    image: redis:7.4-alpine
+    image: redis:7.4.12-alpine
     icon: redis
     port: 6379

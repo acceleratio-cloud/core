@@ -19,23 +19,31 @@ website: https://ghost.org
 resources:
   cpu: 1
   memory_mib: 1024
-inputs:
-  - name: DOMAIN
-    label: Domain
-    placeholder: app.example.com
 services:
   - name: ghost
-    image: ghost:5.105.0-alpine
+    image: ghost:6.75.0-alpine
     icon: ghost
     port: 2368
     public: true
-    volume:
-      path: /var/lib/ghost/content
-      size_gib: 10
+    volumes:
+      - path: /var/lib/ghost/content
+        size_gib: 10
+    env:
+      url: '${{ app.url }}'
+      database__client: mysql
+      database__connection__host: '${{ service.mysql.host }}'
+      database__connection__user: ghost
+      database__connection__password: '${{ password.mysql }}'
+      database__connection__database: ghost
   - name: mysql
-    image: mysql:8.4
+    image: mysql:8.4.13
     icon: mysql
     port: 3306
-    volume:
-      path: /var/lib/mysql
-      size_gib: 10
+    volumes:
+      - path: /var/lib/mysql
+        size_gib: 10
+    env:
+      MYSQL_USER: ghost
+      MYSQL_PASSWORD: '${{ password.mysql }}'
+      MYSQL_DATABASE: ghost
+      MYSQL_ROOT_PASSWORD: '${{ password.mysql_root }}'

@@ -4,7 +4,12 @@ import {
   type MarketplaceCategory,
   type MarketplaceInput,
   type MarketplaceService,
+  type EnvVar,
 } from '@acceleratio/shared';
+
+import { normalizeMountPath } from '@/application/workload/docker/docker-workload.config';
+
+import { checkRefs, type RefScope } from './marketplace-values';
 
 /*
   Strict reader for templates/apps/<slug>.yaml. A template describes containers
@@ -21,6 +26,20 @@ const INPUT_NAME = /^[A-Z][A-Z0-9_]{0,63}$/;
 const IMAGE =
   /^[a-z0-9]+(?:[._-][a-z0-9]+)*(?::[0-9]+)?(?:\/[a-z0-9]+(?:[._-][a-z0-9]+)*)*:(?!latest(?:$|@))[\w][\w.-]{0,127}(?:@sha256:[a-f0-9]{64})?$/;
 const MAX_SERVICES = 10;
+// The same rules the Docker service settings apply.
+const ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const MAX_VOLUMES = 10;
+const MAX_VOLUME_GIB = 100;
+
+/** A service as the API deploys it; `env` and `command` never reach the console. */
+export interface TemplateService extends MarketplaceService {
+  env: EnvVar[];
+  command?: string[];
+}
+
+export interface MarketplaceTemplate extends MarketplaceApp {
+  services: TemplateService[];
+}
 
 export class TemplateError extends Error {}
 
@@ -120,20 +139,47 @@ const icon = (value: unknown, path: string, icons: IconLookup) => {
   return icons(name) ?? fail(path, `has no file templates/icons/${name}.svg`);
 };
 
+const volume = (value: unknown, path: string) => {
+  const raw = object(value, path, ['path', 'size_gib']);
+  let mount = '';
+  try {
+    // The same check a Docker service applies, so a bad path fails at load, not at deploy.
+    mount = normalizeMountPath(raw.path);
+  } catch (error) {
+    fail(`${path}.path`, (error as Error).message);
+  }
+  return {
+    path: mount,
+    size_gib: number(raw.size_gib, `${path}.size_gib`, 1, MAX_VOLUME_GIB),
+  };
+};
+
+const scalar = (value: unknown, path: string): string => {
+  if (typeof value === 'number' || typeof value === 'boolean')
+    return String(value);
+  if (typeof value !== 'string')
+    fail(path, 'must be text, a number or a boolean');
+  if ((value as string).length > 4096)
+    fail(path, 'must be 4096 characters or fewer');
+  return value as string;
+};
+
 const service = (
   value: unknown,
   path: string,
   icons: IconLookup,
-): MarketplaceService => {
+): TemplateService => {
   const raw = object(value, path, [
     'name',
     'image',
     'icon',
     'port',
     'public',
-    'volume',
+    'volumes',
+    'env',
+    'command',
   ]);
-  const result: MarketplaceService = {
+  const result: TemplateService = {
     name: match(
       raw.name,
       `${path}.name`,
@@ -147,6 +193,7 @@ const service = (
       'an image with an explicit tag other than latest',
     ),
     icon: icon(raw.icon, `${path}.icon`, icons),
+    env: [],
   };
   if (raw.port !== undefined)
     result.port = number(raw.port, `${path}.port`, 1, 65535);
@@ -158,31 +205,50 @@ const service = (
       result.public = true;
     }
   }
-  if (raw.volume !== undefined) {
-    const volume = object(raw.volume, `${path}.volume`, ['path', 'size_gib']);
-    const mount = text(volume.path, `${path}.volume.path`);
-    if (!mount.startsWith('/') || mount.split('/').includes('..')) {
-      fail(
-        `${path}.volume.path`,
-        'must be an absolute path inside the container',
-      );
-    }
-    result.volume = {
-      path: mount,
-      size_gib: number(volume.size_gib, `${path}.volume.size_gib`, 1, 1000),
-    };
+  if (raw.volumes !== undefined) {
+    result.volumes = list(raw.volumes, `${path}.volumes`, MAX_VOLUMES, volume);
+    unique(
+      result.volumes.map((v) => v.path),
+      `${path}.volumes`,
+    );
+  }
+  if (raw.env !== undefined) {
+    const env = object(raw.env, `${path}.env`, Object.keys(raw.env ?? {}));
+    result.env = Object.entries(env).map(([key, item]) => {
+      if (!ENV_KEY.test(key)) fail(`${path}.env.${key}`, 'is not a valid name');
+      return { key, value: scalar(item, `${path}.env.${key}`) };
+    });
+  }
+  if (raw.command !== undefined) {
+    result.command = list(raw.command, `${path}.command`, 64, (item, at) =>
+      scalar(item, at),
+    );
   }
   return result;
 };
 
 const input = (value: unknown, path: string): MarketplaceInput => {
-  const raw = object(value, path, ['name', 'label', 'placeholder']);
+  const raw = object(value, path, [
+    'name',
+    'label',
+    'placeholder',
+    'default',
+    'required',
+  ]);
   const result: MarketplaceInput = {
     name: match(raw.name, `${path}.name`, INPUT_NAME, 'UPPER_SNAKE_CASE'),
     label: text(raw.label, `${path}.label`, 60),
+    required: true,
   };
   if (raw.placeholder !== undefined)
     result.placeholder = text(raw.placeholder, `${path}.placeholder`);
+  if (raw.default !== undefined)
+    result.default = text(raw.default, `${path}.default`);
+  if (raw.required !== undefined) {
+    if (typeof raw.required !== 'boolean')
+      fail(`${path}.required`, 'must be true or false');
+    result.required = raw.required as boolean;
+  }
   return result;
 };
 
@@ -191,7 +257,7 @@ export const readTemplate = (
   slug: string,
   value: unknown,
   icons: IconLookup,
-): MarketplaceApp => {
+): MarketplaceTemplate => {
   if (!SLUG_PATTERN.test(slug))
     fail(slug, 'file name must be lowercase letters, digits and hyphens');
   const raw = object(value, slug, [
@@ -248,6 +314,28 @@ export const readTemplate = (
     inputs.map((i) => i.name),
     `${slug}.inputs`,
   );
+  const scope: RefScope = {
+    inputs: new Set(inputs.map((i) => i.name)),
+    services: new Set(services.map((s) => s.name)),
+    hasPublic: services.some((s) => s.public),
+  };
+  services.forEach((s, index) => {
+    const at = `${slug}.services[${index}]`;
+    const values: [string, string][] = [
+      ...s.env.map(({ key, value }): [string, string] => [
+        `${at}.env.${key}`,
+        value,
+      ]),
+      ...(s.command ?? []).map((value, i): [string, string] => [
+        `${at}.command[${i}]`,
+        value,
+      ]),
+    ];
+    for (const [path, value] of values) {
+      const problem = checkRefs(value, scope);
+      if (problem) fail(path, problem);
+    }
+  });
 
   return {
     slug,

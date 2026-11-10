@@ -4,7 +4,7 @@ import { Injectable, Logger, type OnModuleInit } from '@nestjs/common';
 import type { MarketplaceApp } from '@acceleratio/shared';
 import { load } from 'js-yaml';
 
-import { readTemplate } from './marketplace-template';
+import { readTemplate, type MarketplaceTemplate } from './marketplace-template';
 
 const MAX_ICON_BYTES = 32 * 1024;
 
@@ -39,7 +39,7 @@ export const loadTemplates = (dir: string, logger?: Logger) => {
     return icons.get(name);
   };
 
-  const apps: MarketplaceApp[] = [];
+  const apps: MarketplaceTemplate[] = [];
   const errors: string[] = [];
   for (const file of readdirSync(join(dir, 'apps')).sort()) {
     if (!file.endsWith('.yaml')) continue;
@@ -61,12 +61,27 @@ export const loadTemplates = (dir: string, logger?: Logger) => {
 @Injectable()
 export class MarketplaceService implements OnModuleInit {
   private readonly logger = new Logger(MarketplaceService.name);
+  private templates: MarketplaceTemplate[] = [];
   private apps: MarketplaceApp[] = [];
 
   onModuleInit(): void {
     const dir = templatesDir();
     try {
-      this.apps = loadTemplates(dir, this.logger).apps;
+      this.templates = loadTemplates(dir, this.logger).apps;
+      // What the console sees: env and command stay on the server.
+      this.apps = this.templates.map((template) => ({
+        ...template,
+        services: template.services.map(
+          ({ name, image, icon, port, public: isPublic, volumes }) => ({
+            name,
+            image,
+            icon,
+            port,
+            public: isPublic,
+            volumes,
+          }),
+        ),
+      }));
       this.logger.log(
         `Loaded ${this.apps.length} marketplace templates from ${dir}`,
       );
@@ -79,5 +94,10 @@ export class MarketplaceService implements OnModuleInit {
 
   list(): MarketplaceApp[] {
     return this.apps;
+  }
+
+  /** The full template, env included; undefined for an unknown slug. */
+  find(slug: string): MarketplaceTemplate | undefined {
+    return this.templates.find((template) => template.slug === slug);
   }
 }

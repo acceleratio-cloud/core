@@ -19,27 +19,40 @@ website: https://nextcloud.com
 resources:
   cpu: 2
   memory_mib: 2048
-inputs:
-  - name: DOMAIN
-    label: Domain
-    placeholder: app.example.com
 services:
   - name: nextcloud
-    image: nextcloud:30.0.4-apache
+    image: nextcloud:35.0.2-apache
     icon: nextcloud
     port: 80
     public: true
-    volume:
-      path: /var/www/html
-      size_gib: 50
+    volumes:
+      - path: /var/www/html
+        size_gib: 50
+    env:
+      NEXTCLOUD_ADMIN_USER: admin
+      NEXTCLOUD_ADMIN_PASSWORD: '${{ password.admin }}'
+      NEXTCLOUD_TRUSTED_DOMAINS: '${{ app.host }}'
+      OVERWRITEHOST: '${{ app.host }}'
+      OVERWRITEPROTOCOL: https
+      POSTGRES_HOST: '${{ service.postgres.host }}'
+      POSTGRES_DB: nextcloud
+      POSTGRES_USER: nextcloud
+      POSTGRES_PASSWORD: '${{ password.postgres }}'
+      REDIS_HOST: '${{ service.redis.host }}'
   - name: postgres
-    image: postgres:17.2-alpine
+    image: postgres:17.11-alpine
     icon: postgres
     port: 5432
-    volume:
-      path: /var/lib/postgresql/data
-      size_gib: 10
+    volumes:
+      - path: /var/lib/postgresql/data
+        size_gib: 10
+    env:
+      POSTGRES_USER: nextcloud
+      POSTGRES_PASSWORD: '${{ password.postgres }}'
+      POSTGRES_DB: nextcloud
+      # A subfolder, so initdb never meets a non-empty volume root.
+      PGDATA: /var/lib/postgresql/data/pgdata
   - name: redis
-    image: redis:7.4-alpine
+    image: redis:7.4.12-alpine
     icon: redis
     port: 6379

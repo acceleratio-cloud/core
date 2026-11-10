@@ -20,22 +20,38 @@ resources:
   cpu: 1
   memory_mib: 1024
 inputs:
-  - name: DOMAIN
-    label: Domain
-    placeholder: app.example.com
   - name: ADMIN_USER
     label: Admin username
-    placeholder: admin
+    default: admin
 services:
   - name: keycloak
-    image: quay.io/keycloak/keycloak:26.0.7
+    image: quay.io/keycloak/keycloak:26.8.2
     icon: keycloak
     port: 8080
     public: true
+    command:
+      - start
+    env:
+      KC_BOOTSTRAP_ADMIN_USERNAME: '${{ input.ADMIN_USER }}'
+      KC_BOOTSTRAP_ADMIN_PASSWORD: '${{ password.admin }}'
+      KC_HOSTNAME: '${{ app.url }}'
+      KC_HTTP_ENABLED: true
+      KC_PROXY_HEADERS: xforwarded
+      KC_HEALTH_ENABLED: true
+      KC_DB: postgres
+      KC_DB_URL: 'jdbc:postgresql://${{ service.postgres.host }}:5432/keycloak'
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: '${{ password.postgres }}'
   - name: postgres
-    image: postgres:17.2-alpine
+    image: postgres:17.11-alpine
     icon: postgres
     port: 5432
-    volume:
-      path: /var/lib/postgresql/data
-      size_gib: 5
+    volumes:
+      - path: /var/lib/postgresql/data
+        size_gib: 5
+    env:
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: '${{ password.postgres }}'
+      POSTGRES_DB: keycloak
+      # A subfolder, so initdb never meets a non-empty volume root.
+      PGDATA: /var/lib/postgresql/data/pgdata

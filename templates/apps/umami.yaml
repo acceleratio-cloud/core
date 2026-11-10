@@ -20,20 +20,25 @@ website: https://umami.is
 resources:
   cpu: 0.5
   memory_mib: 512
-inputs:
-  - name: DOMAIN
-    label: Domain
-    placeholder: app.example.com
 services:
   - name: umami
-    image: ghcr.io/umami-software/umami:postgresql-v2.14.0
+    image: ghcr.io/umami-software/umami:3.4.1
     icon: umami
     port: 3000
     public: true
+    env:
+      DATABASE_URL: 'postgres://umami:${{ password.postgres }}@${{ service.postgres.host }}:5432/umami'
+      APP_SECRET: '${{ hex.app_secret }}'
   - name: postgres
-    image: postgres:17.2-alpine
+    image: postgres:17.11-alpine
     icon: postgres
     port: 5432
-    volume:
-      path: /var/lib/postgresql/data
-      size_gib: 5
+    volumes:
+      - path: /var/lib/postgresql/data
+        size_gib: 5
+    env:
+      POSTGRES_USER: umami
+      POSTGRES_PASSWORD: '${{ password.postgres }}'
+      POSTGRES_DB: umami
+      # A subfolder, so initdb never meets a non-empty volume root.
+      PGDATA: /var/lib/postgresql/data/pgdata

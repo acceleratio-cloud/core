@@ -20,23 +20,41 @@ website: https://n8n.io
 resources:
   cpu: 1
   memory_mib: 1024
-inputs:
-  - name: DOMAIN
-    label: Domain
-    placeholder: app.example.com
 services:
   - name: n8n
-    image: n8nio/n8n:1.70.3
+    image: n8nio/n8n:2.47.3
     icon: n8n
     port: 5678
     public: true
-    volume:
-      path: /home/node/.n8n
-      size_gib: 2
+    volumes:
+      - path: /home/node/.n8n
+        size_gib: 2
+    env:
+      # Set explicitly: Kubernetes would otherwise inject N8N_PORT=tcp://… for a Service named n8n.
+      N8N_PORT: 5678
+      N8N_HOST: '${{ app.host }}'
+      N8N_PROTOCOL: https
+      N8N_EDITOR_BASE_URL: '${{ app.url }}'
+      WEBHOOK_URL: '${{ app.url }}'
+      N8N_PROXY_HOPS: 1
+      N8N_ENCRYPTION_KEY: '${{ password.encryption_key }}'
+      GENERIC_TIMEZONE: UTC
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: '${{ service.postgres.host }}'
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: n8n
+      DB_POSTGRESDB_USER: n8n
+      DB_POSTGRESDB_PASSWORD: '${{ password.postgres }}'
   - name: postgres
-    image: postgres:17.2-alpine
+    image: postgres:17.11-alpine
     icon: postgres
     port: 5432
-    volume:
-      path: /var/lib/postgresql/data
-      size_gib: 10
+    volumes:
+      - path: /var/lib/postgresql/data
+        size_gib: 10
+    env:
+      POSTGRES_USER: n8n
+      POSTGRES_PASSWORD: '${{ password.postgres }}'
+      POSTGRES_DB: n8n
+      # A subfolder, so initdb never meets a non-empty volume root.
+      PGDATA: /var/lib/postgresql/data/pgdata

@@ -21,29 +21,60 @@ resources:
   cpu: 1
   memory_mib: 1024
 inputs:
-  - name: DOMAIN
-    label: Domain
-    placeholder: app.example.com
-  - name: OIDC_ISSUER
-    label: OIDC issuer URL
-    placeholder: https://auth.example.com/realms/team
+  - name: OIDC_CLIENT_ID
+    label: OIDC client ID
+    placeholder: outline
+  - name: OIDC_CLIENT_SECRET
+    label: OIDC client secret
+  - name: OIDC_AUTH_URI
+    label: OIDC authorization URL
+    placeholder: https://auth.example.com/realms/team/protocol/openid-connect/auth
+  - name: OIDC_TOKEN_URI
+    label: OIDC token URL
+    placeholder: https://auth.example.com/realms/team/protocol/openid-connect/token
+  - name: OIDC_USERINFO_URI
+    label: OIDC user info URL
+    placeholder: https://auth.example.com/realms/team/protocol/openid-connect/userinfo
 services:
   - name: outline
-    image: outlinewiki/outline:0.81.1
+    image: outlinewiki/outline:1.12.0
     icon: outline
     port: 3000
     public: true
-    volume:
-      path: /var/lib/outline/data
-      size_gib: 10
+    volumes:
+      - path: /var/lib/outline/data
+        size_gib: 10
+    env:
+      URL: '${{ app.url }}'
+      PORT: 3000
+      SECRET_KEY: '${{ hex.secret_key }}'
+      UTILS_SECRET: '${{ hex.utils_secret }}'
+      DATABASE_URL: 'postgres://outline:${{ password.postgres }}@${{ service.postgres.host }}:5432/outline'
+      PGSSLMODE: disable
+      REDIS_URL: 'redis://${{ service.redis.host }}:6379'
+      FILE_STORAGE: local
+      FILE_STORAGE_LOCAL_ROOT_DIR: /var/lib/outline/data
+      # TLS ends at the platform's proxy.
+      FORCE_HTTPS: false
+      OIDC_CLIENT_ID: '${{ input.OIDC_CLIENT_ID }}'
+      OIDC_CLIENT_SECRET: '${{ input.OIDC_CLIENT_SECRET }}'
+      OIDC_AUTH_URI: '${{ input.OIDC_AUTH_URI }}'
+      OIDC_TOKEN_URI: '${{ input.OIDC_TOKEN_URI }}'
+      OIDC_USERINFO_URI: '${{ input.OIDC_USERINFO_URI }}'
   - name: postgres
-    image: postgres:17.2-alpine
+    image: postgres:17.11-alpine
     icon: postgres
     port: 5432
-    volume:
-      path: /var/lib/postgresql/data
-      size_gib: 10
+    volumes:
+      - path: /var/lib/postgresql/data
+        size_gib: 10
+    env:
+      POSTGRES_USER: outline
+      POSTGRES_PASSWORD: '${{ password.postgres }}'
+      POSTGRES_DB: outline
+      # A subfolder, so initdb never meets a non-empty volume root.
+      PGDATA: /var/lib/postgresql/data/pgdata
   - name: redis
-    image: redis:7.4-alpine
+    image: redis:7.4.12-alpine
     icon: redis
     port: 6379

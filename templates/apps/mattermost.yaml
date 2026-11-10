@@ -19,23 +19,40 @@ website: https://mattermost.com
 resources:
   cpu: 2
   memory_mib: 2048
-inputs:
-  - name: DOMAIN
-    label: Domain
-    placeholder: app.example.com
 services:
   - name: mattermost
-    image: mattermost/mattermost-team-edition:10.2.0
+    image: mattermost/mattermost-team-edition:12.0.2
     icon: mattermost
     port: 8065
     public: true
-    volume:
-      path: /mattermost/data
-      size_gib: 20
+    volumes:
+      - path: /mattermost/data
+        size_gib: 20
+      - path: /mattermost/config
+        size_gib: 1
+      - path: /mattermost/logs
+        size_gib: 1
+      - path: /mattermost/plugins
+        size_gib: 1
+      - path: /mattermost/client/plugins
+        size_gib: 1
+      - path: /mattermost/bleve-indexes
+        size_gib: 1
+    env:
+      MM_SERVICESETTINGS_SITEURL: '${{ app.url }}'
+      MM_SQLSETTINGS_DRIVERNAME: postgres
+      MM_SQLSETTINGS_DATASOURCE: 'postgres://mattermost:${{ password.postgres }}@${{ service.postgres.host }}:5432/mattermost?sslmode=disable&connect_timeout=10'
+      MM_BLEVESETTINGS_INDEXDIR: /mattermost/bleve-indexes
   - name: postgres
-    image: postgres:17.2-alpine
+    image: postgres:17.11-alpine
     icon: postgres
     port: 5432
-    volume:
-      path: /var/lib/postgresql/data
-      size_gib: 10
+    volumes:
+      - path: /var/lib/postgresql/data
+        size_gib: 10
+    env:
+      POSTGRES_USER: mattermost
+      POSTGRES_PASSWORD: '${{ password.postgres }}'
+      POSTGRES_DB: mattermost
+      # A subfolder, so initdb never meets a non-empty volume root.
+      PGDATA: /var/lib/postgresql/data/pgdata

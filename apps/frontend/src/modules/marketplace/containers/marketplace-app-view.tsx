@@ -42,7 +42,12 @@ export const MarketplaceAppView = ({
       (other) => other.category === app.category && other.slug !== app.slug,
     )
     .slice(0, 3);
-  const volumes = app.services.filter((service) => service.volume);
+  const volumes = app.services.flatMap((service) =>
+    (service.volumes ?? []).map((volume) => ({
+      service: service.name,
+      ...volume,
+    })),
+  );
   const publicService = app.services.find((service) => service.public);
 
   return (
@@ -184,11 +189,14 @@ export const MarketplaceAppView = ({
               <Detail term="Memory">
                 {formatMemory(app.resources.memory_mib)}
               </Detail>
-              {volumes.map((service) => (
-                <Detail key={service.name} term={`${service.name} disk`}>
-                  {service.volume!.size_gib} GiB
-                </Detail>
-              ))}
+              {app.services
+                .filter((service) => service.volumes?.length)
+                .map((service) => (
+                  <Detail key={service.name} term={`${service.name} disk`}>
+                    {service.volumes!.reduce((sum, v) => sum + v.size_gib, 0)}{' '}
+                    GiB
+                  </Detail>
+                ))}
             </dl>
           </section>
 

@@ -17,15 +17,18 @@ const ServiceNode = ({ service }: { service: MarketplaceService }) => (
         </p>
       </div>
     </div>
-    {service.volume ? (
-      <p className="mt-2.5 flex items-center gap-1.5 border-t border-border pt-2 text-xs text-muted-foreground">
+    {service.volumes?.map((volume) => (
+      <p
+        key={volume.path}
+        className="mt-2.5 flex items-center gap-1.5 border-t border-border pt-2 text-xs text-muted-foreground"
+      >
         <HardDrive aria-hidden="true" strokeWidth={1.75} className="size-3.5" />
-        <span className="truncate font-mono">{service.volume.path}</span>
+        <span className="truncate font-mono">{volume.path}</span>
         <span className="ml-auto shrink-0 tabular-nums">
-          {service.volume.size_gib} GiB
+          {volume.size_gib} GiB
         </span>
       </p>
-    ) : null}
+    ))}
   </div>
 );
 

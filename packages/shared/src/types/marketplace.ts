@@ -21,7 +21,7 @@ export interface MarketplaceService {
   port?: number;
   /** Exposed on the app's domain. At most one service per template. */
   public?: boolean;
-  volume?: { path: string; size_gib: number };
+  volumes?: { path: string; size_gib: number }[];
 }
 
 /** A value the user fills in before deploying. */
@@ -29,6 +29,10 @@ export interface MarketplaceInput {
   name: string;
   label: string;
   placeholder?: string;
+  /** Prefilled value. */
+  default?: string;
+  /** False when the field may stay empty. */
+  required: boolean;
 }
 
 export interface MarketplaceApp {
@@ -47,4 +51,25 @@ export interface MarketplaceApp {
   resources: { cpu: number; memory_mib: number };
   inputs: MarketplaceInput[];
   services: MarketplaceService[];
+}
+
+/**
+ * Deploys a template: into `project_id`, or into a new project called
+ * `project_name` (exactly one of the two).
+ */
+export interface DeployMarketplaceAppPayload {
+  project_id?: string;
+  project_name?: string;
+  /** Name of the main service; the others are `<name>-<service>`. */
+  name: string;
+  /** Values for the template's inputs, by input name. */
+  inputs?: Record<string, string>;
+}
+
+export interface MarketplaceDeployment {
+  project_id: string;
+  /** Ids of the services created, in template order. */
+  workload_ids: string[];
+  /** `https://…` of the public service; null when the app has none. */
+  url: string | null;
 }

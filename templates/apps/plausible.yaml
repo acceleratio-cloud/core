@@ -19,27 +19,40 @@ website: https://plausible.io
 resources:
   cpu: 2
   memory_mib: 2048
-inputs:
-  - name: DOMAIN
-    label: Domain
-    placeholder: app.example.com
 services:
   - name: plausible
-    image: ghcr.io/plausible/community-edition:v2.1.4
+    image: ghcr.io/plausible/community-edition:v3.2.1
     icon: plausible
     port: 8000
     public: true
+    command:
+      - sh
+      - -c
+      - /entrypoint.sh db createdb && /entrypoint.sh db migrate && /entrypoint.sh run
+    env:
+      BASE_URL: '${{ app.url }}'
+      SECRET_KEY_BASE: '${{ base64.secret_key_base }}'
+      DATABASE_URL: 'postgres://plausible:${{ password.postgres }}@${{ service.postgres.host }}:5432/plausible'
+      CLICKHOUSE_DATABASE_URL: 'http://${{ service.clickhouse.host }}:8123/plausible_events_db'
   - name: postgres
-    image: postgres:17.2-alpine
+    image: postgres:17.11-alpine
     icon: postgres
     port: 5432
-    volume:
-      path: /var/lib/postgresql/data
-      size_gib: 5
+    volumes:
+      - path: /var/lib/postgresql/data
+        size_gib: 5
+    env:
+      POSTGRES_USER: plausible
+      POSTGRES_PASSWORD: '${{ password.postgres }}'
+      POSTGRES_DB: plausible
+      # A subfolder, so initdb never meets a non-empty volume root.
+      PGDATA: /var/lib/postgresql/data/pgdata
   - name: clickhouse
     image: clickhouse/clickhouse-server:24.12-alpine
     icon: clickhouse
     port: 8123
-    volume:
-      path: /var/lib/clickhouse
-      size_gib: 20
+    volumes:
+      - path: /var/lib/clickhouse
+        size_gib: 20
+    env:
+      CLICKHOUSE_SKIP_USER_SETUP: 1

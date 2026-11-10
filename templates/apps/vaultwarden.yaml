@@ -19,16 +19,17 @@ website: https://github.com/dani-garcia/vaultwarden
 resources:
   cpu: 0.25
   memory_mib: 256
-inputs:
-  - name: DOMAIN
-    label: Domain
-    placeholder: app.example.com
 services:
   - name: vaultwarden
-    image: vaultwarden/server:1.32.7
+    image: vaultwarden/server:1.37.5
     icon: vaultwarden
     port: 80
     public: true
-    volume:
-      path: /data
-      size_gib: 2
+    volumes:
+      - path: /data
+        size_gib: 2
+    env:
+      DOMAIN: '${{ app.url }}'
+      ADMIN_TOKEN: '${{ hex.admin_token }}'
+      SIGNUPS_ALLOWED: true
+      IP_HEADER: X-Forwarded-For

@@ -19,26 +19,23 @@ website: https://openwebui.com
 resources:
   cpu: 4
   memory_mib: 8192
-inputs:
-  - name: DOMAIN
-    label: Domain
-    placeholder: app.example.com
-  - name: MODEL
-    label: Model to pull
-    placeholder: llama3.2
 services:
   - name: open-webui
-    image: ghcr.io/open-webui/open-webui:v0.5.4
+    image: ghcr.io/open-webui/open-webui:v0.13.3
     icon: open-webui
     port: 8080
     public: true
-    volume:
-      path: /app/backend/data
-      size_gib: 10
+    volumes:
+      - path: /app/backend/data
+        size_gib: 10
+    env:
+      WEBUI_URL: '${{ app.url }}'
+      WEBUI_SECRET_KEY: '${{ password.webui_secret }}'
+      OLLAMA_BASE_URL: 'http://${{ service.ollama.host }}:11434'
   - name: ollama
-    image: ollama/ollama:0.5.4
+    image: ollama/ollama:0.40.16
     icon: ollama
     port: 11434
-    volume:
-      path: /root/.ollama
-      size_gib: 50
+    volumes:
+      - path: /root/.ollama
+        size_gib: 50

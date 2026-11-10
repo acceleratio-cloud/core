@@ -19,16 +19,15 @@ website: https://uptime.kuma.pet
 resources:
   cpu: 0.25
   memory_mib: 256
-inputs:
-  - name: DOMAIN
-    label: Domain
-    placeholder: app.example.com
 services:
   - name: uptime-kuma
-    image: louislam/uptime-kuma:1.23.15
+    image: louislam/uptime-kuma:2.5.9
     icon: uptime-kuma
     port: 3001
     public: true
-    volume:
-      path: /app/data
-      size_gib: 2
+    volumes:
+      - path: /app/data
+        size_gib: 2
+    env:
+      # Set explicitly: Kubernetes would otherwise inject UPTIME_KUMA_PORT=tcp://… for a Service named uptime-kuma.
+      UPTIME_KUMA_PORT: 3001
