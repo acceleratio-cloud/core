@@ -1,5 +1,4 @@
 import { BadRequestException } from '@nestjs/common';
-import type { WorkloadConfig } from '@acceleratio/shared';
 import {
   ENV_MAX_ITEMS,
   newDockerConfig,
@@ -7,7 +6,7 @@ import {
 } from '../docker-workload.config';
 
 const normalize = (config: Record<string, unknown>) =>
-  normalizeDockerConfig(config as unknown as WorkloadConfig);
+  normalizeDockerConfig(config);
 
 describe('normalizeDockerConfig', () => {
   it('keeps an image-only config as it is', () => {

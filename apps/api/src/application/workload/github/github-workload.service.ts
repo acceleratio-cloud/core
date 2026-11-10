@@ -326,7 +326,7 @@ export class GithubWorkloadService extends DockerWorkloadService {
           docker_image: undefined,
           commit_sha: undefined,
           ...source,
-        } as WorkloadConfig,
+        },
       }),
     );
   }
