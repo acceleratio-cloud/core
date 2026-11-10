@@ -1,0 +1,41 @@
+schema_version: 1
+name: Ghost
+icon: ghost
+category: Content
+tagline: Publishing platform with newsletters and memberships.
+description: |
+  Ghost is an editor, a theme engine and a newsletter sender in one, with paid
+  memberships through Stripe.
+
+  Posts and members are stored in MySQL; uploaded images on a volume.
+features:
+  - Card-based editor
+  - Newsletters sent from the same post
+  - Free and paid memberships
+  - Themes in Handlebars
+license: MIT
+repository: https://github.com/TryGhost/Ghost
+website: https://ghost.org
+resources:
+  cpu: 1
+  memory_mib: 1024
+inputs:
+  - name: DOMAIN
+    label: Domain
+    placeholder: app.example.com
+services:
+  - name: ghost
+    image: ghost:5.105.0-alpine
+    icon: ghost
+    port: 2368
+    public: true
+    volume:
+      path: /var/lib/ghost/content
+      size_gib: 10
+  - name: mysql
+    image: mysql:8.4
+    icon: mysql
+    port: 3306
+    volume:
+      path: /var/lib/mysql
+      size_gib: 10

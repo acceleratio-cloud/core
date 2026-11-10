@@ -1,0 +1,44 @@
+schema_version: 1
+name: Open WebUI
+icon: open-webui
+category: AI
+tagline: Chat interface for local and hosted language models.
+description: |
+  Open WebUI is a chat app for models served by Ollama or any OpenAI-compatible
+  API, with documents, tools and per-user history.
+
+  The template runs Ollama beside it, so models stay inside the project network.
+features:
+  - Chats over local and remote models
+  - Document upload with retrieval
+  - Users, groups and model permissions
+  - Tools and functions in Python
+license: Open WebUI License
+repository: https://github.com/open-webui/open-webui
+website: https://openwebui.com
+resources:
+  cpu: 4
+  memory_mib: 8192
+inputs:
+  - name: DOMAIN
+    label: Domain
+    placeholder: app.example.com
+  - name: MODEL
+    label: Model to pull
+    placeholder: llama3.2
+services:
+  - name: open-webui
+    image: ghcr.io/open-webui/open-webui:v0.5.4
+    icon: open-webui
+    port: 8080
+    public: true
+    volume:
+      path: /app/backend/data
+      size_gib: 10
+  - name: ollama
+    image: ollama/ollama:0.5.4
+    icon: ollama
+    port: 11434
+    volume:
+      path: /root/.ollama
+      size_gib: 50

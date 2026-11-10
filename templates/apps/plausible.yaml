@@ -1,0 +1,45 @@
+schema_version: 1
+name: Plausible
+icon: plausible
+category: Analytics
+tagline: Website analytics without cookies or personal data.
+description: |
+  Plausible counts visits, sources and goals with a script under 1 KB, and keeps
+  no personal data, so no cookie banner is needed.
+
+  Community Edition stores accounts in PostgreSQL and events in ClickHouse.
+features:
+  - One-page dashboard per site
+  - Goals, funnels and custom properties
+  - Google Search Console import
+  - Shared links and email reports
+license: AGPL-3.0
+repository: https://github.com/plausible/analytics
+website: https://plausible.io
+resources:
+  cpu: 2
+  memory_mib: 2048
+inputs:
+  - name: DOMAIN
+    label: Domain
+    placeholder: app.example.com
+services:
+  - name: plausible
+    image: ghcr.io/plausible/community-edition:v2.1.4
+    icon: plausible
+    port: 8000
+    public: true
+  - name: postgres
+    image: postgres:17.2-alpine
+    icon: postgres
+    port: 5432
+    volume:
+      path: /var/lib/postgresql/data
+      size_gib: 5
+  - name: clickhouse
+    image: clickhouse/clickhouse-server:24.12-alpine
+    icon: clickhouse
+    port: 8123
+    volume:
+      path: /var/lib/clickhouse
+      size_gib: 20

@@ -1,0 +1,35 @@
+schema_version: 1
+name: Grafana
+icon: grafana
+category: Observability
+tagline: Dashboards and alerts for metrics, logs and traces.
+description: |
+  Grafana queries Prometheus, VictoriaMetrics, Loki, PostgreSQL and dozens of
+  other sources and draws them on one dashboard.
+
+  The template points Grafana at the cluster’s VictoriaMetrics, so node and
+  workload metrics are there the moment it starts.
+features:
+  - Dashboards over any data source
+  - Alert rules with Slack, email and webhook contacts
+  - Teams, folders and per-dashboard permissions
+  - Thousands of community dashboards to import
+license: AGPL-3.0
+repository: https://github.com/grafana/grafana
+website: https://grafana.com
+resources:
+  cpu: 0.5
+  memory_mib: 512
+inputs:
+  - name: DOMAIN
+    label: Domain
+    placeholder: app.example.com
+services:
+  - name: grafana
+    image: grafana/grafana-oss:11.3.0
+    icon: grafana
+    port: 3000
+    public: true
+    volume:
+      path: /var/lib/grafana
+      size_gib: 5

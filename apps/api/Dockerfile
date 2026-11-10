@@ -67,6 +67,8 @@ COPY --from=production-dependencies /app/apps/api/node_modules ./node_modules
 COPY --from=build /app/apps/api/dist ./dist
 COPY --from=build /app/apps/api/drizzle ./drizzle
 COPY --from=build /app/apps/api/package.json ./package.json
+# Marketplace templates, read from ../../templates (MARKETPLACE_TEMPLATES_DIR overrides).
+COPY templates /app/templates
 
 # The build runs under Bun but production runs under Node: fail the build if
 # the runtime dependencies do not resolve under Node.

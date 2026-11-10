@@ -1,0 +1,41 @@
+schema_version: 1
+name: Gitea
+icon: gitea
+category: Developer tools
+tagline: Git hosting with pull requests, packages and CI runners.
+description: |
+  Gitea is a lightweight Git forge: repositories, issues, pull requests, a
+  package registry and Actions compatible with GitHub workflows.
+
+  It runs as a single Go binary and stays fast on a small server.
+features:
+  - Pull requests with reviews and protected branches
+  - Gitea Actions, compatible with GitHub workflow files
+  - Container, npm, Maven and PyPI registries
+  - Mirrors of repositories hosted elsewhere
+license: MIT
+repository: https://github.com/go-gitea/gitea
+website: https://about.gitea.com
+resources:
+  cpu: 1
+  memory_mib: 1024
+inputs:
+  - name: DOMAIN
+    label: Domain
+    placeholder: app.example.com
+services:
+  - name: gitea
+    image: gitea/gitea:1.22.6
+    icon: gitea
+    port: 3000
+    public: true
+    volume:
+      path: /data
+      size_gib: 20
+  - name: postgres
+    image: postgres:17.2-alpine
+    icon: postgres
+    port: 5432
+    volume:
+      path: /var/lib/postgresql/data
+      size_gib: 10

@@ -1,0 +1,49 @@
+schema_version: 1
+name: Outline
+icon: outline
+category: Productivity
+tagline: Team knowledge base with real-time editing.
+description: |
+  Outline is a wiki for teams: nested documents, collaborative editing, search
+  and a Markdown-friendly editor.
+
+  It signs users in through an OIDC provider, such as Keycloak from this
+  catalog.
+features:
+  - Real-time collaborative editor
+  - Collections with permissions
+  - Full-text search
+  - Slack and API integrations
+license: BSL 1.1
+repository: https://github.com/outline/outline
+website: https://www.getoutline.com
+resources:
+  cpu: 1
+  memory_mib: 1024
+inputs:
+  - name: DOMAIN
+    label: Domain
+    placeholder: app.example.com
+  - name: OIDC_ISSUER
+    label: OIDC issuer URL
+    placeholder: https://auth.example.com/realms/team
+services:
+  - name: outline
+    image: outlinewiki/outline:0.81.1
+    icon: outline
+    port: 3000
+    public: true
+    volume:
+      path: /var/lib/outline/data
+      size_gib: 10
+  - name: postgres
+    image: postgres:17.2-alpine
+    icon: postgres
+    port: 5432
+    volume:
+      path: /var/lib/postgresql/data
+      size_gib: 10
+  - name: redis
+    image: redis:7.4-alpine
+    icon: redis
+    port: 6379

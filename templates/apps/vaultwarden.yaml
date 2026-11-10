@@ -1,0 +1,34 @@
+schema_version: 1
+name: Vaultwarden
+icon: vaultwarden
+category: Security
+tagline: Password manager server for Bitwarden clients.
+description: |
+  Vaultwarden implements the Bitwarden server API in Rust, so the official
+  Bitwarden apps and browser extensions work with it.
+
+  One small container with its vault on an encrypted volume.
+features:
+  - Works with official Bitwarden clients
+  - Organizations and shared collections
+  - TOTP, WebAuthn and Duo two-factor
+  - Emergency access and Send
+license: AGPL-3.0
+repository: https://github.com/dani-garcia/vaultwarden
+website: https://github.com/dani-garcia/vaultwarden
+resources:
+  cpu: 0.25
+  memory_mib: 256
+inputs:
+  - name: DOMAIN
+    label: Domain
+    placeholder: app.example.com
+services:
+  - name: vaultwarden
+    image: vaultwarden/server:1.32.7
+    icon: vaultwarden
+    port: 80
+    public: true
+    volume:
+      path: /data
+      size_gib: 2

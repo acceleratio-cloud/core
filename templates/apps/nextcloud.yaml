@@ -1,0 +1,45 @@
+schema_version: 1
+name: Nextcloud
+icon: nextcloud
+category: Productivity
+tagline: Files, calendars and contacts on your own servers.
+description: |
+  Nextcloud syncs files across desktop and mobile clients and adds calendars,
+  contacts and office documents through apps.
+
+  The template uses PostgreSQL for metadata and Redis for file locking.
+features:
+  - Desktop and mobile sync clients
+  - Sharing by link with expiry and password
+  - Calendar and contacts over CalDAV and CardDAV
+  - Hundreds of apps in its own store
+license: AGPL-3.0
+repository: https://github.com/nextcloud/server
+website: https://nextcloud.com
+resources:
+  cpu: 2
+  memory_mib: 2048
+inputs:
+  - name: DOMAIN
+    label: Domain
+    placeholder: app.example.com
+services:
+  - name: nextcloud
+    image: nextcloud:30.0.4-apache
+    icon: nextcloud
+    port: 80
+    public: true
+    volume:
+      path: /var/www/html
+      size_gib: 50
+  - name: postgres
+    image: postgres:17.2-alpine
+    icon: postgres
+    port: 5432
+    volume:
+      path: /var/lib/postgresql/data
+      size_gib: 10
+  - name: redis
+    image: redis:7.4-alpine
+    icon: redis
+    port: 6379

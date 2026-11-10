@@ -1,0 +1,39 @@
+schema_version: 1
+name: Umami
+icon: umami
+category: Analytics
+tagline: Simple, privacy-focused analytics on PostgreSQL.
+description: |
+  Umami tracks page views, events and referrers for any number of sites, without
+  cookies.
+
+  It needs only PostgreSQL, which makes it the lightest analytics option in the
+  catalog.
+features:
+  - Unlimited websites per instance
+  - Custom events and UTM reports
+  - Public share links for dashboards
+  - Teams with view-only members
+license: MIT
+repository: https://github.com/umami-software/umami
+website: https://umami.is
+resources:
+  cpu: 0.5
+  memory_mib: 512
+inputs:
+  - name: DOMAIN
+    label: Domain
+    placeholder: app.example.com
+services:
+  - name: umami
+    image: ghcr.io/umami-software/umami:postgresql-v2.14.0
+    icon: umami
+    port: 3000
+    public: true
+  - name: postgres
+    image: postgres:17.2-alpine
+    icon: postgres
+    port: 5432
+    volume:
+      path: /var/lib/postgresql/data
+      size_gib: 5

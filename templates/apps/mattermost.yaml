@@ -1,0 +1,41 @@
+schema_version: 1
+name: Mattermost
+icon: mattermost
+category: Productivity
+tagline: Team chat with channels, threads and calls.
+description: |
+  Mattermost gives a team channels, threads, file sharing and voice calls, with
+  message history kept on your own disks.
+
+  Team Edition runs on PostgreSQL and stores files on a volume.
+features:
+  - Channels, threads and direct messages
+  - Voice calls and screen sharing
+  - Playbooks for incident response
+  - Webhooks, slash commands and bots
+license: AGPL-3.0
+repository: https://github.com/mattermost/mattermost
+website: https://mattermost.com
+resources:
+  cpu: 2
+  memory_mib: 2048
+inputs:
+  - name: DOMAIN
+    label: Domain
+    placeholder: app.example.com
+services:
+  - name: mattermost
+    image: mattermost/mattermost-team-edition:10.2.0
+    icon: mattermost
+    port: 8065
+    public: true
+    volume:
+      path: /mattermost/data
+      size_gib: 20
+  - name: postgres
+    image: postgres:17.2-alpine
+    icon: postgres
+    port: 5432
+    volume:
+      path: /var/lib/postgresql/data
+      size_gib: 10

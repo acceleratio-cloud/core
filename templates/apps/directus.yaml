@@ -1,0 +1,48 @@
+schema_version: 1
+name: Directus
+icon: directus
+category: Content
+tagline: Headless CMS and data studio over SQL.
+description: |
+  Directus puts a REST and GraphQL API and an admin app on top of a SQL
+  database, without changing its schema.
+
+  Use it as a headless CMS, an internal tool or a back office.
+features:
+  - REST and GraphQL APIs
+  - Role-based access down to fields
+  - Flows for automation
+  - File library with image transforms
+license: BSL 1.1
+repository: https://github.com/directus/directus
+website: https://directus.io
+resources:
+  cpu: 1
+  memory_mib: 1024
+inputs:
+  - name: DOMAIN
+    label: Domain
+    placeholder: app.example.com
+  - name: ADMIN_EMAIL
+    label: Admin email
+    placeholder: you@example.com
+services:
+  - name: directus
+    image: directus/directus:11.3.5
+    icon: directus
+    port: 8055
+    public: true
+    volume:
+      path: /directus/uploads
+      size_gib: 10
+  - name: postgres
+    image: postgres:17.2-alpine
+    icon: postgres
+    port: 5432
+    volume:
+      path: /var/lib/postgresql/data
+      size_gib: 10
+  - name: redis
+    image: redis:7.4-alpine
+    icon: redis
+    port: 6379

@@ -4,6 +4,8 @@ import { PasswordAttemptLimiter } from '@/application/auth/password-attempt-limi
 import { HealthController } from '@/application/health/health.controller';
 import { GithubController } from '@/application/integration/github/github.controller';
 import { GithubService } from '@/application/integration/github/github.service';
+import { MarketplaceController } from '@/application/marketplace/marketplace.controller';
+import { MarketplaceService } from '@/application/marketplace/marketplace.service';
 import { LogsController } from '@/application/logs/logs.controller';
 import { LogsService } from '@/application/logs/logs.service';
 import { MetricsController } from '@/application/metrics/metrics.controller';
@@ -71,6 +73,7 @@ import { VictoriaMetricsClient } from '@/vendor/victoriametrics/victoriametrics.
     AuthController,
     GithubController,
     HealthController,
+    MarketplaceController,
     LogsController,
     MetricsController,
     NodeController,
@@ -85,6 +88,7 @@ import { VictoriaMetricsClient } from '@/vendor/victoriametrics/victoriametrics.
   ],
   providers: [
     PasswordAttemptLimiter,
+    MarketplaceService,
     GithubClient,
     GithubService,
     NodeService,

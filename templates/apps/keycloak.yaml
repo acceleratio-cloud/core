@@ -1,0 +1,41 @@
+schema_version: 1
+name: Keycloak
+icon: keycloak
+category: Security
+tagline: Single sign-on with OIDC, SAML and social logins.
+description: |
+  Keycloak is an identity provider: user accounts, groups, two-factor login and
+  federation with LDAP or social providers.
+
+  Other apps in a project sign users in through it over OIDC or SAML.
+features:
+  - OIDC and SAML 2.0
+  - Two-factor login and passkeys
+  - LDAP and Active Directory federation
+  - Themes for login pages
+license: Apache-2.0
+repository: https://github.com/keycloak/keycloak
+website: https://www.keycloak.org
+resources:
+  cpu: 1
+  memory_mib: 1024
+inputs:
+  - name: DOMAIN
+    label: Domain
+    placeholder: app.example.com
+  - name: ADMIN_USER
+    label: Admin username
+    placeholder: admin
+services:
+  - name: keycloak
+    image: quay.io/keycloak/keycloak:26.0.7
+    icon: keycloak
+    port: 8080
+    public: true
+  - name: postgres
+    image: postgres:17.2-alpine
+    icon: postgres
+    port: 5432
+    volume:
+      path: /var/lib/postgresql/data
+      size_gib: 5

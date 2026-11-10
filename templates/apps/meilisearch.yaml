@@ -1,0 +1,30 @@
+schema_version: 1
+name: Meilisearch
+icon: meilisearch
+category: Developer tools
+tagline: Fast, typo-tolerant search API.
+description: |
+  Meilisearch indexes JSON documents and answers search queries in milliseconds,
+  with typo tolerance, filters and facets.
+
+  It stays private by default: other services in the project reach it over the
+  internal network.
+features:
+  - Search-as-you-type in under 50 ms
+  - Filters, facets and sorting
+  - Hybrid keyword and vector search
+  - SDKs for JavaScript, Python, Go and more
+license: MIT
+repository: https://github.com/meilisearch/meilisearch
+website: https://www.meilisearch.com
+resources:
+  cpu: 1
+  memory_mib: 1024
+services:
+  - name: meilisearch
+    image: getmeili/meilisearch:v1.12.0
+    icon: meilisearch
+    port: 7700
+    volume:
+      path: /meili_data
+      size_gib: 10

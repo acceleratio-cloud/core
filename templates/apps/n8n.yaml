@@ -1,0 +1,42 @@
+schema_version: 1
+name: n8n
+icon: n8n
+category: Automation
+tagline: Workflow automation with 400+ integrations and code steps.
+description: |
+  n8n connects APIs, databases and SaaS tools in a visual editor, with
+  JavaScript or Python steps where a node is not enough.
+
+  Workflows, credentials and executions are kept in PostgreSQL, so the editor
+  can be restarted or moved without losing history.
+features:
+  - Visual editor with branching, loops and retries
+  - Webhook, schedule and queue triggers
+  - AI agent nodes for OpenAI, Anthropic and Ollama
+  - Encrypted credential store
+license: Sustainable Use License
+repository: https://github.com/n8n-io/n8n
+website: https://n8n.io
+resources:
+  cpu: 1
+  memory_mib: 1024
+inputs:
+  - name: DOMAIN
+    label: Domain
+    placeholder: app.example.com
+services:
+  - name: n8n
+    image: n8nio/n8n:1.70.3
+    icon: n8n
+    port: 5678
+    public: true
+    volume:
+      path: /home/node/.n8n
+      size_gib: 2
+  - name: postgres
+    image: postgres:17.2-alpine
+    icon: postgres
+    port: 5432
+    volume:
+      path: /var/lib/postgresql/data
+      size_gib: 10

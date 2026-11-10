@@ -1,0 +1,34 @@
+schema_version: 1
+name: Uptime Kuma
+icon: uptime-kuma
+category: Observability
+tagline: Uptime checks and status pages.
+description: |
+  Uptime Kuma checks HTTP, TCP, DNS, ping and Docker targets every few seconds
+  and sends a notification when one goes down.
+
+  Each project can publish its own status page on a custom domain.
+features:
+  - HTTP, TCP, DNS, ping and keyword checks
+  - 90+ notification channels
+  - Public status pages
+  - Certificate expiry warnings
+license: MIT
+repository: https://github.com/louislam/uptime-kuma
+website: https://uptime.kuma.pet
+resources:
+  cpu: 0.25
+  memory_mib: 256
+inputs:
+  - name: DOMAIN
+    label: Domain
+    placeholder: app.example.com
+services:
+  - name: uptime-kuma
+    image: louislam/uptime-kuma:1.23.15
+    icon: uptime-kuma
+    port: 3001
+    public: true
+    volume:
+      path: /app/data
+      size_gib: 2

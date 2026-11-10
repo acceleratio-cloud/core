@@ -1,0 +1,38 @@
+schema_version: 1
+name: Metabase
+icon: metabase
+category: Analytics
+tagline: Questions and dashboards over your databases.
+description: |
+  Metabase lets anyone on the team ask questions of PostgreSQL, MySQL,
+  ClickHouse and other databases, with SQL for those who want it.
+
+  Its own settings and saved questions live in a separate PostgreSQL database.
+features:
+  - Query builder without SQL
+  - Native SQL editor with variables
+  - Dashboards with filters and subscriptions
+  - Embedding in other apps
+license: AGPL-3.0
+repository: https://github.com/metabase/metabase
+website: https://www.metabase.com
+resources:
+  cpu: 1
+  memory_mib: 2048
+inputs:
+  - name: DOMAIN
+    label: Domain
+    placeholder: app.example.com
+services:
+  - name: metabase
+    image: metabase/metabase:v0.51.5
+    icon: metabase
+    port: 3000
+    public: true
+  - name: postgres
+    image: postgres:17.2-alpine
+    icon: postgres
+    port: 5432
+    volume:
+      path: /var/lib/postgresql/data
+      size_gib: 5
