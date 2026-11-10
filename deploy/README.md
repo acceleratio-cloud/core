@@ -146,8 +146,17 @@ log is also linked as `/var/log/acceleratio/install.log`.
    `/etc/acceleratio/manifests/traefik-config.yaml` (see
    [Custom domain](#custom-domain)).
 
+Steps 6–8 run at the same time as VictoriaMetrics, VictoriaLogs and the
+CloudNativePG operator: they are independent once Cilium is up. Each line they
+print is prefixed with its group (`[storage]`, `[metrics]`, `[logs]`, `[cnpg]`),
+and each step logs how long it took.
+
 The installer is idempotent: a second run updates configuration and Helm
-releases instead of recreating the cluster.
+releases instead of recreating the cluster. Run directly (a repair), it
+re-applies every release and repeats the smoke test. Run by `update.sh`, it
+leaves alone any release whose chart, settings and values match its last
+successful run (recorded in `/etc/acceleratio/helm-state`), and runs the smoke
+test only when k3s, Cilium or the storage changed.
 
 ## Configuration
 

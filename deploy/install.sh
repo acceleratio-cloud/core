@@ -118,6 +118,12 @@ CSI_FULLNAME=""
 HELM_BIN=""
 LOG_FILE=""
 SMOKE_NAMESPACE="acceleratio-smoke"
+# update.sh sets ACCELERATIO_SKIP_UNCHANGED=1: Helm releases deployed by an
+# earlier run with the same chart, arguments and values are left alone, and the
+# smoke test runs only when k3s, Cilium or the storage changed. A direct run
+# (fresh install or repair) always applies everything.
+SKIP_UNCHANGED="${ACCELERATIO_SKIP_UNCHANGED:-0}"
+SMOKE_NEEDED=$(( SKIP_UNCHANGED ? 0 : 1 ))
 
 # ---------------------------------------------------------------------------
 # Logging and helpers.
@@ -168,6 +174,95 @@ run() {
   fi
   log_info "RUN: $*"
   "$@"
+}
+
+# report_step LABEL: tells a supervising update.sh runner (the console) what
+# the install stage is doing. Without ACCELERATIO_UPDATE_STAGE_FILE it does
+# nothing.
+report_step() {
+  if [ -n "${ACCELERATIO_UPDATE_STAGE_FILE:-}" ]; then
+    printf 'install\n%s\n' "$1" >"$ACCELERATIO_UPDATE_STAGE_FILE" 2>/dev/null || true
+  fi
+}
+
+# step LABEL FUNC: reports LABEL, runs FUNC and logs how long it took.
+step() {
+  local started=$SECONDS
+  report_step "$1"
+  "$2"
+  log_ok "Step $2 took $((SECONDS - started))s"
+}
+
+# run_parallel GROUP...: runs each "name:func func..." group as a background
+# job (its functions in order) with its output prefixed by [name], then fails
+# if any group failed. A failed group does not stop the others: killing helm
+# mid-upgrade would leave its release locked.
+run_parallel() {
+  local group name fn i failed=""
+  local pids=() names=()
+  for group in "$@"; do
+    name="${group%%:*}"
+    (
+      for fn in ${group#*:}; do
+        started=$SECONDS
+        "$fn"
+        log_ok "Step ${fn} took $((SECONDS - started))s"
+      done
+    ) > >(sed -u "s/^/[${name}] /") 2>&1 &
+    pids+=("$!")
+    names+=("$name")
+  done
+  for i in "${!pids[@]}"; do
+    wait "${pids[$i]}" || failed="${failed:+${failed}, }${names[$i]}"
+  done
+  [ -z "$failed" ] || die "Failed: ${failed}. The lines prefixed with their name above show why."
+}
+
+# helm_install RELEASE CHART ARGS...: helm upgrade --install with ARGS (which
+# include --namespace). In SKIP_UNCHANGED mode a release that is deployed with
+# the same chart, ARGS and values files as the last successful run is skipped.
+helm_install() {
+  local release=$1 namespace="" prev="" arg digest stamp
+  for arg in "$@"; do
+    if [ "$prev" = "--namespace" ]; then namespace=$arg; fi
+    prev=$arg
+  done
+  digest="$(
+    {
+      printf '%s\n' "$@"
+      prev=""
+      for arg in "$@"; do
+        if [ "$prev" = "--values" ]; then cat "$arg"; fi
+        prev=$arg
+      done
+    } | sha256sum | cut -d' ' -f1
+  )"
+  stamp="${CONFIG_DIR}/helm-state/${namespace}.${release}"
+
+  if (( SKIP_UNCHANGED )) && [ "$(cat "$stamp" 2>/dev/null)" = "$digest" ] &&
+    "$HELM_BIN" status "$release" --namespace "$namespace" 2>/dev/null | grep -qx 'STATUS: deployed'; then
+    log_info "${release} is unchanged since the last run; not upgrading it"
+    return 0
+  fi
+
+  "$HELM_BIN" upgrade --install "$@"
+  install -d -m 0700 "${CONFIG_DIR}/helm-state"
+  printf '%s\n' "$digest" >"$stamp"
+  SMOKE_NEEDED=1
+}
+
+# prepull_images: pulls the platform's own images in the background while the
+# charts install, so the pods find them in containerd. Best effort: kubelet
+# pulls again whatever is missing.
+prepull_images() {
+  local image
+  if (( DRY_RUN )); then
+    return 0
+  fi
+  for image in "$ACCELERATIO_API_IMAGE" "$ACCELERATIO_CONSOLE_IMAGE" \
+    "$POSTGRES_IMAGE" "$REGISTRY_IMAGE" busybox:1.36; do
+    k3s crictl pull "$image" >/dev/null 2>&1 &
+  done
 }
 
 setup_logging() {
@@ -819,6 +914,10 @@ build_k3s_config() {
     echo "disable-kube-proxy: true"
     echo "disable:"
     echo "  - local-storage"
+    # kubelet pulls one image at a time by default, which serialises a fresh
+    # install behind every chart's images.
+    echo "kubelet-arg:"
+    echo "  - serialize-image-pulls=false"
     if [ -n "$K3S_ETCD_SNAPSHOT_CRON" ]; then
       echo "etcd-snapshot-schedule-cron: \"${K3S_ETCD_SNAPSHOT_CRON}\""
     else
@@ -900,6 +999,9 @@ install_k3s() {
     fi
   fi
 
+  if (( install_needed || K3S_CONFIG_CHANGED )); then
+    SMOKE_NEEDED=1
+  fi
   if (( install_needed )); then
     log_info "Installing k3s ${K3S_VERSION:-latest from ${K3S_CHANNEL}}"
     install_script="$(mktemp)"
@@ -1096,7 +1198,7 @@ install_cilium() {
   check_other_nodes_ready
 
   log_info "Installing Cilium ${CILIUM_VERSION} (kube-proxy replacement)"
-  "$HELM_BIN" upgrade --install cilium oci://quay.io/cilium/charts/cilium \
+  helm_install cilium oci://quay.io/cilium/charts/cilium \
     --version "$CILIUM_VERSION" \
     --namespace kube-system \
     --values "${CONFIG_DIR}/cilium-values.yaml" \
@@ -1170,6 +1272,10 @@ write_seaweedfs_values() {
 # before it exists.
 master:
   replicas: 1
+  # The chart probes every 45s and needs two successes, which kept a fresh
+  # master unready for ~90s after it was up.
+  readinessProbe:
+    periodSeconds: 5
   data:
     type: hostPath
     hostPathPrefix: "${SEAWEEDFS_DATA_DIR}"
@@ -1224,7 +1330,7 @@ install_seaweedfs() {
   install -d -m 0755 "$SEAWEEDFS_DATA_DIR"
   ensure_namespace "$SEAWEEDFS_NAMESPACE"
 
-  "$HELM_BIN" upgrade --install "$SEAWEEDFS_RELEASE" seaweedfs/seaweedfs \
+  helm_install "$SEAWEEDFS_RELEASE" seaweedfs/seaweedfs \
     --version "$SEAWEEDFS_CHART_VERSION" \
     --namespace "$SEAWEEDFS_NAMESPACE" \
     --values "${CONFIG_DIR}/seaweedfs-values.yaml" \
@@ -1307,7 +1413,7 @@ install_csi() {
   fi
 
   log_info "Installing SeaweedFS CSI ${SEAWEEDFS_CSI_CHART_VERSION}"
-  "$HELM_BIN" upgrade --install "$SEAWEEDFS_CSI_RELEASE" seaweedfs-csi-driver/seaweedfs-csi-driver \
+  helm_install "$SEAWEEDFS_CSI_RELEASE" seaweedfs-csi-driver/seaweedfs-csi-driver \
     --version "$SEAWEEDFS_CSI_CHART_VERSION" \
     --namespace "$SEAWEEDFS_NAMESPACE" \
     --values "${CONFIG_DIR}/seaweedfs-csi-values.yaml" \
@@ -1404,7 +1510,7 @@ install_victoriametrics() {
   install -d -m 0755 "$VICTORIAMETRICS_DATA_DIR"
   ensure_namespace "$VICTORIAMETRICS_NAMESPACE"
 
-  "$HELM_BIN" upgrade --install "$VICTORIAMETRICS_RELEASE" victoria-metrics/victoria-metrics-single \
+  helm_install "$VICTORIAMETRICS_RELEASE" victoria-metrics/victoria-metrics-single \
     --version "$VICTORIAMETRICS_CHART_VERSION" \
     --namespace "$VICTORIAMETRICS_NAMESPACE" \
     --values "${CONFIG_DIR}/victoriametrics-values.yaml" \
@@ -1427,7 +1533,7 @@ install_cnpg() {
   log_info "Installing CloudNativePG operator ${CNPG_CHART_VERSION}"
   ensure_namespace "$CNPG_NAMESPACE"
 
-  "$HELM_BIN" upgrade --install "$CNPG_RELEASE" cnpg/cloudnative-pg \
+  helm_install "$CNPG_RELEASE" cnpg/cloudnative-pg \
     --version "$CNPG_CHART_VERSION" \
     --namespace "$CNPG_NAMESPACE" \
     --wait --timeout 10m
@@ -1603,7 +1709,7 @@ install_victorialogs() {
   install -d -m 0755 "$VICTORIALOGS_DATA_DIR"
   ensure_namespace "$VICTORIALOGS_NAMESPACE"
 
-  "$HELM_BIN" upgrade --install "$VICTORIALOGS_RELEASE" victoria-metrics/victoria-logs-single \
+  helm_install "$VICTORIALOGS_RELEASE" victoria-metrics/victoria-logs-single \
     --version "$VICTORIALOGS_CHART_VERSION" \
     --namespace "$VICTORIALOGS_NAMESPACE" \
     --values "${CONFIG_DIR}/victorialogs-values.yaml" \
@@ -1637,7 +1743,11 @@ verify_installation() {
   log_info "Cilium status:"
   k3s kubectl -n kube-system get daemonset/cilium deployment/cilium-operator
 
-  smoke_test
+  if (( SMOKE_NEEDED )); then
+    smoke_test
+  else
+    log_info "k3s, Cilium and the storage are unchanged; skipping the storage and DNS smoke test"
+  fi
   log_ok "Verification passed"
 }
 
@@ -2501,22 +2611,25 @@ main() {
     reset_installation
   fi
 
-  install_packages
-  install_k3s
-  configure_kubeconfig
-  install_helm
+  step "Installing host packages" install_packages
+  step "Installing k3s" install_k3s
+  prepull_images
+  step "Installing the kubeconfig" configure_kubeconfig
+  step "Installing Helm" install_helm
   prepare_helm_environment
-  prepare_helm_repos
-  install_cilium
-  install_seaweedfs
-  install_csi
-  install_victoriametrics
-  install_victorialogs
-  install_cnpg
-  verify_installation
+  step "Updating Helm repositories" prepare_helm_repos
+  step "Installing Cilium (networking)" install_cilium
   resolve_acceleratio_urls
-  configure_traefik
-  install_acceleratio
+  step "Configuring Traefik" configure_traefik
+  # Independent of each other once the network is up: metrics and logs keep
+  # their data on hostPath, not on SeaweedFS.
+  report_step "Installing storage, metrics, logs and the PostgreSQL operator"
+  run_parallel \
+    "storage:install_seaweedfs install_csi verify_installation" \
+    "metrics:install_victoriametrics" \
+    "logs:install_victorialogs" \
+    "cnpg:install_cnpg"
+  step "Starting PostgreSQL, the API and the console" install_acceleratio
   save_config
   print_summary
 }

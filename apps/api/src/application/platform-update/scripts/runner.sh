@@ -111,12 +111,15 @@ verify() {
 }
 
 # read_stage: the stage update.sh reports through ACCELERATIO_UPDATE_STAGE_FILE.
+# During the install stage install.sh adds the step it is on as a second line,
+# published as the message until the update ends.
 read_stage() {
   local reported=""
   reported="$(head -n 1 "$STAGE_FILE" 2>/dev/null || true)"
   case "$reported" in
     prepare|backup|install|verify|cleanup|rollback)
       stage=$reported
+      message="$(sed -n 2p "$STAGE_FILE" 2>/dev/null || true)"
       ;;
     rolled_back|rollback_failed)
       stage=rollback

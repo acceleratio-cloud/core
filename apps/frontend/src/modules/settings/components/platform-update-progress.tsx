@@ -177,7 +177,17 @@ export const PlatformUpdateProgress = ({
                       )}
                     />
                   </span>
-                  {step.label}
+                  <span className="flex min-w-0 flex-col gap-0.5">
+                    {step.label}
+                    {step.state === 'current' && active && update.message ? (
+                      <span
+                        role="status"
+                        className="font-normal text-[12px] text-muted-foreground"
+                      >
+                        {update.message}
+                      </span>
+                    ) : null}
+                  </span>
                   <span className="sr-only">
                     {step.state === 'done'
                       ? '(done)'

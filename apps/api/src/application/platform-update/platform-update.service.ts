@@ -367,6 +367,8 @@ export class PlatformUpdateService
     const log = cleanLog(configMap.data?.log ?? '');
     const progress: RowPatch = {
       stage: reported.stage ?? row.stage,
+      // While running: the install step the server is on.
+      message: reported.message,
       log,
       reported_at: reported.reportedAt ?? new Date(),
     };

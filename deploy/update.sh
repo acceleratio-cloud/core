@@ -907,6 +907,9 @@ rollback() {
 
   ROLLED_BACK=1
   report_stage rollback
+  # The releases go back to older revisions, so install.sh must not trust
+  # what it recorded as deployed.
+  rm -rf "${CONFIG_DIR}/helm-state"
   log_warn "Rolling back the Helm releases and the Acceleratio manifests"
 
   for entry in ${HELM_REVISIONS[@]+"${HELM_REVISIONS[@]}"}; do
@@ -983,7 +986,8 @@ run_install() {
   log_info "Running the target install.sh"
   # Own process group, so a signal can stop install.sh and everything it started.
   set -m
-  bash "$TARGET_INSTALL" ${args[@]+"${args[@]}"} &
+  # Unchanged Helm releases and an untouched storage need no work.
+  ACCELERATIO_SKIP_UNCHANGED=1 bash "$TARGET_INSTALL" ${args[@]+"${args[@]}"} &
   INSTALL_PID=$!
   set +m
   wait "$INSTALL_PID" || rc=$?

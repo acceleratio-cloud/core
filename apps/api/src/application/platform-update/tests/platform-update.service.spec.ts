@@ -126,7 +126,7 @@ describe('PlatformUpdateService.poll', () => {
     coreV1.readNamespacedConfigMap.mockResolvedValue({
       data: {
         status:
-          'phase=running\nstage=backup\nexit_code=\nmessage=\nreported_at=2026-11-07T10:00:00Z\n',
+          'phase=running\nstage=install\nexit_code=\nmessage=Installing Cilium (networking)\nreported_at=2026-11-07T10:00:00Z\n',
         log: '\u001b[34m[10:00:00]\u001b[0m Backing up\n',
       },
     });
@@ -145,7 +145,8 @@ describe('PlatformUpdateService.poll', () => {
 
     expect(updates).toEqual([
       {
-        stage: 'backup',
+        stage: 'install',
+        message: 'Installing Cilium (networking)',
         log: '[10:00:00] Backing up\n',
         reported_at: new Date('2026-11-07T10:00:00Z'),
       },
