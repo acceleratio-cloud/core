@@ -2,10 +2,10 @@
 
 import { useDeferredValue, useState } from 'react';
 import { Search } from 'lucide-react';
-import {
-  MARKETPLACE_CATEGORIES,
-  type MarketplaceApp,
-  type MarketplaceCategory as Category,
+// Types only: the console cannot import runtime values from @acceleratio/shared.
+import type {
+  MarketplaceApp,
+  MarketplaceCategory as Category,
 } from '@acceleratio/shared';
 
 import { Input } from '@/shared/components/ui/input';
@@ -20,9 +20,7 @@ export const MarketplaceView = ({ apps: all }: { apps: MarketplaceApp[] }) => {
   const [category, setCategory] = useState<Category | null>(null);
   const needle = useDeferredValue(query.trim().toLowerCase());
 
-  const categories = MARKETPLACE_CATEGORIES.filter((value) =>
-    all.some((app) => app.category === value),
-  );
+  const categories = [...new Set(all.map((app) => app.category))].sort();
   const apps = all.filter(
     (app) =>
       (!category || app.category === category) &&
