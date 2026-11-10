@@ -311,7 +311,11 @@ Adding a workload type:
 1) create `workload/<type>/` with `<type>-workload.service.ts` implementing `WorkloadTypeService`, plus
    its manifests, status, deriver, config and `tests/`
 2) register the service in `workload-type.registry.ts` and the deriver in
-   `workload-status-deriver.registry.ts`; `DockerWorkloadService` and the Docker deriver stay untouched
+   `workload-status-deriver.registry.ts`; `DockerWorkloadService` and the Docker deriver stay untouched.
+   The exception is a type that runs as a Docker service: `github/` and `static/` extend
+   `DockerWorkloadService` and reuse the Docker deriver. They change it only through its protected hooks
+   (`normalizeConfig`, `prepareManifest` to add what the pods need before an apply, `diffSections`), and
+   `static/` mounts its files through `WorkloadManifestInput.read_only_claim`
 3) add the type to the shared contract and the Drizzle enum in `schemas/workload.schema.ts`, then
    generate the migration
 4) add the service and deriver to `application.module.ts` providers

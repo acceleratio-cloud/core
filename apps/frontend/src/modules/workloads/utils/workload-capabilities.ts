@@ -1,6 +1,10 @@
-import type { Workload, WorkloadType } from '@acceleratio/shared';
+import type {
+  StaticWorkloadConfig,
+  Workload,
+  WorkloadType,
+} from '@acceleratio/shared';
 
-import { hasPendingChanges } from './workload-config';
+import { effectiveConfig, hasPendingChanges } from './workload-config';
 
 /**
  * Types that run as a Deployment with Docker service settings (instances,
@@ -8,12 +12,12 @@ import { hasPendingChanges } from './workload-config';
  * which the console imports for types only.
  */
 export const isContainerWorkload = (type: WorkloadType) =>
-  type === 'docker' || type === 'github';
+  type === 'docker' || type === 'github' || type === 'static';
 
 /**
  * Whether the service runs as a Deployment, so it can be deployed, started,
- * stopped, restarted and rolled back: Docker and GitHub services. S3 buckets
- * cannot.
+ * stopped, restarted and rolled back: Docker and GitHub services and static
+ * sites. S3 buckets cannot.
  */
 export const hasLifecycle = (workload: Workload) =>
   isContainerWorkload(workload.type);
@@ -34,6 +38,14 @@ export interface DeployAction {
 export const deployAction = (workload: Workload): DeployAction | null => {
   // An S3 bucket is provisioned on create and has nothing to deploy.
   if (!hasLifecycle(workload)) {
+    return null;
+  }
+
+  // A static site has nothing to deploy until its first upload is published.
+  if (
+    workload.type === 'static' &&
+    !(effectiveConfig(workload) as StaticWorkloadConfig | undefined)?.release_id
+  ) {
     return null;
   }
 

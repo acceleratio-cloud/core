@@ -1,4 +1,6 @@
+import { randomUUID } from 'node:crypto';
 import type http from 'node:http';
+import type { Readable } from 'node:stream';
 import { Injectable } from '@nestjs/common';
 import { KubernetesService } from '@/vendor/kubernetes/kubernetes.service';
 import {
@@ -30,6 +32,55 @@ export const encodeFilerPath = (path: string): string =>
     .split('/')
     .map((segment) => encodeURIComponent(segment))
     .join('/');
+
+export interface FilerUpload {
+  request: FilerRequest;
+  /** Bytes read from the body so far. */
+  bytes: () => number;
+}
+
+/**
+ * A `POST` that streams `body` to the filer as one multipart part, so a file
+ * of any size passes through without being held in memory. An existing file
+ * at `path` is replaced.
+ */
+export const filerUpload = (
+  path: string,
+  name: string,
+  contentType: string,
+  body: Readable,
+): FilerUpload => {
+  const boundary = `acceleratio-${randomUUID()}`;
+  const head = Buffer.from(
+    `--${boundary}\r\n` +
+      `Content-Disposition: form-data; name="file"; filename="${name.replace(/["\\\r\n]/g, '_')}"\r\n` +
+      `Content-Type: ${contentType.replace(/[\r\n]/g, '')}\r\n\r\n`,
+  );
+  const tail = Buffer.from(`\r\n--${boundary}--\r\n`);
+  let size = 0;
+
+  return {
+    bytes: () => size,
+    request: {
+      method: 'POST',
+      path,
+      headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}` },
+      body: (request) => {
+        request.write(head);
+        body.on('data', (chunk: Buffer) => {
+          size += chunk.length;
+
+          if (!request.write(chunk)) {
+            body.pause();
+            request.once('drain', () => body.resume());
+          }
+        });
+        body.on('end', () => request.end(tail));
+        body.on('error', (error) => request.destroy(error));
+      },
+    },
+  };
+};
 
 /**
  * The SeaweedFS filer HTTP API, reached through the Kubernetes API server's

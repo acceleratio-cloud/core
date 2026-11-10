@@ -81,8 +81,8 @@ const createTypeService = (type: WorkloadType) => ({
 
 type FakeTypeService = ReturnType<typeof createTypeService>;
 type RegistryFake = ReturnType<typeof createRegistry>;
-type ResolverFake = { resolve: jest.Mock };
-type ProjectServiceFake = { exists: jest.Mock };
+type ResolverFake = { resolve: jest.Mock; listInProject?: jest.Mock };
+type ProjectServiceFake = { exists: jest.Mock; remove?: jest.Mock };
 
 const createProjectService = (exists = true): ProjectServiceFake => ({
   exists: jest.fn().mockResolvedValue(exists),
@@ -176,6 +176,53 @@ describe('WorkloadService.list', () => {
     docker.list.mockResolvedValue([]);
 
     await expect(service.list(projectId)).resolves.toEqual([]);
+  });
+});
+
+describe('WorkloadService.removeProject', () => {
+  const setup = () => {
+    const docker = createTypeService('docker');
+    const future = createTypeService(futureType);
+    const projectService = {
+      ...createProjectService(),
+      remove: jest.fn().mockResolvedValue(undefined),
+    };
+    const resolver = {
+      ...createResolver('docker'),
+      listInProject: jest.fn().mockResolvedValue([
+        { id: 'a', type: 'docker' },
+        { id: 'b', type: futureType },
+      ]),
+    };
+    const service = createService(
+      createRegistry([docker, future]),
+      resolver,
+      projectService,
+    );
+
+    return { docker, future, projectService, service };
+  };
+
+  it('removes every service through its type before the project', async () => {
+    const { docker, future, projectService, service } = setup();
+
+    await service.removeProject(projectId);
+
+    expect(docker.remove).toHaveBeenCalledWith(projectId, 'a');
+    expect(future.remove).toHaveBeenCalledWith(projectId, 'b');
+    expect(projectService.remove).toHaveBeenCalledWith(projectId);
+    expect(docker.list).not.toHaveBeenCalled();
+  });
+
+  it('still deletes the project when a service cannot be removed', async () => {
+    const { docker, future, projectService, service } = setup();
+
+    docker.remove.mockRejectedValue(new Error('SeaweedFS is down'));
+
+    await service.removeProject(projectId);
+
+    expect(future.remove).toHaveBeenCalledWith(projectId, 'b');
+    expect(projectService.remove).toHaveBeenCalledWith(projectId);
   });
 });
 

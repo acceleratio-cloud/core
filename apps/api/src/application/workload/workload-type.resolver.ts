@@ -26,4 +26,14 @@ export class WorkloadTypeResolver {
 
     return row.type;
   }
+
+  /** Every workload of a project with its type, without reading the cluster. */
+  listInProject(
+    projectId: string,
+  ): Promise<{ id: string; type: WorkloadType }[]> {
+    return this.db
+      .select({ id: workload.id, type: workload.type })
+      .from(workload)
+      .where(eq(workload.project_id, projectId));
+  }
 }

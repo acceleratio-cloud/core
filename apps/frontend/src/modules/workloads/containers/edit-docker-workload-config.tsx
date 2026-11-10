@@ -510,6 +510,8 @@ export const EditDockerWorkloadConfig = () => {
     workload.type === 'github'
       ? (config as unknown as GithubWorkloadConfig)
       : null;
+  // A static site's server, files and storage are the platform's.
+  const isSite = workload.type === 'static';
 
   return (
     <form onSubmit={onSubmit} noValidate>
@@ -526,106 +528,111 @@ export const EditDockerWorkloadConfig = () => {
           />
         ) : null}
 
-        <DetailSection
-          title="Source"
-          description={
-            source
-              ? 'The repository and branch each deploy builds.'
-              : 'The image to run and how its process starts.'
-          }
-        >
-          <div className="divide-y divide-edge-subtle">
-            {source ? (
-              <>
-                <RepositoryHeader repository={source.repository} />
-                <InlineRow
-                  label="Branch"
-                  htmlFor="workload-config-branch"
-                  hint="Deploy builds its latest commit."
-                >
-                  <div className="w-44 sm:w-56">
-                    <GithubBranchSelect
-                      id="workload-config-branch"
-                      appId={source.github_app_id}
-                      repository={source.repository}
-                      value={branch.value}
-                      onChange={branch.onChange}
-                      disabled={isLocked}
-                    />
-                  </div>
-                </InlineRow>
-                <AutoDeployRow branch={source.branch} />
-              </>
-            ) : (
-              <>
-                <SettingRow
-                  label="Image"
-                  htmlFor="workload-config-image"
-                  hint="Tag or digest."
-                >
-                  <Input
-                    id="workload-config-image"
-                    autoComplete="off"
-                    spellCheck={false}
-                    placeholder="nginx:latest"
-                    aria-invalid={!!errors.dockerImage}
-                    className="font-mono"
-                    {...register('dockerImage', {
-                      validate: (value) =>
-                        value.trim() ? true : 'Enter the image to run.',
-                    })}
-                  />
-                  <FieldError
-                    errors={[errors.dockerImage]}
-                    className="mt-1.5"
-                  />
-                </SettingRow>
-
-                <SettingRow
-                  label="Entrypoint"
-                  htmlFor="workload-config-entrypoint"
-                  hint="Replaces ENTRYPOINT."
-                >
-                  <Input
-                    id="workload-config-entrypoint"
-                    autoComplete="off"
-                    spellCheck={false}
-                    placeholder="Image default"
-                    aria-invalid={!!errors.entrypoint}
-                    className="font-mono"
-                    {...register('entrypoint', { validate: validateArgs })}
-                  />
-                  <FieldError errors={[errors.entrypoint]} className="mt-1.5" />
-                </SettingRow>
-
-                <SettingRow
-                  label="Command"
-                  htmlFor="workload-config-command"
-                  hint="Replaces CMD."
-                >
-                  <Input
-                    id="workload-config-command"
-                    autoComplete="off"
-                    spellCheck={false}
-                    placeholder="Image default"
-                    aria-invalid={!!errors.command}
-                    aria-describedby="workload-config-command-help"
-                    className="font-mono"
-                    {...register('command', { validate: validateArgs })}
-                  />
-                  <p
-                    id="workload-config-command-help"
-                    className="mt-1.5 text-xs leading-5 text-fg-tertiary"
+        {isSite ? null : (
+          <DetailSection
+            title="Source"
+            description={
+              source
+                ? 'The repository and branch each deploy builds.'
+                : 'The image to run and how its process starts.'
+            }
+          >
+            <div className="divide-y divide-edge-subtle">
+              {source ? (
+                <>
+                  <RepositoryHeader repository={source.repository} />
+                  <InlineRow
+                    label="Branch"
+                    htmlFor="workload-config-branch"
+                    hint="Deploy builds its latest commit."
                   >
-                    Split like a shell line. Quote arguments that contain
-                    spaces.
-                  </p>
-                  <FieldError errors={[errors.command]} className="mt-1.5" />
-                </SettingRow>
-              </>
-            )}
-          </div>
-        </DetailSection>
+                    <div className="w-44 sm:w-56">
+                      <GithubBranchSelect
+                        id="workload-config-branch"
+                        appId={source.github_app_id}
+                        repository={source.repository}
+                        value={branch.value}
+                        onChange={branch.onChange}
+                        disabled={isLocked}
+                      />
+                    </div>
+                  </InlineRow>
+                  <AutoDeployRow branch={source.branch} />
+                </>
+              ) : (
+                <>
+                  <SettingRow
+                    label="Image"
+                    htmlFor="workload-config-image"
+                    hint="Tag or digest."
+                  >
+                    <Input
+                      id="workload-config-image"
+                      autoComplete="off"
+                      spellCheck={false}
+                      placeholder="nginx:latest"
+                      aria-invalid={!!errors.dockerImage}
+                      className="font-mono"
+                      {...register('dockerImage', {
+                        validate: (value) =>
+                          value.trim() ? true : 'Enter the image to run.',
+                      })}
+                    />
+                    <FieldError
+                      errors={[errors.dockerImage]}
+                      className="mt-1.5"
+                    />
+                  </SettingRow>
+
+                  <SettingRow
+                    label="Entrypoint"
+                    htmlFor="workload-config-entrypoint"
+                    hint="Replaces ENTRYPOINT."
+                  >
+                    <Input
+                      id="workload-config-entrypoint"
+                      autoComplete="off"
+                      spellCheck={false}
+                      placeholder="Image default"
+                      aria-invalid={!!errors.entrypoint}
+                      className="font-mono"
+                      {...register('entrypoint', { validate: validateArgs })}
+                    />
+                    <FieldError
+                      errors={[errors.entrypoint]}
+                      className="mt-1.5"
+                    />
+                  </SettingRow>
+
+                  <SettingRow
+                    label="Command"
+                    htmlFor="workload-config-command"
+                    hint="Replaces CMD."
+                  >
+                    <Input
+                      id="workload-config-command"
+                      autoComplete="off"
+                      spellCheck={false}
+                      placeholder="Image default"
+                      aria-invalid={!!errors.command}
+                      aria-describedby="workload-config-command-help"
+                      className="font-mono"
+                      {...register('command', { validate: validateArgs })}
+                    />
+                    <p
+                      id="workload-config-command-help"
+                      className="mt-1.5 text-xs leading-5 text-fg-tertiary"
+                    >
+                      Split like a shell line. Quote arguments that contain
+                      spaces.
+                    </p>
+                    <FieldError errors={[errors.command]} className="mt-1.5" />
+                  </SettingRow>
+                </>
+              )}
+            </div>
+          </DetailSection>
+        )}
 
         <DockerWorkloadPrivateNetwork />
 
@@ -660,31 +667,33 @@ export const EditDockerWorkloadConfig = () => {
           </div>
         </DetailSection>
 
-        <DockerWorkloadVolumes />
+        {isSite ? null : <DockerWorkloadVolumes />}
 
-        <DetailSection
-          title="Placement"
-          description="Run the service only on servers with these labels. Set labels on the Servers page."
-        >
-          <div className="divide-y divide-edge-subtle">
-            <SettingRow
-              label="Node selector"
-              htmlFor="workload-config-node-selector"
-              hint="One key=value per line."
-            >
-              <Textarea
-                id="workload-config-node-selector"
-                rows={3}
-                autoComplete="off"
-                spellCheck={false}
-                placeholder="Any server"
-                disabled={isLocked}
-                className="font-mono text-xs"
-                {...register('nodeSelector')}
-              />
-            </SettingRow>
-          </div>
-        </DetailSection>
+        {isSite ? null : (
+          <DetailSection
+            title="Placement"
+            description="Run the service only on servers with these labels. Set labels on the Servers page."
+          >
+            <div className="divide-y divide-edge-subtle">
+              <SettingRow
+                label="Node selector"
+                htmlFor="workload-config-node-selector"
+                hint="One key=value per line."
+              >
+                <Textarea
+                  id="workload-config-node-selector"
+                  rows={3}
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder="Any server"
+                  disabled={isLocked}
+                  className="font-mono text-xs"
+                  {...register('nodeSelector')}
+                />
+              </SettingRow>
+            </div>
+          </DetailSection>
+        )}
       </DetailStack>
     </form>
   );

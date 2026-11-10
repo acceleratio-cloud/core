@@ -21,6 +21,7 @@ import type {
   UpdateWorkloadPayload,
   Workload,
   WorkloadConfig,
+  WorkloadDiffSection,
   WorkloadPosition,
   WorkloadVersionDiff,
 } from '@acceleratio/shared';
@@ -197,7 +198,7 @@ const describeError = (error: unknown): string =>
 export class DockerWorkloadService
   implements WorkloadTypeService, OnApplicationBootstrap, OnApplicationShutdown
 {
-  readonly type: 'docker' | 'github' = 'docker';
+  readonly type: 'docker' | 'github' | 'static' = 'docker';
 
   private readonly logger = new Logger(DockerWorkloadService.name);
 
@@ -738,7 +739,7 @@ export class DockerWorkloadService
       type: this.type,
       base: left.side,
       target: right.side,
-      sections: diffDockerConfigs(
+      sections: this.diffSections(
         left.config && this.normalizeConfig(left.config),
         right.config && this.normalizeConfig(right.config),
       ),
@@ -778,7 +779,7 @@ export class DockerWorkloadService
           ? { kind: 'none' }
           : { kind: 'version', version_id: active.id, number: active.number },
       target: { kind: 'version', version_id: target.id, number: target.number },
-      sections: diffDockerConfigs(
+      sections: this.diffSections(
         active && this.normalizeConfig(active.config),
         applied,
       ),
@@ -1020,7 +1021,7 @@ export class DockerWorkloadService
   private async applyNow(row: WorkloadRow, plan: ApplyPlan): Promise<Workload> {
     await this.isolation.ensure(row.project_id);
 
-    const input: WorkloadManifestInput = {
+    let input: WorkloadManifestInput = {
       id: row.id,
       project_id: row.project_id,
       name: row.name,
@@ -1030,6 +1031,7 @@ export class DockerWorkloadService
     };
 
     try {
+      input = await this.prepareManifest(input);
       // The Secret and the claims go first, so new pods never start against
       // a missing one.
       await this.ensureEnvSecret(input);
@@ -1526,6 +1528,24 @@ export class DockerWorkloadService
     this.logger.warn(`Kubernetes request failed: ${describeError(error)}`);
 
     return toNestException(error);
+  }
+
+  /**
+   * Last step before an apply writes the cluster: a subclass can add what its
+   * pods need beyond the stored config. Runs inside the workload's queue.
+   */
+  protected prepareManifest(
+    input: WorkloadManifestInput,
+  ): Promise<WorkloadManifestInput> {
+    return Promise.resolve(input);
+  }
+
+  /** Diff sections between two normalized configs. */
+  protected diffSections(
+    base: DockerWorkloadConfig | null,
+    target: DockerWorkloadConfig | null,
+  ): WorkloadDiffSection[] {
+    return diffDockerConfigs(base, target);
   }
 
   /** Validates a stored or requested config; a subclass keeps its own fields. */

@@ -347,7 +347,12 @@ const AddDomainMenu = ({
  */
 export const DockerWorkloadNetwork = () => {
   const { workload } = useWorkloadActions();
-  const target = { projectId: workload.project_id, workloadId: workload.id };
+  const target = {
+    projectId: workload.project_id,
+    workloadId: workload.id,
+    // The static file server listens on 80.
+    ...(workload.type === 'static' ? { defaultPort: '80' } : {}),
+  };
   const { data, error, loading, upsert, drop } = useWorkloadDomains(
     target.projectId,
     target.workloadId,

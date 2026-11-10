@@ -46,7 +46,12 @@ export const useBodyRef = () => {
   return bodyRef;
 };
 
-type Target = { projectId: string; workloadId: string };
+type Target = {
+  projectId: string;
+  workloadId: string;
+  /** Prefills the port when the server's is known, as a static site's is. */
+  defaultPort?: string;
+};
 
 const APPLIES_NOW =
   'Applies immediately. The service keeps running and does not need a deploy.';
@@ -146,7 +151,7 @@ export const GenerateDomainDialog = ({
   const labelId = useId();
   const portId = useId();
   const [label, setLabel] = useState(domains.suggested_label);
-  const [port, setPort] = useState('');
+  const [port, setPort] = useState(target.defaultPort ?? '');
   const [touched, setTouched] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -350,7 +355,7 @@ export const AddCustomDomainDialog = ({
   const hostnameId = useId();
   const portId = useId();
   const [hostname, setHostname] = useState('');
-  const [port, setPort] = useState('');
+  const [port, setPort] = useState(target.defaultPort ?? '');
   const [touched, setTouched] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);

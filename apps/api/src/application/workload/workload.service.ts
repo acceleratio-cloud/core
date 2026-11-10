@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import type {
@@ -40,6 +41,8 @@ const compareWorkloads = (left: Workload, right: Workload): number =>
  */
 @Injectable()
 export class WorkloadService {
+  private readonly logger = new Logger(WorkloadService.name);
+
   constructor(
     private readonly registry: WorkloadTypeRegistry,
     private readonly resolver: WorkloadTypeResolver,
@@ -219,6 +222,32 @@ export class WorkloadService {
     const service = await this.serviceForRow(projectId, id);
 
     return service.remove(projectId, id);
+  }
+
+  /**
+   * Deletes a project with its services. Each service is removed by its type
+   * first, all at once, so what lives outside the namespace (an S3 bucket, a
+   * static site's volume and files) goes with it. A service that cannot be
+   * removed does not keep the project: deleting the namespace takes what is
+   * inside it, and only that service's outside storage is left, as logged.
+   */
+  async removeProject(projectId: string): Promise<void> {
+    const items = await this.resolver.listInProject(projectId);
+    const results = await Promise.allSettled(
+      items.map(({ id, type }) =>
+        this.registry.get(type).remove(projectId, id),
+      ),
+    );
+
+    results.forEach((result, index) => {
+      if (result.status === 'rejected') {
+        this.logger.warn(
+          `Could not remove workload ${items[index].id} of deleted project ${projectId}; its storage outside the namespace may remain: ${(result.reason as Error)?.message ?? String(result.reason)}`,
+        );
+      }
+    });
+
+    await this.projectService.remove(projectId);
   }
 
   async rollback(

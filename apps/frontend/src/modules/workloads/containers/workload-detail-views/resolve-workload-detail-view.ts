@@ -4,6 +4,7 @@ import { getGithubDetailView } from './github-detail-view';
 import { getGenericDetailView } from './generic-detail-view';
 import { getPostgresDetailView } from './postgres-detail-view';
 import { getS3BucketDetailView } from './s3-bucket-detail-view';
+import { getStaticDetailView } from './static-detail-view';
 import type { WorkloadDetailView } from './workload-detail-view';
 
 /**
@@ -25,6 +26,8 @@ export const resolveWorkloadDetailView = (
       return getGithubDetailView(workload);
     case 'postgres':
       return getPostgresDetailView(workload);
+    case 'static':
+      return getStaticDetailView(workload);
     default:
       workload.type satisfies never;
       return getGenericDetailView(workload);

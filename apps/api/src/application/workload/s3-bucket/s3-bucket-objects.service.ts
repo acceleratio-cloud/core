@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import type { Readable } from 'node:stream';
 import {
@@ -12,6 +11,7 @@ import {
 import type { S3BucketEntry, S3BucketListing } from '@acceleratio/shared';
 import {
   encodeFilerPath,
+  filerUpload,
   readBody,
   SeaweedfsFilerClient,
 } from '@/vendor/seaweedfs/seaweedfs-filer.client';
@@ -168,11 +168,7 @@ export class S3BucketObjectsService {
     };
   }
 
-  /**
-   * Streams the request body to the filer as one multipart part, so a file
-   * of any size passes through without being held in memory. An existing
-   * file at the same key is replaced, as S3 does.
-   */
+  /** Streams the request body to the filer; an existing file is replaced, as S3 does. */
   async upload(
     projectId: string,
     id: string,
@@ -184,37 +180,8 @@ export class S3BucketObjectsService {
     const path = normalizeObjectPath(pathInput, 'file');
     const name = lastSegment(path);
     const type = contentType?.trim() || DEFAULT_CONTENT_TYPE;
-    const boundary = `acceleratio-${randomUUID()}`;
-    const head = Buffer.from(
-      `--${boundary}\r\n` +
-        `Content-Disposition: form-data; name="file"; filename="${name.replace(/["\\\r\n]/g, '_')}"\r\n` +
-        `Content-Type: ${type.replace(/[\r\n]/g, '')}\r\n\r\n`,
-    );
-    const tail = Buffer.from(`\r\n--${boundary}--\r\n`);
-    let size = 0;
-
-    const response = await this.send(() =>
-      this.filer.request({
-        method: 'POST',
-        path: this.filerPath(bucket, path),
-        headers: {
-          'Content-Type': `multipart/form-data; boundary=${boundary}`,
-        },
-        body: (request) => {
-          request.write(head);
-          body.on('data', (chunk: Buffer) => {
-            size += chunk.length;
-
-            if (!request.write(chunk)) {
-              body.pause();
-              request.once('drain', () => body.resume());
-            }
-          });
-          body.on('end', () => request.end(tail));
-          body.on('error', (error) => request.destroy(error));
-        },
-      }),
-    );
+    const upload = filerUpload(this.filerPath(bucket, path), name, type, body);
+    const response = await this.send(() => this.filer.request(upload.request));
 
     const stored = await this.expectOk(response, 'upload the file');
     let storedSize: unknown;
@@ -230,7 +197,7 @@ export class S3BucketObjectsService {
       path,
       kind: 'file',
       // The filer reports what it stored; the byte count is the fallback.
-      size: typeof storedSize === 'number' ? storedSize : size,
+      size: typeof storedSize === 'number' ? storedSize : upload.bytes(),
       content_type: type,
       modified_at: new Date().toISOString(),
     };

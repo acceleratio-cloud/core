@@ -22,6 +22,7 @@ export const workloadTypeEnum = pgEnum('workload_type', [
   's3_bucket',
   'github',
   'postgres',
+  'static',
 ]);
 
 export const workload = pgTable(

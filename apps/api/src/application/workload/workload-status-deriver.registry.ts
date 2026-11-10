@@ -16,8 +16,9 @@ export class WorkloadStatusDeriverRegistry {
       this.derivers.set(deriver.type, deriver);
     }
 
-    // A GitHub service runs as a Docker service once its image is built.
+    // GitHub services and static sites run as Docker services.
     this.derivers.set('github', dockerWorkloadStatusDeriver);
+    this.derivers.set('static', dockerWorkloadStatusDeriver);
   }
 
   get(

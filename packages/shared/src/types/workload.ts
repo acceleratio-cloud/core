@@ -1,12 +1,17 @@
-export type WorkloadType = 'docker' | 's3_bucket' | 'github' | 'postgres';
+export type WorkloadType =
+  | 'docker'
+  | 's3_bucket'
+  | 'github'
+  | 'postgres'
+  | 'static';
 
 /**
  * Types that run as a Deployment with Docker service settings: instances,
- * environment, volumes, domains and logs. A `github` service is a Docker
- * service whose image is built from its repository.
+ * domains and logs. A `github` service is a Docker service whose image is
+ * built from its repository; a `static` site one that serves uploaded files.
  */
 export const isContainerWorkload = (type: WorkloadType): boolean =>
-  type === 'docker' || type === 'github';
+  type === 'docker' || type === 'github' || type === 'static';
 
 export type WorkloadStatus =
   'draft' | 'deploying' | 'running' | 'stopped' | 'failed';
@@ -115,6 +120,30 @@ export interface GithubWorkloadConfig extends Omit<
   commit_sha?: string;
 }
 
+/**
+ * A static site: uploaded files served over HTTP on port 80. Each upload is a
+ * release; deploying one rolls the pods onto it without downtime and a
+ * rollback serves an earlier release's files again. `/` serves
+ * `index.html`, a missing path `404.html` when the release has one; hidden
+ * files are never served. The file server belongs to the platform, so its
+ * image is not part of the config.
+ */
+export interface StaticWorkloadConfig extends Pick<
+  DockerWorkloadConfig,
+  'cpu_max' | 'ram_max' | 'replicas'
+> {
+  /**
+   * Release the site serves; absent until the first upload is published.
+   * Changed only by `POST …/releases/:releaseId/publish`, never by an update.
+   */
+  release_id?: string;
+}
+
+/** `POST …/releases`: an empty release to upload the site's files into. */
+export interface StaticRelease {
+  id: string;
+}
+
 export type WorkloadBuildStatus =
   | 'building'
   | 'succeeded'
@@ -169,7 +198,8 @@ export type WorkloadConfig =
   | DockerWorkloadConfig
   | S3BucketConfig
   | GithubWorkloadConfig
-  | PostgresConfig;
+  | PostgresConfig
+  | StaticWorkloadConfig;
 
 /**
  * How project services reach a `postgres` workload. The password stays in

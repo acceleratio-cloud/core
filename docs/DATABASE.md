@@ -188,7 +188,7 @@ erDiagram
 ### `project`
 
 One row per project. `id` is a server-generated UUID used in URLs and as the Kubernetes namespace
-suffix. `name` is operator-visible and not unique. Deleting a project cascades to its workloads.
+suffix. `name` is operator-visible and not unique. Deleting a project cascades to its workloads; the API first removes each workload through its type, so storage outside the namespace (buckets, static site files) goes too.
 
 Columns: `id`, `name`, `created_at`, `updated_at`.
 
@@ -215,7 +215,7 @@ Invariants:
   `0019_workload_internal_hostname` leaves existing Docker rows null; the API names them on startup
   and on their next deploy, never with their `external_name`.
 - `type` selects the shape of every config of the workload (`draft_config` and its versions). The
-  values are `docker`, `s3_bucket`, `github` and `postgres` (migration `0027`). A `github` config is a `docker` config plus `github_app_id`, `repository` and `branch` (the App and repository are fixed after creation; the branch can be changed, and the API checks that it exists on GitHub); its `docker_image` and `commit_sha` are written only by a successful build (`workload_build`) and are absent until the first one. A `docker` config carries the image reference (`docker_image`) and optional
+  values are `docker`, `s3_bucket`, `github`, `postgres` (migration `0027`) and `static` (migration `0028`). A `github` config is a `docker` config plus `github_app_id`, `repository` and `branch` (the App and repository are fixed after creation; the branch can be changed, and the API checks that it exists on GitHub); its `docker_image` and `commit_sha` are written only by a successful build (`workload_build`) and are absent until the first one. A `docker` config carries the image reference (`docker_image`) and optional
   `cpu_max` (vCPU, default 1), `ram_max` (MiB, default 1024), `entrypoint` and `command` (string
   arrays that replace the image's ENTRYPOINT and CMD). An absent limit means the default and a null
   limit means no limit. New services are created with both limits null; configs stored before that
@@ -235,6 +235,13 @@ Invariants:
   (`provisioning`, `ready`, `failed`) and `acceleratio.io/bucket-message`; a Secret without the
   annotation predates it and counts as ready. The access keys live in the Secret `s3-<bucket>` in the project namespace, never in the
   database. For other types `storage_class_id` is null.
+- A `static` workload is a site of uploaded files served by a Docker-style Deployment of
+  `joseluisq/static-web-server`. Its config is `{ cpu_max?, ram_max?, replicas?, release_id? }`; the API drops
+  every other Docker field, and the server image and flags are set on each apply, not stored, so versions never
+  pin them. Only publishing an upload changes `release_id`. `release_id` names a folder
+  `/sites/<workload id>/<release id>/` on the SeaweedFS filer, which pods read through a read-only, statically
+  provisioned PersistentVolume `static-site-<workload id>` over `/sites/<workload id>`. A release that the draft or a
+  version references cannot be written to; releases are deleted with the site, not before.
 - A `postgres` workload is a single-instance CloudNativePG `Cluster` named `external_name`. Its
   config is `{ postgres_version, size_gb, storage_class_id, cpu_max?, ram_max? }`; the version and storage
   profile are fixed after creation, `size_gb` can only grow (and only on a StorageClass that allows
@@ -453,7 +460,7 @@ library; do not repurpose them.
 
 | Enum | Values | Used by |
 | --- | --- | --- |
-| `workload_type` | `docker`, `s3_bucket`, `github` | `workload.type` |
+| `workload_type` | `docker`, `s3_bucket`, `github`, `postgres`, `static` | `workload.type` |
 | `storage_class_kind` | `platform`, `custom` | `storage_class.kind` |
 | `storage_class_reclaim_policy` | `Delete`, `Retain` | `storage_class.reclaim_policy` |
 | `node_operation_type` | `add`, `drain`, `remove` | `node_operation.type` |

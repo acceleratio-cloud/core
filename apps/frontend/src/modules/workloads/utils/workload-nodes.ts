@@ -2,6 +2,7 @@ import type { DockerWorkloadNode } from '../components/workload-cards/docker-wor
 import type { GithubWorkloadNode } from '../components/workload-cards/github-workload-card';
 import type { PostgresWorkloadNode } from '../components/workload-cards/postgres-workload-card';
 import type { S3BucketWorkloadNode } from '../components/workload-cards/s3-bucket-workload-card';
+import type { StaticWorkloadNode } from '../components/workload-cards/static-workload-card';
 
 import type { Workload } from '@acceleratio/shared';
 
@@ -9,7 +10,8 @@ export type WorkloadNode =
   | DockerWorkloadNode
   | S3BucketWorkloadNode
   | GithubWorkloadNode
-  | PostgresWorkloadNode;
+  | PostgresWorkloadNode
+  | StaticWorkloadNode;
 
 /**
  * Canvas nodes are a direct projection of the stored coordinates. Placement

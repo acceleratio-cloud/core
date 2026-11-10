@@ -4,6 +4,7 @@ import { DockerWorkloadService } from './docker/docker-workload.service';
 import { GithubWorkloadService } from './github/github-workload.service';
 import { PostgresWorkloadService } from './postgres/postgres.service';
 import { S3BucketWorkloadService } from './s3-bucket/s3-bucket.service';
+import { StaticWorkloadService } from './static/static-workload.service';
 import type { WorkloadTypeService } from './workload-type-service';
 
 const UNSUPPORTED_TYPE_MESSAGE = 'Unsupported workload type';
@@ -22,12 +23,14 @@ export class WorkloadTypeRegistry {
     s3BucketWorkloadService: S3BucketWorkloadService,
     githubWorkloadService: GithubWorkloadService,
     postgresWorkloadService: PostgresWorkloadService,
+    staticWorkloadService: StaticWorkloadService,
   ) {
     for (const service of [
       dockerWorkloadService,
       s3BucketWorkloadService,
       githubWorkloadService,
       postgresWorkloadService,
+      staticWorkloadService,
     ]) {
       this.services.set(service.type, service);
     }

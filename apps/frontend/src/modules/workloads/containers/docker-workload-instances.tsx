@@ -73,7 +73,10 @@ export const DockerWorkloadInstances = ({
         isLive={isLive}
         activeVersionId={workload.active_version?.id ?? null}
         emptyHint={emptyHintFor(workload)}
-        onOpenTerminal={handleOpenTerminal}
+        // The static file server's image has no shell to open.
+        onOpenTerminal={
+          workload.type === 'static' ? undefined : handleOpenTerminal
+        }
         canOpenTerminal={canOpen}
         logsLink={(instance) => (
           <ViewLogsLink

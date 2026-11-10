@@ -120,7 +120,12 @@ export interface WorkloadManifestInput {
    * another version always rolls the pods, even to an identical config.
    */
   version_id?: string;
+  /** A claim mounted read-only into the container: a static site's files. */
+  read_only_claim?: { name: string; mount_path: string };
 }
+
+/** Pod volume name of `WorkloadManifestInput.read_only_claim`. */
+export const READ_ONLY_VOLUME_NAME = 'files';
 
 export interface DeploymentOptions {
   /** Overrides the config's pod count. */
@@ -251,6 +256,36 @@ export const buildDeployment = (
     }));
   }
 
+  const readOnly = input.read_only_claim;
+
+  if (readOnly) {
+    container.volumeMounts = [
+      ...(container.volumeMounts ?? []),
+      {
+        name: READ_ONLY_VOLUME_NAME,
+        mountPath: readOnly.mount_path,
+        readOnly: true,
+      },
+    ];
+  }
+
+  const podVolumes = [
+    ...volumes.map((volume) => ({
+      name: podVolumeName(volumeIdOf(volume)),
+      persistentVolumeClaim: {
+        claimName: volumeClaimName(input.external_name, volumeIdOf(volume)),
+      },
+    })),
+    ...(readOnly
+      ? [
+          {
+            name: READ_ONLY_VOLUME_NAME,
+            persistentVolumeClaim: { claimName: readOnly.name, readOnly: true },
+          },
+        ]
+      : []),
+  ];
+
   const annotations: Record<string, string> = {
     [WORKLOAD_NAME_ANNOTATION]: input.name,
   };
@@ -299,19 +334,7 @@ export const buildDeployment = (
           // such as N8N_PORT or REDIS_PORT. Services are reached by DNS.
           enableServiceLinks: false,
           containers: [container],
-          ...(volumes.length > 0
-            ? {
-                volumes: volumes.map((volume) => ({
-                  name: podVolumeName(volumeIdOf(volume)),
-                  persistentVolumeClaim: {
-                    claimName: volumeClaimName(
-                      input.external_name,
-                      volumeIdOf(volume),
-                    ),
-                  },
-                })),
-              }
-            : {}),
+          ...(podVolumes.length > 0 ? { volumes: podVolumes } : {}),
           ...(input.config.node_selector
             ? { nodeSelector: input.config.node_selector }
             : {}),

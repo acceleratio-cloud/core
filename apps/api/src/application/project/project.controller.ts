@@ -15,11 +15,15 @@ import type {
   Project,
   UpdateProjectPayload,
 } from '@acceleratio/shared';
+import { WorkloadService } from '@/application/workload/workload.service';
 import { ProjectService } from './project.service';
 
 @Controller('projects')
 export class ProjectController {
-  constructor(private readonly projectService: ProjectService) {}
+  constructor(
+    private readonly projectService: ProjectService,
+    private readonly workloadService: WorkloadService,
+  ) {}
 
   @Get()
   list(): Promise<Project[]> {
@@ -47,6 +51,6 @@ export class ProjectController {
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   remove(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
-    return this.projectService.remove(id);
+    return this.workloadService.removeProject(id);
   }
 }

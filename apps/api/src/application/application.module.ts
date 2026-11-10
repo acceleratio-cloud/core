@@ -44,6 +44,8 @@ import { PostgresWorkloadService } from '@/application/workload/postgres/postgre
 import { S3BucketObjectsController } from '@/application/workload/s3-bucket/s3-bucket-objects.controller';
 import { S3BucketObjectsService } from '@/application/workload/s3-bucket/s3-bucket-objects.service';
 import { S3BucketWorkloadService } from '@/application/workload/s3-bucket/s3-bucket.service';
+import { StaticReleasesController } from '@/application/workload/static/static-releases.controller';
+import { StaticWorkloadService } from '@/application/workload/static/static-workload.service';
 import { WorkloadInstancesService } from '@/application/workload/instances/workload-instances.service';
 import { WorkloadEventsService } from '@/application/workload/observer/workload-events.service';
 import { WorkloadObserverService } from '@/application/workload/observer/workload-observer.service';
@@ -85,6 +87,7 @@ import { VictoriaMetricsClient } from '@/vendor/victoriametrics/victoriametrics.
     SystemController,
     WorkloadController,
     S3BucketObjectsController,
+    StaticReleasesController,
     PostgresController,
   ],
   providers: [
@@ -117,6 +120,7 @@ import { VictoriaMetricsClient } from '@/vendor/victoriametrics/victoriametrics.
     PostgresOverviewService,
     PostgresAccessService,
     GithubWorkloadService,
+    StaticWorkloadService,
     S3BucketObjectsService,
     SeaweedfsFilerClient,
     TraefikClient,

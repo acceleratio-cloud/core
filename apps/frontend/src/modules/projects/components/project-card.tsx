@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type ReactNode } from 'react';
 import Link from 'next/link';
-import { ArrowUpRight, Plus } from 'lucide-react';
+import { ArrowUpRight, PanelsTopLeft, Plus } from 'lucide-react';
 
 import type { Project, Workload } from '@acceleratio/shared';
 import { workloadsApi } from '@/api/workloads';
@@ -85,6 +85,12 @@ const WorkloadTile = ({ workload }: { workload: Workload }) => (
         <GithubIcon className="size-3.5 shrink-0" />
       ) : workload.type === 'postgres' ? (
         <PostgresIcon className="size-3.5 shrink-0" />
+      ) : workload.type === 'static' ? (
+        <PanelsTopLeft
+          aria-hidden="true"
+          strokeWidth={1.75}
+          className="size-3.5 shrink-0"
+        />
       ) : (
         <DockerIcon className="size-3.5 shrink-0" />
       )}
