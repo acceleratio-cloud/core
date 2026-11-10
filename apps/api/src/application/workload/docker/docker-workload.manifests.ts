@@ -294,6 +294,10 @@ export const buildDeployment = (
         },
         spec: {
           terminationGracePeriodSeconds: TERMINATION_GRACE_PERIOD_SECONDS,
+          // No <SERVICE>_PORT=tcp://… variables for every Service in the
+          // project: names users pick would otherwise override app settings
+          // such as N8N_PORT or REDIS_PORT. Services are reached by DNS.
+          enableServiceLinks: false,
           containers: [container],
           ...(volumes.length > 0
             ? {

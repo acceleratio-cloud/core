@@ -91,6 +91,7 @@ describe('buildDeployment', () => {
     expect(deployment.spec?.template?.spec?.terminationGracePeriodSeconds).toBe(
       TERMINATION_GRACE_PERIOD_SECONDS,
     );
+    expect(deployment.spec?.template?.spec?.enableServiceLinks).toBe(false);
   });
 
   it('sets the image and resources and never declares a container port', () => {
