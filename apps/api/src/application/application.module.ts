@@ -5,6 +5,7 @@ import { HealthController } from '@/application/health/health.controller';
 import { GithubController } from '@/application/integration/github/github.controller';
 import { GithubService } from '@/application/integration/github/github.service';
 import { MarketplaceController } from '@/application/marketplace/marketplace.controller';
+import { MarketplaceDeployService } from '@/application/marketplace/marketplace-deploy.service';
 import { MarketplaceService } from '@/application/marketplace/marketplace.service';
 import { LogsController } from '@/application/logs/logs.controller';
 import { LogsService } from '@/application/logs/logs.service';
@@ -89,6 +90,7 @@ import { VictoriaMetricsClient } from '@/vendor/victoriametrics/victoriametrics.
   providers: [
     PasswordAttemptLimiter,
     MarketplaceService,
+    MarketplaceDeployService,
     GithubClient,
     GithubService,
     NodeService,
