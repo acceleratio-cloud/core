@@ -1,6 +1,5 @@
 "use client"
 
-import { Dices } from "lucide-react"
 import { useForm } from "react-hook-form"
 
 import { getApiErrorMessage } from "@/api"
@@ -20,8 +19,10 @@ import {
   FieldGroup,
   FieldLabel,
 } from "@/shared/components/ui/field"
-import { Input } from "@/shared/components/ui/input"
-import { generateProjectName } from "../utils/generate-project-name"
+import {
+  GeneratedNameInput,
+  generateName,
+} from "@/shared/components/generated-name-input"
 
 export type ProjectDraft = {
   name: string
@@ -54,18 +55,18 @@ export const CreateProjectDialog = ({
     setError,
     setValue,
     formState: { errors, isSubmitting },
-  } = useForm<Form>({ defaultValues: { name: generateProjectName() } })
+  } = useForm<Form>({ defaultValues: { name: generateName() } })
 
   const handleOpenChange = (nextOpen: boolean) => {
     if (!nextOpen) {
-      reset({ name: generateProjectName() })
+      reset({ name: generateName() })
     }
 
     onOpenChange(nextOpen)
   }
 
-  const regenerateName = () => {
-    setValue("name", generateProjectName(), {
+  const regenerateName = (name: string) => {
+    setValue("name", name, {
       shouldValidate: true,
       shouldDirty: true,
     })
@@ -97,43 +98,27 @@ export const CreateProjectDialog = ({
           <FieldGroup className="mt-6">
             <Field data-invalid={errors.name ? true : undefined}>
               <FieldLabel htmlFor="project-name">Name</FieldLabel>
-              <div className="flex items-center gap-2">
-                <Input
-                  id="project-name"
-                  autoComplete="off"
-                  placeholder="platform-prod"
-                  maxLength={NAME_MAX_LENGTH}
-                  autoFocus
-                  aria-invalid={!!errors.name}
-                  {...register("name", {
-                    required: "Give the project a name.",
-                    maxLength: {
-                      value: NAME_MAX_LENGTH,
-                      message: `Keep the name under ${NAME_MAX_LENGTH} characters.`,
-                    },
-                    validate: (value) =>
-                      !existingNames.some(
-                        (existingName) =>
-                          existingName.toLowerCase() ===
-                          value.trim().toLowerCase()
-                      ) || "A project with this name already exists.",
-                  })}
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  aria-label="Generate another name"
-                  title="Generate another name"
-                  onClick={regenerateName}
-                >
-                  <Dices
-                    aria-hidden="true"
-                    strokeWidth={1.75}
-                    className="size-4"
-                  />
-                </Button>
-              </div>
+              <GeneratedNameInput
+                id="project-name"
+                onGenerate={regenerateName}
+                placeholder="platform-prod"
+                maxLength={NAME_MAX_LENGTH}
+                autoFocus
+                aria-invalid={!!errors.name}
+                {...register("name", {
+                  required: "Give the project a name.",
+                  maxLength: {
+                    value: NAME_MAX_LENGTH,
+                    message: `Keep the name under ${NAME_MAX_LENGTH} characters.`,
+                  },
+                  validate: (value) =>
+                    !existingNames.some(
+                      (existingName) =>
+                        existingName.toLowerCase() ===
+                        value.trim().toLowerCase()
+                    ) || "A project with this name already exists.",
+                })}
+              />
               <FieldError errors={[errors.name]} />
             </Field>
             <FieldError>{errors.root?.message}</FieldError>

@@ -11,6 +11,10 @@ import type {
 import { getApiErrorMessage } from '@/api';
 import { githubApi } from '@/api/github';
 import { workloadsApi } from '@/api/workloads';
+import {
+  GeneratedNameInput,
+  generateName,
+} from '@/shared/components/generated-name-input';
 import { Button } from '@/shared/components/ui/button';
 import {
   DialogDescription,
@@ -54,7 +58,7 @@ export const CreateGithubWorkloadForm = ({
   // Repositories of the selected App only; null while they load.
   const repositories = loaded?.appId === appId ? loaded.list : null;
   const repository = picked && repositories?.includes(picked) ? picked : null;
-  const [name, setName] = useState('');
+  const [name, setName] = useState(generateName);
   const [branch, setBranch] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -101,7 +105,6 @@ export const CreateGithubWorkloadForm = ({
     if (!next) return;
     setPicked(next);
     setBranch(next.default_branch);
-    setName((current) => current || next.full_name.split('/')[1]);
   };
 
   const submit = async (event: React.FormEvent) => {
@@ -243,11 +246,11 @@ export const CreateGithubWorkloadForm = ({
 
               <Field>
                 <FieldLabel htmlFor="github-name">Name</FieldLabel>
-                <Input
+                <GeneratedNameInput
                   id="github-name"
-                  autoComplete="off"
                   value={name}
                   onChange={(event) => setName(event.target.value)}
+                  onGenerate={setName}
                 />
               </Field>
             </>

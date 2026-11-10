@@ -8,6 +8,10 @@ import type { PostgresVersion, Workload } from '@acceleratio/shared';
 import { getApiErrorMessage } from '@/api';
 import { workloadsApi } from '@/api/workloads';
 import { useStorageProfiles } from '@/modules/workloads/hooks/use-storage-profiles';
+import {
+  GeneratedNameInput,
+  generateName,
+} from '@/shared/components/generated-name-input';
 import { Button } from '@/shared/components/ui/button';
 import {
   DialogDescription,
@@ -60,12 +64,13 @@ export const CreatePostgresForm = ({
   const [profileId, setProfileId] = useState<string | null>(null);
   const {
     register,
+    setValue,
     handleSubmit,
     clearErrors,
     setError,
     formState: { errors, isSubmitting },
   } = useForm<PostgresForm>({
-    defaultValues: { name: 'postgres', size_gb: DEFAULT_VOLUME_SIZE },
+    defaultValues: { name: generateName(), size_gb: DEFAULT_VOLUME_SIZE },
   });
 
   const available = profiles.status === 'ready' ? profiles.profiles : [];
@@ -106,8 +111,14 @@ export const CreatePostgresForm = ({
         <FieldGroup className="mt-5">
           <Field data-invalid={errors.name ? true : undefined}>
             <FieldLabel htmlFor="postgres-name">Name</FieldLabel>
-            <Input
+            <GeneratedNameInput
               id="postgres-name"
+              onGenerate={(generated) =>
+                setValue('name', generated, {
+                  shouldValidate: true,
+                  shouldDirty: true,
+                })
+              }
               autoComplete="off"
               spellCheck={false}
               maxLength={255}

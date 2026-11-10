@@ -6,6 +6,10 @@ import { useForm } from 'react-hook-form';
 import type { Workload } from '@acceleratio/shared';
 import { getApiErrorMessage } from '@/api';
 import { workloadsApi } from '@/api/workloads';
+import {
+  GeneratedNameInput,
+  generateName,
+} from '@/shared/components/generated-name-input';
 import { Button } from '@/shared/components/ui/button';
 import {
   DialogDescription,
@@ -39,12 +43,13 @@ export const CreateDockerWorkloadForm = ({
 }) => {
   const {
     register,
+    setValue,
     handleSubmit,
     clearErrors,
     setError,
     formState: { errors, isSubmitting },
   } = useForm<DockerWorkloadForm>({
-    defaultValues: { name: '', dockerImage: '' },
+    defaultValues: { name: generateName(), dockerImage: '' },
   });
 
   const onSubmit = handleSubmit(async ({ name, dockerImage }) => {
@@ -76,8 +81,14 @@ export const CreateDockerWorkloadForm = ({
         <FieldGroup className="mt-5">
           <Field data-invalid={errors.name ? true : undefined}>
             <FieldLabel htmlFor="workload-name">Name</FieldLabel>
-            <Input
+            <GeneratedNameInput
               id="workload-name"
+              onGenerate={(generated) =>
+                setValue('name', generated, {
+                  shouldValidate: true,
+                  shouldDirty: true,
+                })
+              }
               autoComplete="off"
               placeholder="web"
               maxLength={NAME_MAX_LENGTH}

@@ -8,6 +8,10 @@ import type { CreateWorkloadPayload, Workload } from '@acceleratio/shared';
 import { getApiErrorMessage } from '@/api';
 import { workloadsApi } from '@/api/workloads';
 import { useStorageProfiles } from '@/modules/workloads/hooks/use-storage-profiles';
+import {
+  GeneratedNameInput,
+  generateName,
+} from '@/shared/components/generated-name-input';
 import { Button } from '@/shared/components/ui/button';
 import {
   DialogDescription,
@@ -22,7 +26,6 @@ import {
   FieldGroup,
   FieldLabel,
 } from '@/shared/components/ui/field';
-import { Input } from '@/shared/components/ui/input';
 import {
   Select,
   SelectContent,
@@ -54,11 +57,14 @@ export const CreateS3BucketForm = ({
   const [profileId, setProfileId] = useState<string | null>(null);
   const {
     register,
+    setValue,
     handleSubmit,
     clearErrors,
     setError,
     formState: { errors, isSubmitting },
-  } = useForm<S3BucketForm>({ defaultValues: { name: '' } });
+  } = useForm<S3BucketForm>({
+    defaultValues: { name: generateName() },
+  });
 
   const available = profiles.status === 'ready' ? profiles.profiles : [];
   const platform = available.find((profile) => profile.kind === 'platform');
@@ -99,8 +105,14 @@ export const CreateS3BucketForm = ({
         <FieldGroup className="mt-5">
           <Field data-invalid={errors.name ? true : undefined}>
             <FieldLabel htmlFor="bucket-name">Bucket name</FieldLabel>
-            <Input
+            <GeneratedNameInput
               id="bucket-name"
+              onGenerate={(generated) =>
+                setValue('name', generated, {
+                  shouldValidate: true,
+                  shouldDirty: true,
+                })
+              }
               autoComplete="off"
               spellCheck={false}
               placeholder="media-uploads"
