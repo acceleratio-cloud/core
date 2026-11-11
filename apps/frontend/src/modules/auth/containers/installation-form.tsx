@@ -46,7 +46,7 @@ export const InstallationForm = () => {
 
   return (
     <div className="w-full">
-      <div className="text-2xl tracking-tight font-medium leading-none">
+      <div className="font-heading text-2xl tracking-tight font-medium leading-none">
         Initial Setup
       </div>
       <div className="text-sm text-muted-foreground mt-2.5">

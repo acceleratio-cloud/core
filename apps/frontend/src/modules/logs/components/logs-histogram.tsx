@@ -109,7 +109,7 @@ export const LogsHistogram = ({ histogram, onZoom }: LogsHistogramProps) => {
     return (
       <div
         aria-hidden="true"
-        className="h-24 animate-pulse rounded-md bg-surface-sunken motion-reduce:animate-none"
+        className="h-24 animate-[delayed-in_150ms_200ms_both] rounded-md bg-surface-sunken motion-reduce:animate-none"
       />
     );
   }

@@ -67,7 +67,7 @@ const Tile = ({
   value: string;
   change: string | null;
 }) => (
-  <div className="rounded-lg border border-border bg-surface-raised px-4 py-3">
+  <div className="panel-lit rounded-lg px-4 py-3">
     <p className="text-[12px] text-muted-foreground">{label}</p>
     <p className="mt-1 text-xl font-medium tracking-tight text-foreground tabular-nums">
       {value}
@@ -255,7 +255,7 @@ export const BenchmarkReportView = ({ id }: { id: string }) => {
         <section
           aria-label="Progress"
           role="status"
-          className="mt-6 rounded-lg border border-border bg-surface-raised px-5 py-4"
+          className="mt-6 panel-lit rounded-lg px-5 py-4"
         >
           <div className="flex items-center justify-between gap-3 text-[13px]">
             <span className="inline-flex items-center gap-1.5 text-foreground">
@@ -399,7 +399,7 @@ export const BenchmarkReportView = ({ id }: { id: string }) => {
       </div>
 
       <section aria-label="Context" className="mt-6 grid gap-4 md:grid-cols-2">
-        <div className="rounded-lg border border-border bg-surface-raised px-5 py-4">
+        <div className="panel-lit rounded-lg px-5 py-4">
           <h2 className="text-sm font-medium text-foreground">
             Profile at run time
           </h2>
@@ -427,7 +427,7 @@ export const BenchmarkReportView = ({ id }: { id: string }) => {
             </p>
           )}
         </div>
-        <div className="rounded-lg border border-border bg-surface-raised px-5 py-4">
+        <div className="panel-lit rounded-lg px-5 py-4">
           <h2 className="text-sm font-medium text-foreground">How it ran</h2>
           <dl className="mt-2 divide-y divide-border">
             <Row label="Test volume" value="2 GiB, deleted afterwards" />

@@ -12,7 +12,7 @@ import { Input } from '@/shared/components/ui/input';
 import { AppCard } from '../components/app-card';
 
 const FILTER =
-  'inline-flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-[13px] font-medium text-muted-foreground outline-none transition-colors hover:bg-surface-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 aria-pressed:bg-surface-raised aria-pressed:text-foreground aria-pressed:shadow-key-soft';
+  'inline-flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-full px-3 text-[13px] font-medium text-muted-foreground outline-none transition-colors hover:bg-surface-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 aria-pressed:bg-surface-muted aria-pressed:text-foreground';
 
 /** The catalog: search, a category row and one card per app. */
 export const MarketplaceView = ({ apps: all }: { apps: MarketplaceApp[] }) => {

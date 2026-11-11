@@ -37,7 +37,7 @@ export const AccountCard = () => {
       <section
         aria-label="Account"
         aria-busy="true"
-        className="rounded-lg border border-border bg-surface-raised p-6"
+        className="panel-lit rounded-lg p-6"
       >
         <div className="flex items-center gap-4">
           <Skeleton className="size-14 rounded-full" />
@@ -92,7 +92,7 @@ export const AccountCard = () => {
   return (
     <section
       aria-labelledby="account-title"
-      className="rounded-lg border border-border bg-surface-raised"
+      className="panel-lit rounded-lg"
     >
       <header className="flex items-center gap-4 border-b border-border px-6 py-5">
         <Avatar className="size-14">

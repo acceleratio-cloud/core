@@ -147,7 +147,7 @@ export const MarketplaceAppView = ({
         <aside className="space-y-4">
           <section
             aria-labelledby="details-title"
-            className="rounded-lg border border-border bg-surface-raised px-4 py-3"
+            className="panel-lit rounded-lg px-4 py-3"
           >
             <h2 id="details-title" className={SECTION_TITLE}>
               Details
@@ -179,7 +179,7 @@ export const MarketplaceAppView = ({
 
           <section
             aria-labelledby="resources-title"
-            className="rounded-lg border border-border bg-surface-raised px-4 py-3"
+            className="panel-lit rounded-lg px-4 py-3"
           >
             <h2 id="resources-title" className={SECTION_TITLE}>
               Recommended resources
@@ -202,7 +202,7 @@ export const MarketplaceAppView = ({
 
           <section
             aria-labelledby="images-title"
-            className="rounded-lg border border-border bg-surface-raised px-4 py-3"
+            className="panel-lit rounded-lg px-4 py-3"
           >
             <h2 id="images-title" className={SECTION_TITLE}>
               Images

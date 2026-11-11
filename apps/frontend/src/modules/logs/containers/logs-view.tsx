@@ -798,12 +798,12 @@ const ListSkeleton = () => (
   <div aria-hidden="true" className="flex flex-col gap-2.5 px-3 py-3">
     {Array.from({ length: 14 }, (_, index) => (
       <div key={index} className="flex items-center gap-3">
-        <span className="h-3 w-36 animate-pulse rounded-sm bg-surface-muted motion-reduce:animate-none" />
-        <span className="h-3 w-7 animate-pulse rounded-sm bg-surface-muted motion-reduce:animate-none" />
-        <span className="h-3 w-32 animate-pulse rounded-sm bg-surface-muted motion-reduce:animate-none" />
+        <span className="h-3 w-36 animate-[delayed-in_150ms_200ms_both] rounded-sm bg-surface-muted motion-reduce:animate-none" />
+        <span className="h-3 w-7 animate-[delayed-in_150ms_200ms_both] rounded-sm bg-surface-muted motion-reduce:animate-none" />
+        <span className="h-3 w-32 animate-[delayed-in_150ms_200ms_both] rounded-sm bg-surface-muted motion-reduce:animate-none" />
         <span
           className={cn(
-            'h-3 animate-pulse rounded-sm bg-surface-muted motion-reduce:animate-none',
+            'h-3 animate-[delayed-in_150ms_200ms_both] rounded-sm bg-surface-muted motion-reduce:animate-none',
             index % 3 === 0 ? 'w-1/2' : index % 3 === 1 ? 'w-2/3' : 'w-1/3',
           )}
         />

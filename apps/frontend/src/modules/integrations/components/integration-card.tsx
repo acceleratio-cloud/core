@@ -12,7 +12,7 @@ type IntegrationCardProps = {
 };
 
 const CARD =
-  'flex h-full items-center gap-3.5 rounded-lg border border-border bg-surface-raised px-4 py-3.5';
+  'panel-lit flex h-full items-center gap-3.5 rounded-xl px-4 py-3.5';
 
 export const IntegrationCard = ({
   integration,
@@ -45,7 +45,7 @@ export const IntegrationCard = ({
       className={cn(
         CARD,
         'group outline-none transition-[transform,border-color,background-color] duration-150',
-        'hover:border-edge-control hover:bg-surface-muted/40 focus-visible:ring-2 focus-visible:ring-ring/50',
+        'hover:border-edge-strong focus-visible:ring-2 focus-visible:ring-ring/50',
         'motion-safe:hover:-translate-y-0.5 motion-safe:active:translate-y-0',
       )}
     >

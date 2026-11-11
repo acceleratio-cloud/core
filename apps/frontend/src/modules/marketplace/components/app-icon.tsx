@@ -1,6 +1,6 @@
 import { cn } from '@/lib/utils';
 
-/** The project's own mark, in its own colours, on a quiet white tile. */
+/** The project's own mark, in its own colours, on a light tile, since third-party marks are drawn for a light ground. */
 export const AppIcon = ({
   src,
   className,
@@ -12,7 +12,7 @@ export const AppIcon = ({
   <span
     aria-hidden="true"
     className={cn(
-      'grid size-10 shrink-0 place-items-center rounded-lg border border-border bg-surface-raised',
+      'grid size-10 shrink-0 place-items-center rounded-lg bg-fg-primary',
       className,
     )}
   >

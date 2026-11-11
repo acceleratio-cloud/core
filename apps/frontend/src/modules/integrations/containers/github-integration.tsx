@@ -106,7 +106,7 @@ export const GithubIntegration = () => {
       {data && step < 4 ? <GithubSetupSteps step={step} /> : null}
 
       {data && !data.webhooks_active ? (
-        <p className="rounded-lg border border-border bg-surface-raised px-4 py-3 text-sm text-fg-secondary">
+        <p className="panel-lit rounded-lg px-4 py-3 text-sm text-fg-secondary">
           This server has no HTTPS address, so GitHub cannot send events back
           (for example when an App is uninstalled). Connecting and listing
           repositories still work.{' '}

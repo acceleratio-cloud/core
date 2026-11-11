@@ -386,7 +386,7 @@ const FacetSkeleton = ({ rows }: { rows: number }) => (
       <span
         key={index}
         className={cn(
-          'h-3.5 animate-pulse rounded-sm bg-surface-muted motion-reduce:animate-none',
+          'h-3.5 animate-[delayed-in_150ms_200ms_both] rounded-sm bg-surface-muted motion-reduce:animate-none',
           SKELETON_WIDTHS[index % SKELETON_WIDTHS.length],
         )}
       />

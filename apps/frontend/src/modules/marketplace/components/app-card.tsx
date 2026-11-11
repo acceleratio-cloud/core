@@ -11,8 +11,8 @@ export const AppCard = ({ app }: { app: MarketplaceApp }) => (
   <Link
     href={`/marketplace/${app.slug}`}
     className={cn(
-      'group flex h-full flex-col rounded-lg border border-border bg-surface-raised p-4 outline-none',
-      'transition-[transform,border-color] duration-150 hover:border-edge-control focus-visible:ring-2 focus-visible:ring-ring/50',
+      'group panel-lit flex h-full flex-col rounded-xl p-4 outline-none',
+      'transition-[transform,border-color] duration-150 hover:border-edge-strong focus-visible:ring-2 focus-visible:ring-ring/50',
       'motion-safe:hover:-translate-y-0.5 motion-safe:active:translate-y-0',
     )}
   >
