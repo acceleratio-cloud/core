@@ -20,6 +20,7 @@ import {
 
 import type { Workload, WorkloadConfig } from '@acceleratio/shared';
 import { getApiErrorMessage } from '@/api';
+import { cn } from '@/lib/utils';
 import { workloadsApi } from '@/api/workloads';
 import { useProject } from '@/modules/projects/providers/project-provider';
 import { DetailSection } from '@/modules/workloads/components/workload-details/detail-primitives';
@@ -239,20 +240,25 @@ export const WorkloadActionsProvider = ({
 type LifecycleAction = {
   key: LifecycleKey;
   visible: boolean;
+  /** A shown action the current status does not allow; it stays in place, dimmed. */
+  unavailable?: boolean;
   primary?: boolean;
   icon: LucideIcon;
   /** Colors the icon of an outline button by what the action does. */
   iconTone?: string;
   label: string;
-  pendingLabel: string;
 };
 
 /**
- * Deploy, Start, Restart and Stop at the top right of the panel header. Only
- * the actions the current status allows are shown. Start, Restart and Stop
- * form one segmented control whose icon colors hint at the action; the deploy
- * action (Deploy, Apply changes or Redeploy, see `deployAction`) is the one
- * solid button, last in the row.
+ * Deploy, Start, Restart and Stop at the top right of the panel header. Once
+ * a service has been deployed, the segmented control always has the same two
+ * slots, Start or Restart and Stop, so the row keeps its width and position
+ * when the status changes; an action the status does not allow is dimmed
+ * instead of removed. Labels never change while a request runs (the button
+ * shows a spinner over its label), and the other buttons only ignore clicks
+ * during it rather than dimming, so a fast request causes no flicker. The
+ * deploy action (Deploy, Apply changes or Redeploy, see `deployAction`) is
+ * the one solid button, last in the row.
  * Applying pending changes first shows what they change and asks to confirm.
  * Renders as a fragment so the header can place the buttons and their error.
  * `leading` goes first in the button row, set apart by a divider, for links
@@ -268,6 +274,10 @@ export const WorkloadLifecycleActions = ({
   const reviewsChanges = hasPendingChanges(workload);
 
   const handleAction = (key: LifecycleKey) => {
+    if (pendingAction !== null) {
+      return;
+    }
+
     if (key === 'deploy' && reviewsChanges) {
       setReviewOpen(true);
       return;
@@ -282,6 +292,12 @@ export const WorkloadLifecycleActions = ({
     }
   };
 
+  // A service never deployed (a first rollout or build) has nothing to start,
+  // restart or stop, so it gets no segmented control at all.
+  const isDeployed = workload.active_version !== null;
+  const isStopped = workload.status === 'stopped';
+  const hasControls = isDeployed || isStopped;
+
   const actions: LifecycleAction[] = [
     {
       key: 'deploy',
@@ -289,35 +305,32 @@ export const WorkloadLifecycleActions = ({
       primary: true,
       icon: Rocket,
       label: deploy?.label ?? 'Deploy',
-      pendingLabel: deploy?.pendingLabel ?? 'Deploying',
     },
     {
       key: 'start',
-      visible: workload.status === 'stopped',
+      visible: hasControls && isStopped,
       icon: Play,
       iconTone: 'text-status-success',
       label: 'Start',
-      pendingLabel: 'Starting',
     },
     {
       key: 'restart',
-      visible: workload.status === 'running',
+      visible: hasControls && !isStopped,
+      unavailable: workload.status !== 'running',
       icon: RotateCw,
       iconTone: 'text-fg-secondary',
       label: 'Restart',
-      pendingLabel: 'Restarting',
     },
     {
       key: 'stop',
-      // A service never deployed (a first rollout or build) has nothing to stop.
-      visible:
-        workload.active_version !== null &&
-        (workload.status === 'running' || workload.status === 'deploying'),
+      visible: hasControls,
+      unavailable:
+        !isDeployed ||
+        (workload.status !== 'running' && workload.status !== 'deploying'),
       icon: Square,
       // Filled, so it reads as a stop glyph rather than an empty checkbox.
       iconTone: 'size-3 fill-current text-status-danger',
       label: 'Stop',
-      pendingLabel: 'Stopping',
     },
   ];
 
@@ -333,10 +346,10 @@ export const WorkloadLifecycleActions = ({
     {
       key,
       primary,
+      unavailable,
       icon: Icon,
       iconTone,
       label,
-      pendingLabel,
     }: LifecycleAction,
     className?: string,
   ) => (
@@ -345,9 +358,10 @@ export const WorkloadLifecycleActions = ({
       type="button"
       variant={primary ? 'default' : 'outline'}
       loading={pendingAction === key}
-      disabled={pendingAction !== null}
+      disabled={unavailable}
+      aria-disabled={pendingAction !== null || undefined}
       onClick={() => handleAction(key)}
-      className={className}
+      className={cn(pendingAction !== null && 'pointer-events-none', className)}
     >
       <Icon
         data-icon="inline-start"
@@ -355,7 +369,7 @@ export const WorkloadLifecycleActions = ({
         strokeWidth={1.75}
         className={iconTone}
       />
-      {pendingAction === key ? pendingLabel : label}
+      {label}
     </Button>
   );
 
@@ -373,11 +387,15 @@ export const WorkloadLifecycleActions = ({
         {controls.length > 0 ? (
           // Joined buttons: shared borders, outer corners only; the focused
           // one rises so its outline is never covered by a neighbour.
-          <div className="inline-flex rounded-md shadow-key-soft">
+          <div className="inline-flex rounded-full shadow-key-soft">
             {controls.map((action) =>
               renderButton(
                 action,
-                'rounded-none shadow-none first:rounded-l-md last:rounded-r-md not-first:-ml-px focus-visible:z-10',
+                cn(
+                  'rounded-none shadow-none first:rounded-l-full last:rounded-r-full not-first:-ml-px focus-visible:z-10',
+                  // Start and Restart share a slot; one width for both.
+                  action.key !== 'stop' && 'min-w-23',
+                ),
               ),
             )}
           </div>
