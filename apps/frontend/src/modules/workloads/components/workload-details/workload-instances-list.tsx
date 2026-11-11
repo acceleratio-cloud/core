@@ -463,7 +463,7 @@ export const WorkloadInstancesList = ({
 
       {instances === null ? (
         <div className="flex flex-col gap-2 p-4" aria-hidden="true">
-          <div className="h-10 animate-pulse rounded-md bg-surface-sunken motion-reduce:animate-none" />
+          <div className="h-10 animate-[delayed-in_150ms_200ms_both] rounded-md bg-surface-sunken motion-reduce:animate-none" />
         </div>
       ) : instances.length === 0 ? (
         <div className="flex flex-col items-center gap-1 px-4 py-8 text-center">

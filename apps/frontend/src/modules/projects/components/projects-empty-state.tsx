@@ -132,7 +132,7 @@ const ProjectsEmptyIllustration = () => {
 
 export const ProjectsEmptyState = ({ onCreate }: { onCreate: () => void }) => {
   return (
-    <div className="mt-6 flex min-h-80 flex-col items-center justify-center rounded-lg border border-border bg-surface-raised px-6 py-14 text-center">
+    <div className="mt-6 flex min-h-80 flex-col items-center justify-center panel-lit rounded-lg px-6 py-14 text-center">
       <ProjectsEmptyIllustration />
 
       <h2 className="mt-2 text-sm font-medium text-foreground">

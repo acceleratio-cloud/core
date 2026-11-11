@@ -104,7 +104,7 @@ export const ProjectHeader = ({
   };
 
   return (
-    <header className="flex h-10 min-w-0 items-center gap-2.5 rounded-lg border border-border bg-surface-raised p-1 pl-1.5 shadow-float">
+    <header className="flex h-10 min-w-0 items-center gap-2.5 rounded-full border border-border bg-surface-raised p-1 pl-1.5 shadow-float">
       <ProjectSwitcher activeTab={activeTab} />
 
       <Separator orientation="vertical" className="h-4 shrink-0 self-center!" />
@@ -119,7 +119,7 @@ export const ProjectHeader = ({
           ref={indicatorRef}
           aria-hidden
           className={cn(
-            'pointer-events-none absolute inset-y-0 left-0 w-(--tab-w) translate-x-(--tab-x) rounded-lg bg-muted',
+            'pointer-events-none absolute inset-y-0 left-0 w-(--tab-w) translate-x-(--tab-x) rounded-full bg-muted',
             hasPlaced
               ? 'opacity-100 transition-[translate,width] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none'
               : 'opacity-0',
@@ -147,7 +147,7 @@ export const ProjectHeader = ({
               tabIndex={active ? 0 : -1}
               onClick={() => onTabChange(tab.id)}
               className={cn(
-                'relative z-10 flex h-7.5 cursor-pointer items-center rounded-lg px-3 text-[13px] whitespace-nowrap outline-none transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-foreground/60',
+                'relative z-10 flex h-7.5 cursor-pointer items-center rounded-full px-3 text-[13px] whitespace-nowrap outline-none transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-foreground/60',
                 active
                   ? 'font-medium text-foreground'
                   : 'text-muted-foreground hover:text-foreground',

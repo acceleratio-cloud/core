@@ -80,7 +80,7 @@ export const WorkloadDetails = ({
               'pointer-events-auto absolute top-16 right-2 bottom-2 flex w-3xl flex-col overflow-hidden',
               // Inset 8px inside the main frame's rounded-xl corner, so the
               // radius steps down by the gap and the corners stay concentric.
-              'rounded-[calc(var(--radius-xl)-0.5rem)] border border-edge-default bg-surface-raised text-fg-primary shadow-panel outline-none',
+              'rounded-[calc(var(--radius-xl)-0.5rem)] border border-edge-default bg-surface-panel text-fg-primary shadow-panel outline-none',
               'transition-[translate,opacity] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none',
               'data-[starting-style]:translate-x-[calc(100%+1rem)] data-[starting-style]:opacity-0',
               'data-[ending-style]:translate-x-[calc(100%+1rem)] data-[ending-style]:opacity-0',
@@ -111,7 +111,7 @@ export const WorkloadDetails = ({
                 {view.tabs.length > 1 ? (
                   <TabsList
                     aria-label="Service sections"
-                    className="relative shrink-0 gap-1 border-edge-subtle bg-surface-raised px-2.5"
+                    className="relative shrink-0 gap-1 border-edge-default bg-surface-raised px-2.5"
                   >
                     {view.tabs.map(({ id, label, icon: Icon }) => (
                       <TabsTrigger
@@ -139,9 +139,9 @@ export const WorkloadDetails = ({
                     key={id}
                     value={id}
                     className={cn(
-                      'flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain bg-surface-raised p-4 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
+                      'flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain bg-surface-panel p-4 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
                       // Without a tab list, a hairline still closes the header.
-                      view.tabs.length <= 1 && 'border-t border-edge-subtle',
+                      view.tabs.length <= 1 && 'border-t border-edge-default',
                     )}
                   >
                     {content}

@@ -372,7 +372,7 @@ const EnvEditor = ({
           </div>
 
           {mode === 'list' ? (
-            <div className="overflow-hidden rounded-lg border border-edge-default bg-surface-raised">
+            <div className="overflow-hidden panel-lit rounded-xl">
               <EnvVarList
                 rows={rows}
                 errors={listErrors}

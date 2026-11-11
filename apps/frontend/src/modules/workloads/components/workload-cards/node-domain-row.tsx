@@ -84,7 +84,7 @@ export const NodeDomainRow = ({ workload }: { workload: Workload }) => {
             <DropdownMenuTrigger
               type="button"
               aria-label={`All ${domains.length} domains of ${workload.name}`}
-              className="h-4.5 shrink-0 cursor-pointer rounded-sm border border-edge-default bg-surface-sunken px-1 font-mono text-[11px] leading-none text-fg-secondary tabular-nums transition-colors hover:border-edge-control hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring data-[popup-open]:border-edge-control data-[popup-open]:text-foreground"
+              className="h-4.5 shrink-0 cursor-pointer rounded-sm border border-edge-default bg-surface-sunken px-1 font-mono text-[11px] leading-none text-fg-secondary tabular-nums transition-colors hover:border-edge-strong hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring data-[popup-open]:border-edge-control data-[popup-open]:text-foreground"
             >
               +{others}
             </DropdownMenuTrigger>

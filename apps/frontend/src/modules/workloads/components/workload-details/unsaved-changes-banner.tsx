@@ -2,7 +2,7 @@ import { cn } from '@/lib/utils';
 import { Button } from '@/shared/components/ui/button';
 
 /**
- * Sticky amber bar pinned to the top of a tab's scroll area while its form has
+ * Sticky warning bar (an opaque tint, so content scrolls under it) pinned to the top of a tab's scroll area while its form has
  * unsaved changes. It cancels the tab panel's 16px padding to sit flush under
  * the tab list, and must be inside a `<form>` for Save to submit it.
  */
@@ -23,7 +23,7 @@ export const UnsavedChangesBanner = ({
   <div
     role="status"
     className={cn(
-      'sticky -top-4 z-10 -mx-4 -mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 border-y border-amber-400 bg-amber-50 px-4 py-2 text-amber-600',
+      'sticky -top-4 z-10 -mx-4 -mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 border-y border-status-warning/35 bg-[color-mix(in_oklch,var(--status-warning)_12%,var(--surface-raised))] px-4 py-2 text-status-warning',
       className,
     )}
   >

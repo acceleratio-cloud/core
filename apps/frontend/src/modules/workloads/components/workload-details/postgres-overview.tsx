@@ -680,9 +680,9 @@ export const PostgresOverview = ({ workload }: { workload: Workload }) => {
           <div aria-hidden="true" className="grid gap-px sm:grid-cols-2">
             {[0, 1, 2, 3].map((index) => (
               <div key={index} className="flex flex-col gap-2 px-4 py-3.5">
-                <span className="h-3 w-20 animate-pulse rounded bg-surface-sunken motion-reduce:animate-none" />
-                <span className="h-6 w-16 animate-pulse rounded bg-surface-sunken motion-reduce:animate-none" />
-                <span className="h-1.5 animate-pulse rounded-full bg-surface-sunken motion-reduce:animate-none" />
+                <span className="h-3 w-20 animate-[delayed-in_150ms_200ms_both] rounded bg-surface-sunken motion-reduce:animate-none" />
+                <span className="h-6 w-16 animate-[delayed-in_150ms_200ms_both] rounded bg-surface-sunken motion-reduce:animate-none" />
+                <span className="h-1.5 animate-[delayed-in_150ms_200ms_both] rounded-full bg-surface-sunken motion-reduce:animate-none" />
               </div>
             ))}
           </div>
@@ -723,13 +723,13 @@ const TableRows = ({
   const shown = state.kind === 'ready' ? state.data.rows.length : 0;
 
   return (
-    <div className="overflow-hidden rounded-lg border border-edge-default bg-surface-raised">
+    <div className="overflow-hidden panel-lit rounded-xl">
       {state.kind === 'loading' ? (
         <div aria-hidden="true" className="flex flex-col gap-2 p-4">
           {[0, 1, 2, 3].map((index) => (
             <span
               key={index}
-              className="h-5 animate-pulse rounded bg-surface-sunken motion-reduce:animate-none"
+              className="h-5 animate-[delayed-in_150ms_200ms_both] rounded bg-surface-sunken motion-reduce:animate-none"
             />
           ))}
         </div>
@@ -818,7 +818,7 @@ const TableRows = ({
 };
 
 const TableIndexes = ({ table }: { table: PostgresTable }) => (
-  <div className="overflow-hidden rounded-lg border border-edge-default bg-surface-raised">
+  <div className="overflow-hidden panel-lit rounded-xl">
     {table.indexes.length === 0 ? (
       <CardNote>This table has no indexes.</CardNote>
     ) : (
@@ -985,7 +985,7 @@ export const PostgresData = ({ workload }: { workload: Workload }) => {
             {[0, 1, 2].map((index) => (
               <span
                 key={index}
-                className="h-6 animate-pulse rounded bg-surface-sunken motion-reduce:animate-none"
+                className="h-6 animate-[delayed-in_150ms_200ms_both] rounded bg-surface-sunken motion-reduce:animate-none"
               />
             ))}
           </div>

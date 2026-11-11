@@ -59,7 +59,7 @@ export const DetailSection = ({
           </div>
           {action ? <div className="shrink-0">{action}</div> : null}
         </div>
-        <div className="overflow-hidden rounded-lg border border-edge-default bg-surface-raised">
+        <div className="overflow-hidden panel-lit rounded-xl">
           {children}
         </div>
       </section>
@@ -81,7 +81,7 @@ export const DetailSection = ({
         ) : null}
         {title}
       </h3>
-      <div className="overflow-hidden rounded-lg border border-edge-default bg-surface-raised">
+      <div className="overflow-hidden panel-lit rounded-xl">
         {children}
       </div>
     </section>

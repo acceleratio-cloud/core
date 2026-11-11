@@ -241,7 +241,7 @@ const UploadList = ({
   return (
     <ul
       aria-label="Uploads"
-      className="overflow-hidden rounded-lg border border-edge-default bg-surface-raised divide-y divide-edge-subtle"
+      className="overflow-hidden panel-lit rounded-xl divide-y divide-edge-subtle"
     >
       {uploads.map((upload) => {
         const percent =

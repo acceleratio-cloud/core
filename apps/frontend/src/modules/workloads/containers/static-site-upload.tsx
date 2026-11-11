@@ -192,7 +192,7 @@ export const StaticSiteUpload = () => {
     >
       <div
         aria-live="polite"
-        className="rounded-lg border border-edge-default bg-surface-raised px-3 py-2.5 text-xs text-fg-secondary"
+        className="panel-lit rounded-xl px-3 py-2.5 text-xs text-fg-secondary"
       >
         {phase.kind === 'uploading' ? (
           <>

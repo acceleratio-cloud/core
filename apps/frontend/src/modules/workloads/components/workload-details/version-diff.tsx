@@ -231,7 +231,7 @@ export const VersionDiffView = ({ diff }: { diff: WorkloadVersionDiff }) => {
           <h4 className="mb-1.5 px-1 text-xs font-medium text-fg-secondary">
             {section.label}
           </h4>
-          <ul className="divide-y divide-edge-subtle overflow-hidden rounded-lg border border-edge-default bg-surface-raised">
+          <ul className="divide-y divide-edge-subtle overflow-hidden panel-lit rounded-xl">
             {section.changes.map((change) => (
               <ChangeRow key={change.path} change={change} />
             ))}

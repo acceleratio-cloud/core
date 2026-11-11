@@ -64,7 +64,7 @@ export const WorkloadHeader = ({
             </span>
 
             {hasPendingChanges(workload) ? (
-              <span className="inline-flex h-5.5 items-center rounded-full font-medium border border-dashed border-amber-400 bg-amber-50 px-2.5 text-xs text-amber-600">
+              <span className="inline-flex h-5.5 items-center rounded-full font-medium border border-dashed border-status-warning/50 bg-status-warning/10 px-2.5 text-xs text-status-warning">
                 Pending changes
               </span>
             ) : null}

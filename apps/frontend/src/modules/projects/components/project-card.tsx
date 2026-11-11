@@ -66,7 +66,7 @@ const useProjectWorkloads = (projectId: string) => {
 const PreviewBoard = ({ children }: { children: ReactNode }) => (
   <div
     aria-hidden="true"
-    className="relative h-36 overflow-hidden rounded-md border border-edge-subtle bg-surface-board p-2"
+    className="relative h-36 overflow-hidden rounded-lg border border-edge-subtle bg-surface-board p-2"
   >
     {children}
   </div>
@@ -77,7 +77,7 @@ const PreviewGrid = ({ children }: { children: ReactNode }) => (
 );
 
 const WorkloadTile = ({ workload }: { workload: Workload }) => (
-  <div className="flex min-w-0 flex-col justify-between rounded-md border border-border bg-surface-raised px-2 py-1.5 shadow-xs transition-colors group-hover:border-edge-control">
+  <div className="flex min-w-0 flex-col justify-between rounded-md border border-border bg-surface-raised px-2 py-1.5 shadow-xs transition-colors group-hover:border-edge-strong">
     <div className="flex min-w-0 items-center gap-1.5">
       {workload.type === 's3_bucket' ? (
         <BucketIcon className="size-3.5 shrink-0" />
@@ -185,7 +185,7 @@ export const ProjectCard = ({ project }: { project: Project }) => {
   return (
     <Link
       href={`/project/${project.id}`}
-      className="group flex flex-col gap-2.5 rounded-lg border border-border bg-surface-raised p-2 outline-none transition-colors hover:border-edge-control focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+      className="group panel-lit flex flex-col gap-2.5 rounded-xl p-2 outline-none transition-colors hover:border-edge-strong focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
     >
       <WorkloadsPreview state={workloads} />
 
@@ -220,8 +220,8 @@ export const ProjectCard = ({ project }: { project: Project }) => {
 
 export const ProjectCardSkeleton = () => {
   return (
-    <div className="flex flex-col gap-2.5 rounded-lg border border-border bg-surface-raised p-2">
-      <Skeleton className="h-36 rounded-md" />
+    <div className="panel-lit flex flex-col gap-2.5 rounded-xl p-2">
+      <Skeleton className="h-36 rounded-lg" />
       <div className="flex flex-col gap-1.5 px-1.5 pb-1">
         <Skeleton className="h-4 w-2/5" />
         <div className="flex items-center gap-2">

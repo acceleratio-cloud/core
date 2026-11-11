@@ -44,12 +44,12 @@ export const NodeCard = ({
 }) => (
   <div
     className={cn(
-      'w-66 cursor-grab overflow-hidden rounded-lg border shadow-float',
+      'w-66 cursor-grab overflow-hidden rounded-xl border shadow-float',
       'active:cursor-grabbing',
       'outline-2 outline-offset-2 transition-[border-color,outline-color,background-color] duration-150 ease-out motion-reduce:transition-none',
       selected
         ? 'border-selection bg-selection-wash outline-selection/35'
-        : 'border-border bg-surface-raised outline-transparent hover:border-edge-control',
+        : 'border-border bg-surface-raised outline-transparent hover:border-edge-strong',
     )}
   >
     {children}
