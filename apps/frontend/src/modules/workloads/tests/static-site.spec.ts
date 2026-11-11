@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'bun:test';
 
-import { sendAll, sitePath } from '@/modules/workloads/utils/static-site';
+import {
+  isServedPath,
+  sendAll,
+  sitePath,
+} from '@/modules/workloads/utils/static-site';
 
 describe('sitePath', () => {
   it('drops the picked folder name', () => {
@@ -13,6 +17,15 @@ describe('sitePath', () => {
     expect(sitePath({ name: 'index.html', webkitRelativePath: '' })).toBe(
       'index.html',
     );
+  });
+});
+
+describe('isServedPath', () => {
+  it('skips hidden files and folders but keeps .well-known', () => {
+    expect(isServedPath('index.html')).toBe(true);
+    expect(isServedPath('.well-known/security.txt')).toBe(true);
+    expect(isServedPath('.git/config')).toBe(false);
+    expect(isServedPath('assets/.DS_Store')).toBe(false);
   });
 });
 

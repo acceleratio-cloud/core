@@ -1,6 +1,7 @@
 import type {
   V1PersistentVolume,
   V1PersistentVolumeClaim,
+  V1Probe,
 } from '@kubernetes/client-node';
 import { projectNamespace } from '@/common/naming';
 import { SEAWEEDFS_PROVISIONER } from '@/application/storage-class/storage-class.manifests';
@@ -36,8 +37,9 @@ export const siteVolumeName = (workloadId: string): string =>
   `static-site-${workloadId}`;
 
 /**
- * Arguments of the server: serve one release, with its own 404 page. Hidden
- * files (`.env`, `.git/`) answer 404, since a picked folder may hold them.
+ * Arguments of the server: serve one release, with its own 404 page. The
+ * server hides dot-paths by default; hidden files never reach a release (see
+ * `isServedPath`), so turning that off only lets `.well-known/` through.
  */
 export const siteServerArgs = (releaseId: string): string[] => [
   '--root',
@@ -45,8 +47,19 @@ export const siteServerArgs = (releaseId: string): string[] => [
   '--page404',
   `${SITE_MOUNT_PATH}/${releaseId}/404.html`,
   '--ignore-hidden-files',
-  'true',
+  'false',
 ];
+
+/**
+ * A new pod takes traffic only once `/` answers, which needs the server up
+ * and the release's `index.html` visible on the node's SeaweedFS mount, so a
+ * rollout never sends visitors to a pod that cannot serve the new files.
+ */
+export const SITE_READINESS_PROBE: V1Probe = {
+  httpGet: { path: '/', port: STATIC_SERVER_PORT },
+  periodSeconds: 2,
+  failureThreshold: 3,
+};
 
 type SiteInput = Pick<WorkloadManifestInput, 'id' | 'project_id' | 'name'>;
 

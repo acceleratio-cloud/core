@@ -7,6 +7,12 @@ import { useForm } from 'react-hook-form';
 import type { PostgresVersion, Workload } from '@acceleratio/shared';
 import { getApiErrorMessage } from '@/api';
 import { workloadsApi } from '@/api/workloads';
+import {
+  ProfileField,
+  SIZE_ERROR,
+  SizeField,
+  parseSize,
+} from './workload-volume-dialogs';
 import { useStorageProfiles } from '@/modules/workloads/hooks/use-storage-profiles';
 import {
   GeneratedNameInput,
@@ -21,12 +27,10 @@ import {
 } from '@/shared/components/ui/dialog';
 import {
   Field,
-  FieldDescription,
   FieldError,
   FieldGroup,
   FieldLabel,
 } from '@/shared/components/ui/field';
-import { Input } from '@/shared/components/ui/input';
 import {
   Select,
   SelectContent,
@@ -34,19 +38,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/shared/components/ui/select';
-import {
-  DEFAULT_VOLUME_SIZE,
-  VOLUME_SIZE_MAX,
-  VOLUME_SIZE_MIN,
-} from '../utils/workload-config';
-import { describeStorageProfile } from '../utils/s3-bucket';
+import { DEFAULT_VOLUME_SIZE } from '../utils/workload-config';
 
 /** Mirrors `POSTGRES_VERSIONS` in the shared package, newest first. */
 const VERSIONS: PostgresVersion[] = ['17', '16'];
 
 interface PostgresForm {
   name: string;
-  size_gb: number;
+  // Only carries the size error; the value lives in `sizeText`.
+  size_gb: string;
 }
 
 export const CreatePostgresForm = ({
@@ -61,7 +61,10 @@ export const CreatePostgresForm = ({
   const profiles = useStorageProfiles();
   const [version, setVersion] = useState<PostgresVersion>(VERSIONS[0]);
   // Null keeps the platform profile, which the API resolves.
+  const [sizeText, setSizeText] = useState(String(DEFAULT_VOLUME_SIZE));
   const [profileId, setProfileId] = useState<string | null>(null);
+  // Generated once per opened form, not on every render.
+  const [initialName] = useState(generateName);
   const {
     register,
     setValue,
@@ -70,16 +73,18 @@ export const CreatePostgresForm = ({
     setError,
     formState: { errors, isSubmitting },
   } = useForm<PostgresForm>({
-    defaultValues: { name: generateName(), size_gb: DEFAULT_VOLUME_SIZE },
+    defaultValues: { name: initialName },
   });
 
-  const available = profiles.status === 'ready' ? profiles.profiles : [];
-  const platform = available.find((profile) => profile.kind === 'platform');
-  const selectedId = profileId ?? platform?.id ?? null;
-  const selected = available.find((profile) => profile.id === selectedId);
+  const onSubmit = handleSubmit(async ({ name }) => {
+    clearErrors();
 
-  const onSubmit = handleSubmit(async ({ name, size_gb }) => {
-    clearErrors('root');
+    const size = parseSize(sizeText);
+
+    if (size === null) {
+      setError('size_gb', { message: SIZE_ERROR });
+      return;
+    }
 
     try {
       const workload = await workloadsApi.create(projectId, {
@@ -87,7 +92,7 @@ export const CreatePostgresForm = ({
         type: 'postgres',
         config: {
           postgres_version: version,
-          size_gb: Number(size_gb),
+          size_gb: size,
           storage_class_id: profileId,
         },
       });
@@ -158,76 +163,17 @@ export const CreatePostgresForm = ({
             </Select>
           </Field>
 
-          <Field data-invalid={errors.size_gb ? true : undefined}>
-            <FieldLabel htmlFor="postgres-size">Disk size (GiB)</FieldLabel>
-            <Input
-              id="postgres-size"
-              type="number"
-              inputMode="numeric"
-              min={VOLUME_SIZE_MIN}
-              max={VOLUME_SIZE_MAX}
-              step={1}
-              aria-invalid={!!errors.size_gb}
-              aria-describedby="postgres-size-rules"
-              {...register('size_gb', {
-                valueAsNumber: true,
-                validate: (value) =>
-                  (Number.isInteger(value) &&
-                    value >= VOLUME_SIZE_MIN &&
-                    value <= VOLUME_SIZE_MAX) ||
-                  `Enter a whole number from ${VOLUME_SIZE_MIN} to ${VOLUME_SIZE_MAX}`,
-              })}
-            />
-            <FieldDescription id="postgres-size-rules">
-              {VOLUME_SIZE_MIN}–{VOLUME_SIZE_MAX} GiB. The version, size and
-              storage profile cannot change later.
-            </FieldDescription>
-            <FieldError errors={[errors.size_gb]} />
-          </Field>
+          <SizeField
+            text={sizeText}
+            onTextChange={setSizeText}
+            error={errors.size_gb?.message ?? null}
+          />
 
-          <Field>
-            <FieldLabel htmlFor="postgres-storage-profile">
-              Storage profile
-            </FieldLabel>
-            {profiles.status === 'error' ? (
-              <FieldDescription className="text-destructive">
-                Could not load storage profiles: {profiles.message}. The
-                database will use the platform default.
-              </FieldDescription>
-            ) : (
-              <>
-                <Select
-                  value={selectedId}
-                  items={available.map((profile) => ({
-                    value: profile.id,
-                    label: profile.name,
-                  }))}
-                  disabled={profiles.status === 'loading'}
-                  onValueChange={(next) => {
-                    if (typeof next === 'string') {
-                      setProfileId(next === platform?.id ? null : next);
-                    }
-                  }}
-                >
-                  <SelectTrigger id="postgres-storage-profile">
-                    <SelectValue placeholder="Loading profiles…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {available.map((profile) => (
-                      <SelectItem key={profile.id} value={profile.id}>
-                        {profile.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {selected ? (
-                  <FieldDescription>
-                    {describeStorageProfile(selected)}
-                  </FieldDescription>
-                ) : null}
-              </>
-            )}
-          </Field>
+          <ProfileField
+            profiles={profiles}
+            value={profileId}
+            onChange={setProfileId}
+          />
 
           <FieldError>{errors.root?.message}</FieldError>
         </FieldGroup>

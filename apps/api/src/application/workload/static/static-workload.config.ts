@@ -45,5 +45,19 @@ export const normalizeStaticConfig = (
   ) as DockerWorkloadConfig;
 };
 
+/**
+ * Whether a release keeps this file. Hidden files and folders (`.env`,
+ * `.git/`, `.DS_Store`) are dropped on upload, since a picked folder may hold
+ * them and the server would publish them; `.well-known/` at the root stays
+ * for security.txt and app-link files.
+ */
+export const isServedPath = (path: string): boolean =>
+  !path
+    .split('/')
+    .some(
+      (segment, index) =>
+        segment.startsWith('.') && !(index === 0 && segment === '.well-known'),
+    );
+
 export const releaseOf = (config: unknown): string | null =>
   (config as StaticWorkloadConfig | null)?.release_id ?? null;

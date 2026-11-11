@@ -1,5 +1,6 @@
 "use client"
 
+import { useState } from "react"
 import { useForm } from "react-hook-form"
 
 import { getApiErrorMessage } from "@/api"
@@ -47,6 +48,8 @@ export const CreateProjectDialog = ({
   onCreate,
   existingNames,
 }: CreateProjectDialogProps) => {
+  // Generated once, not on every render; closing the dialog resets it.
+  const [initialName] = useState(generateName)
   const {
     register,
     handleSubmit,
@@ -55,7 +58,7 @@ export const CreateProjectDialog = ({
     setError,
     setValue,
     formState: { errors, isSubmitting },
-  } = useForm<Form>({ defaultValues: { name: generateName() } })
+  } = useForm<Form>({ defaultValues: { name: initialName } })
 
   const handleOpenChange = (nextOpen: boolean) => {
     if (!nextOpen) {

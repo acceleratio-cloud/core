@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 
@@ -41,6 +42,8 @@ export const CreateDockerWorkloadForm = ({
   onCreated: (workload: Workload) => void;
   onBack: () => void;
 }) => {
+  // Generated once per opened form, not on every render.
+  const [initialName] = useState(generateName);
   const {
     register,
     setValue,
@@ -49,7 +52,7 @@ export const CreateDockerWorkloadForm = ({
     setError,
     formState: { errors, isSubmitting },
   } = useForm<DockerWorkloadForm>({
-    defaultValues: { name: generateName(), dockerImage: '' },
+    defaultValues: { name: initialName, dockerImage: '' },
   });
 
   const onSubmit = handleSubmit(async ({ name, dockerImage }) => {

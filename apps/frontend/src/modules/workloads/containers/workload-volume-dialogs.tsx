@@ -88,7 +88,7 @@ const MountPathField = ({
 );
 
 /** The size the field holds, or null while it is not a whole 1–100. */
-const parseSize = (text: string): number | null => {
+export const parseSize = (text: string): number | null => {
   const trimmed = text.trim();
   const parsed = Number(trimmed);
 
@@ -100,14 +100,14 @@ const parseSize = (text: string): number | null => {
     : null;
 };
 
-const SIZE_ERROR = `Enter a whole number of GiB from ${VOLUME_SIZE_MIN} to ${VOLUME_SIZE_MAX}.`;
+export const SIZE_ERROR = `Enter a whole number of GiB from ${VOLUME_SIZE_MIN} to ${VOLUME_SIZE_MAX}.`;
 
 /**
  * Size in GiB: a slider for the rough value and a number field for an exact
  * one. The dialog submits only what the field shows: an out-of-range or
  * partial value blocks the submit instead of falling back to an older one.
  */
-const SizeField = ({
+export const SizeField = ({
   text,
   onTextChange,
   error,
@@ -180,7 +180,7 @@ const SizeField = ({
 };
 
 /** Storage profile behind Advanced; null keeps the platform profile. */
-const ProfileField = ({
+export const ProfileField = ({
   profiles,
   value,
   onChange,

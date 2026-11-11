@@ -1,9 +1,14 @@
 import { BadRequestException } from '@nestjs/common';
 import { buildDeployment } from '../../docker/docker-workload.manifests';
-import { normalizeStaticConfig, releaseIdOf } from '../static-workload.config';
+import {
+  isServedPath,
+  normalizeStaticConfig,
+  releaseIdOf,
+} from '../static-workload.config';
 import {
   buildSiteClaim,
   buildSiteVolume,
+  SITE_READINESS_PROBE,
   siteServerArgs,
   STATIC_SERVER_IMAGE,
 } from '../static-workload.manifests';
@@ -28,6 +33,21 @@ describe('static site config', () => {
   it.each(['../etc', 'abc', 42])('rejects the release id %p', (value) => {
     expect(() => releaseIdOf(value)).toThrow(BadRequestException);
   });
+});
+
+describe('isServedPath', () => {
+  it.each(['index.html', 'assets/app.js', '.well-known/security.txt'])(
+    'keeps %s',
+    (path) => expect(isServedPath(path)).toBe(true),
+  );
+
+  it.each([
+    '.env',
+    '.git/config',
+    'assets/.DS_Store',
+    'docs/.well-known/x',
+    '.well-known/.secret',
+  ])('drops %s', (path) => expect(isServedPath(path)).toBe(false));
 });
 
 describe('static site manifests', () => {
@@ -60,8 +80,14 @@ describe('static site manifests', () => {
         command: siteServerArgs(releaseId),
       },
       read_only_claim: { name: 'static-site-x', mount_path: '/site' },
+      readiness_probe: SITE_READINESS_PROBE,
     });
     const pod = deployment.spec!.template.spec!;
+
+    expect(pod.containers[0].readinessProbe?.httpGet).toEqual({
+      path: '/',
+      port: 80,
+    });
 
     expect(pod.containers[0].args).toEqual([
       '--root',
@@ -69,7 +95,7 @@ describe('static site manifests', () => {
       '--page404',
       `/site/${releaseId}/404.html`,
       '--ignore-hidden-files',
-      'true',
+      'false',
     ]);
     expect(pod.containers[0].volumeMounts).toEqual([
       { name: 'files', mountPath: '/site', readOnly: true },

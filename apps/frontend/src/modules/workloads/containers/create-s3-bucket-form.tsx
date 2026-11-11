@@ -55,6 +55,8 @@ export const CreateS3BucketForm = ({
   const profiles = useStorageProfiles();
   // Null keeps the platform profile, which the API resolves.
   const [profileId, setProfileId] = useState<string | null>(null);
+  // Generated once per opened form, not on every render.
+  const [initialName] = useState(generateName);
   const {
     register,
     setValue,
@@ -63,7 +65,7 @@ export const CreateS3BucketForm = ({
     setError,
     formState: { errors, isSubmitting },
   } = useForm<S3BucketForm>({
-    defaultValues: { name: generateName() },
+    defaultValues: { name: initialName },
   });
 
   const available = profiles.status === 'ready' ? profiles.profiles : [];

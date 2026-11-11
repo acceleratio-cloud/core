@@ -171,14 +171,22 @@ write_kubeconfig() {
   # valid when the machine's IP changes, and avoids macOS blocking terminals and
   # editors from reaching the machine's LAN address (Privacy & Security >
   # Local Network).
-  # OrbStack sometimes stops forwarding the port (e.g. after k3s restarts); then
-  # fall back to the machine's own address, which the certificate also covers.
-  local host=127.0.0.1
-  if ! curl -sk -m 3 -o /dev/null "https://127.0.0.1:6443/healthz"; then
-    host="$(machine_ip)"
-    warn "localhost:6443 is not forwarded by OrbStack; using ${host}."
+  kube config set-cluster default --server=https://127.0.0.1:6443 >/dev/null
+
+  # The kubeconfig's own CA and client certificate must work there: OrbStack
+  # sometimes stops forwarding the port (e.g. after k3s restarts), and another
+  # machine running Kubernetes can hold it instead, which a TLS check alone
+  # would accept. Then use the machine's own address, which the certificate
+  # also covers. `make dev` runs `up` every time, so the choice is re-checked
+  # and returns to localhost once the forward works again.
+  if ! kube get --raw=/version --request-timeout=5s >/dev/null 2>&1; then
+    local ip
+    ip="$(machine_ip)"
+    [[ -n "$ip" ]] ||
+      die "localhost:6443 does not reach ${MACHINE}, and the machine has no IP address yet. Try again in a few seconds."
+    warn "localhost:6443 does not reach ${MACHINE} (OrbStack is not forwarding it, or another machine holds the port); using ${ip}. Editors and terminals may need Local Network access to reach it."
+    kube config set-cluster default --server="https://${ip}:6443" >/dev/null
   fi
-  kube config set-cluster default --server="https://${host}:6443" >/dev/null
 }
 
 up() {

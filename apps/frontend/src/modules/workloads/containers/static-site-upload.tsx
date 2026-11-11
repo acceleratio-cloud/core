@@ -8,7 +8,11 @@ import { getApiErrorMessage } from '@/api';
 import { staticReleasesApi } from '@/api/workloads/static-releases';
 import { DetailSection } from '@/modules/workloads/components/workload-details/detail-primitives';
 import { useProject } from '@/modules/projects/providers/project-provider';
-import { sendAll, sitePath } from '@/modules/workloads/utils/static-site';
+import {
+  isServedPath,
+  sendAll,
+  sitePath,
+} from '@/modules/workloads/utils/static-site';
 import { Button } from '@/shared/components/ui/button';
 import { useWorkloadActions } from './workload-actions';
 
@@ -39,7 +43,9 @@ export const StaticSiteUpload = () => {
     workload.active_version?.config as StaticWorkloadConfig | undefined
   )?.release_id;
 
-  const publish = async (files: File[]) => {
+  const publish = async (picked: File[]) => {
+    const files = picked.filter((file) => isServedPath(sitePath(file)));
+
     if (!files.some((file) => sitePath(file) === 'index.html')) {
       setPhase({
         kind: 'failed',

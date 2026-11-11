@@ -188,7 +188,7 @@ erDiagram
 ### `project`
 
 One row per project. `id` is a server-generated UUID used in URLs and as the Kubernetes namespace
-suffix. `name` is operator-visible and not unique. Deleting a project cascades to its workloads; the API first removes each workload through its type, so storage outside the namespace (buckets, static site files) goes too.
+suffix. `name` is operator-visible and not unique. Deleting a project cascades to its workloads; the API first removes each workload through its type, so storage outside the namespace (buckets, static site files) goes too. That step is best effort: a workload that cannot be removed is logged and its outside storage stays.
 
 Columns: `id`, `name`, `created_at`, `updated_at`.
 

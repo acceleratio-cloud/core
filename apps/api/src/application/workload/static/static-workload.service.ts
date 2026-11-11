@@ -48,6 +48,7 @@ import {
   type VersionAuthorInput,
 } from '../workload-version.service';
 import {
+  isServedPath,
   normalizeStaticConfig,
   releaseIdOf,
   releaseOf,
@@ -59,6 +60,7 @@ import {
   SITE_MOUNT_PATH,
   siteServerArgs,
   sitesRoot,
+  SITE_READINESS_PROBE,
   siteVolumeName,
   STATIC_SERVER_IMAGE,
 } from './static-workload.manifests';
@@ -264,6 +266,7 @@ export class StaticWorkloadService extends DockerWorkloadService {
   /**
    * Streams one file into a release. A release that the draft or any
    * version serves is immutable, so what a version shows is what it served.
+   * A hidden file is accepted and dropped (see `isServedPath`).
    */
   async uploadFile(
     projectId: string,
@@ -276,6 +279,12 @@ export class StaticWorkloadService extends DockerWorkloadService {
     const row = await this.findRow(projectId, id);
     const releaseId = releaseIdOf(releaseInput);
     const path = normalizeObjectPath(pathInput, 'file');
+
+    if (!isServedPath(path)) {
+      body.resume();
+      return;
+    }
+
     const key = releaseKey(row.id, releaseId);
 
     if (this.publishing.has(key)) {
@@ -348,6 +357,7 @@ export class StaticWorkloadService extends DockerWorkloadService {
         docker_image: STATIC_SERVER_IMAGE,
         command: siteServerArgs(releaseId),
       },
+      readiness_probe: SITE_READINESS_PROBE,
       read_only_claim: {
         name: siteVolumeName(input.id),
         mount_path: SITE_MOUNT_PATH,

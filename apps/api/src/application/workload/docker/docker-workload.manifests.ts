@@ -2,6 +2,7 @@ import type {
   V1Container,
   V1Deployment,
   V1PersistentVolumeClaim,
+  V1Probe,
   V1ResourceRequirements,
   V1Secret,
 } from '@kubernetes/client-node';
@@ -122,6 +123,8 @@ export interface WorkloadManifestInput {
   version_id?: string;
   /** A claim mounted read-only into the container: a static site's files. */
   read_only_claim?: { name: string; mount_path: string };
+  /** When a new pod may take traffic; without one, as soon as it starts. */
+  readiness_probe?: V1Probe;
 }
 
 /** Pod volume name of `WorkloadManifestInput.read_only_claim`. */
@@ -254,6 +257,10 @@ export const buildDeployment = (
       name: podVolumeName(volumeIdOf(volume)),
       mountPath: volume.mount_path,
     }));
+  }
+
+  if (input.readiness_probe) {
+    container.readinessProbe = input.readiness_probe;
   }
 
   const readOnly = input.read_only_claim;

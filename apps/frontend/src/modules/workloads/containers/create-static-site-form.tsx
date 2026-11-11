@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 
@@ -34,6 +35,8 @@ export const CreateStaticSiteForm = ({
   onCreated: (workload: Workload) => void;
   onBack: () => void;
 }) => {
+  // Generated once per opened form, not on every render.
+  const [initialName] = useState(generateName);
   const {
     register,
     setValue,
@@ -42,7 +45,7 @@ export const CreateStaticSiteForm = ({
     setError,
     formState: { errors, isSubmitting },
   } = useForm<{ name: string }>({
-    defaultValues: { name: generateName() },
+    defaultValues: { name: initialName },
   });
 
   const onSubmit = handleSubmit(async ({ name }) => {

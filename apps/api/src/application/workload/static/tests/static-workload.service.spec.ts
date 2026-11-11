@@ -147,6 +147,13 @@ describe('StaticWorkloadService.uploadFile', () => {
       undefined,
     );
 
+  it('drops a hidden file without writing it', async () => {
+    const { service, filer } = build();
+
+    await expect(upload(service, '.git/config')).resolves.toBeUndefined();
+    expect(filer.request).not.toHaveBeenCalled();
+  });
+
   it('asks the database once per release, not once per file', async () => {
     const { service, internals, filer } = build();
 
