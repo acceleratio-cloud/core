@@ -7,7 +7,7 @@ export const AuthLayout = ({ children }: { children: ReactNode }) => {
     <div className="min-h-svh flex flex-col ">
       <div className="relative isolate grid flex-1 grid-rows-[1fr_auto_1fr] gap-y-6 overflow-hidden bg-[#0d0e0f]">
         <Image
-          src="/auth/datacenter-centered.png"
+          src="/auth/datacenter-centered.jpg"
           alt=""
           fill
           sizes="(max-aspect-ratio: 16/9) 178vh, 100vw"
