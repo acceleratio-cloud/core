@@ -12,12 +12,22 @@ import type {
   ControlPlaneDnsCheck,
   ControlPlaneSettings,
   SetControlPlaneUrlPayload,
+  SystemComponentStatus,
 } from '@acceleratio/shared';
+import { SystemStatusService } from './system-status.service';
 import { SystemService } from './system.service';
 
 @Controller('system')
 export class SystemController {
-  constructor(private readonly systemService: SystemService) {}
+  constructor(
+    private readonly systemService: SystemService,
+    private readonly statusService: SystemStatusService,
+  ) {}
+
+  @Get('status')
+  getStatus(): Promise<SystemComponentStatus[]> {
+    return this.statusService.status();
+  }
 
   @Get('control-plane')
   getControlPlane(): Promise<ControlPlaneSettings> {

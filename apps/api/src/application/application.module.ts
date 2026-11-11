@@ -32,6 +32,7 @@ import { StorageClassService } from '@/application/storage-class/storage-class.s
 import { ControlPlaneDnsService } from '@/application/system/control-plane-dns.service';
 import { ControlPlaneRoutingService } from '@/application/system/control-plane-routing.service';
 import { SystemController } from '@/application/system/system.controller';
+import { SystemStatusService } from '@/application/system/system-status.service';
 import { SystemService } from '@/application/system/system.service';
 import { DockerWorkloadStatusDeriver } from '@/application/workload/docker/docker-workload.deriver';
 import { DockerWorkloadNetworkService } from '@/application/workload/docker/docker-workload-network.service';
@@ -112,6 +113,7 @@ import { VictoriaMetricsClient } from '@/vendor/victoriametrics/victoriametrics.
     ControlPlaneDnsService,
     ControlPlaneRoutingService,
     SystemService,
+    SystemStatusService,
     DockerWorkloadStatusDeriver,
     DockerWorkloadService,
     DockerWorkloadNetworkService,

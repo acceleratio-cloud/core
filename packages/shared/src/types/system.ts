@@ -49,3 +49,21 @@ export interface ControlPlaneSettings {
 export interface SetControlPlaneUrlPayload {
   url: string;
 }
+
+export type SystemComponentState =
+  | 'operational'
+  | 'degraded'
+  | 'down'
+  | 'unknown';
+
+/** Health of one platform component, read from its pods (or nodes). */
+export interface SystemComponentStatus {
+  id: string;
+  /** What it does for the platform, such as `Network`. */
+  role: string;
+  /** What provides it, such as `Cilium`. */
+  name: string;
+  state: SystemComponentState;
+  ready: number;
+  total: number;
+}

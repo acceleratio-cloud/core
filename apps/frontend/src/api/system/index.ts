@@ -6,6 +6,7 @@ import type {
   PlatformVersionInfo,
   SetControlPlaneUrlPayload,
   StartPlatformUpdatePayload,
+  SystemComponentStatus,
 } from '@acceleratio/shared';
 
 import { api } from '@/api';
@@ -40,6 +41,10 @@ export const systemApi = {
     const { data } = await api.post<ControlPlaneSettings>(
       '/system/control-plane/apply',
     );
+    return data;
+  },
+  getStatus: async () => {
+    const { data } = await api.get<SystemComponentStatus[]>('/system/status');
     return data;
   },
   getPlatform: async () => {
