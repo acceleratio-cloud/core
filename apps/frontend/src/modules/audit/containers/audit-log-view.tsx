@@ -82,10 +82,9 @@ export const AuditLogView = ({ active }: AuditLogViewProps) => {
 
   useEffect(() => {
     if (active) {
-      setStarts([undefined]);
-      void load();
+      void load(starts[starts.length - 1]);
     }
-  }, [active, load]);
+  }, [active, load, starts]);
 
   // Deleted services are only in the log; the filter lists them too.
   useEffect(() => {
@@ -113,9 +112,10 @@ export const AuditLogView = ({ active }: AuditLogViewProps) => {
 
   const pageIndex = starts.length - 1;
   const goTo = (nextStarts: (string | undefined)[]) => {
+    // The effect above loads the page the new starts point at.
+    setIsLoading(true);
     setStarts(nextStarts);
     setExpanded(null);
-    reload(nextStarts[nextStarts.length - 1]);
   };
 
   const liveIds = new Set(workloads.map((workload) => workload.id));
@@ -152,6 +152,7 @@ export const AuditLogView = ({ active }: AuditLogViewProps) => {
                 setService(value);
                 setEntries(null);
                 setCursor(null);
+                setStarts([undefined]);
                 setExpanded(null);
               }
             }}
