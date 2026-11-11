@@ -1,7 +1,7 @@
 'use client';
 
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
-import { ChevronRight, RefreshCw, ScrollText } from 'lucide-react';
+import { ChevronLeft, ChevronRight, RefreshCw, ScrollText } from 'lucide-react';
 import type { AuditLogEntry, AuditLogWorkload } from '@acceleratio/shared';
 
 import { getApiErrorMessage } from '@/api';
@@ -35,7 +35,10 @@ export const AuditLogView = ({ active }: AuditLogViewProps) => {
   const { project, workloads } = useProject();
   const [service, setService] = useState(ALL_SERVICES);
   const [entries, setEntries] = useState<AuditLogEntry[] | null>(null);
+  /** Next page's cursor, if any. */
   const [cursor, setCursor] = useState<string | null>(null);
+  /** The cursor each visited page started from; the last is the shown page. */
+  const [starts, setStarts] = useState<(string | undefined)[]>([undefined]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -59,9 +62,7 @@ export const AuditLogView = ({ active }: AuditLogViewProps) => {
               return;
             }
             setError(null);
-            setEntries((current) =>
-              before ? [...(current ?? []), ...page.entries] : page.entries,
-            );
+            setEntries(page.entries);
             setCursor(page.next_cursor);
           },
           (requestError: unknown) => {
@@ -81,6 +82,7 @@ export const AuditLogView = ({ active }: AuditLogViewProps) => {
 
   useEffect(() => {
     if (active) {
+      setStarts([undefined]);
       void load();
     }
   }, [active, load]);
@@ -107,6 +109,13 @@ export const AuditLogView = ({ active }: AuditLogViewProps) => {
   const reload = (before?: string) => {
     setIsLoading(true);
     void load(before);
+  };
+
+  const pageIndex = starts.length - 1;
+  const goTo = (nextStarts: (string | undefined)[]) => {
+    setStarts(nextStarts);
+    setExpanded(null);
+    reload(nextStarts[nextStarts.length - 1]);
   };
 
   const liveIds = new Set(workloads.map((workload) => workload.id));
@@ -165,7 +174,7 @@ export const AuditLogView = ({ active }: AuditLogViewProps) => {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => reload()}
+            onClick={() => reload(starts[pageIndex])}
             disabled={isLoading}
           >
             <RefreshCw
@@ -204,12 +213,12 @@ export const AuditLogView = ({ active }: AuditLogViewProps) => {
         </div>
       ) : (
         <>
-          <div className="overflow-x-auto rounded-md border border-border bg-surface-raised">
+          <div className="overflow-x-auto rounded-xl border border-border bg-surface-raised">
             <table className="w-full min-w-[760px] text-[13px]">
               <caption className="sr-only">Project audit log</caption>
               <thead className="bg-surface-sunken text-left text-[12px] text-muted-foreground">
                 <tr>
-                  <th scope="col" className="w-8 px-2 py-2">
+                  <th scope="col" className="w-8 px-2 py-2.5">
                     <span className="sr-only">Details</span>
                   </th>
                   <th scope="col" className="w-40 px-3 py-2 font-medium">
@@ -248,15 +257,35 @@ export const AuditLogView = ({ active }: AuditLogViewProps) => {
 
           {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
-          {cursor ? (
-            <Button
-              variant="outline"
-              className="self-center"
-              onClick={() => reload(cursor)}
-              disabled={isLoading}
+          {pageIndex > 0 || cursor ? (
+            <nav
+              aria-label="Audit log pages"
+              className="flex items-center justify-between gap-3"
             >
-              Load older events
-            </Button>
+              <span className="text-xs text-muted-foreground tabular-nums">
+                Page {pageIndex + 1}
+              </span>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => goTo(starts.slice(0, -1))}
+                  disabled={isLoading || pageIndex === 0}
+                >
+                  <ChevronLeft data-icon="inline-start" aria-hidden="true" />
+                  Newer
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => cursor && goTo([...starts, cursor])}
+                  disabled={isLoading || !cursor}
+                >
+                  Older
+                  <ChevronRight data-icon="inline-end" aria-hidden="true" />
+                </Button>
+              </div>
+            </nav>
           ) : null}
         </>
       )}
@@ -278,15 +307,27 @@ const AuditRow = ({
 
   return (
     <Fragment>
-      <tr className="align-top hover:bg-surface-sunken">
-        <td className="px-2 py-2.5">
+      <tr
+        onClick={() => {
+          // A drag-select over the row's text is not a click to toggle.
+          if (!window.getSelection()?.toString()) {
+            onToggle();
+          }
+        }}
+        className="cursor-pointer align-top transition-colors hover:bg-surface-muted/40"
+      >
+        <td className="w-8 px-2 py-2.5">
           <button
             type="button"
             aria-expanded={expanded}
             aria-controls={detailsId}
             aria-label={`Details of ${actionLabel(entry.action)}`}
-            onClick={onToggle}
-            className="flex size-5 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground"
+            onClick={(event) => {
+              // The row's own handler would toggle a second time.
+              event.stopPropagation();
+              onToggle();
+            }}
+            className="mx-auto flex size-5 items-center justify-center rounded-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
           >
             <ChevronRight
               aria-hidden="true"
@@ -355,7 +396,7 @@ const AuditRow = ({
         </td>
       </tr>
       {expanded ? (
-        <tr id={detailsId} className="bg-surface-sunken">
+        <tr id={detailsId} className="cursor-default bg-surface-sunken">
           <td colSpan={6} className="px-4 py-3">
             <AuditDetails entry={entry} />
           </td>
