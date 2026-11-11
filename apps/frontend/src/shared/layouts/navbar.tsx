@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils';
 import { Separator } from '@/shared/components/ui/separator';
 import { Kbd } from '../components/ui/kbd';
 import { LogoIcon } from '../icons/logo-icon';
+import { SystemStatusButton } from '@/modules/system/containers/system-status';
 import { UserMenu } from './user-menu';
 
 type NavLink = {
@@ -80,7 +81,10 @@ export const Navbar = () => {
 
       <Separator orientation="vertical" className="mx-0.5 h-4 self-center!" />
 
-      <nav aria-label="Primary" className="flex min-w-0 items-center gap-1.5">
+      <nav
+        aria-label="Primary"
+        className="flex min-w-0 items-center gap-0.5 rounded-full border border-border bg-surface-panel/70 p-0.5"
+      >
         {links.map((link) => (
           <NavItem
             key={link.href}
@@ -91,9 +95,10 @@ export const Navbar = () => {
       </nav>
 
       <div className="ml-auto flex items-center gap-3">
+        <SystemStatusButton />
         <div
           role="search"
-          className="hidden h-8 w-64 items-center gap-2 rounded-lg border border-border bg-background px-2.5 transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/30 lg:flex"
+          className="hidden h-8 w-64 items-center gap-2 rounded-full border border-border bg-background px-3 transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/30 lg:flex"
         >
           <Search
             aria-hidden="true"
@@ -127,10 +132,10 @@ const NavItem = ({ link, active }: { link: NavLink; active: boolean }) => {
       href={link.href}
       aria-current={active ? 'page' : undefined}
       className={cn(
-        'flex h-8 shrink-0 items-center gap-2 rounded-md border px-3 text-[13px] outline-0 transition-[background-color,border-color,color,scale] duration-100 ease-out focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring motion-reduce:transition-none',
+        'flex h-7 shrink-0 items-center gap-2 rounded-full px-3 text-[13px] outline-0 transition-[background-color,border-color,color,scale] duration-100 ease-out focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring motion-reduce:transition-none',
         active
-          ? 'border-border bg-surface-panel font-medium text-foreground'
-          : 'border-transparent text-muted-foreground hover:bg-surface-panel/60 hover:text-foreground active:scale-[0.98] motion-reduce:active:scale-100',
+          ? 'bg-surface-muted font-medium text-foreground'
+          : 'text-muted-foreground hover:text-foreground active:scale-[0.98] motion-reduce:active:scale-100',
       )}
     >
       <Icon

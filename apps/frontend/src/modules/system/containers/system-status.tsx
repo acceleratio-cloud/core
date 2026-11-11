@@ -8,25 +8,55 @@ import type {
   SystemComponentState,
   SystemComponentStatus,
 } from "@acceleratio/shared"
-import { Skeleton } from "@/shared/components/ui/skeleton"
+import { Button } from "@/shared/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/shared/components/ui/dialog"
 import { cn } from "@/lib/utils"
 
 const REFRESH_MS = 30_000
-const SKELETON_COUNT = 9
 
 const STATE: Record<SystemComponentState, { label: string; dot: string }> = {
-  operational: { label: "Operational", dot: "bg-status-success" },
-  degraded: { label: "Degraded", dot: "bg-status-warning" },
-  down: { label: "Down", dot: "bg-status-danger" },
-  unknown: { label: "Unknown", dot: "bg-muted-foreground" },
+  operational: { label: "Operational", dot: "text-status-success" },
+  degraded: { label: "Degraded", dot: "text-status-warning" },
+  down: { label: "Down", dot: "text-status-danger" },
+  unknown: { label: "Unknown", dot: "text-muted-foreground" },
 }
 
-/** Health of every platform component, refreshed while the page is open. */
-export const SystemStatus = () => {
+/** One line for the whole platform, from the worst component state. */
+const summarize = (
+  components: SystemComponentStatus[] | null,
+  error: string | null,
+): { label: string; dot: string } => {
+  if (!components) {
+    return {
+      label: error ? "Status unavailable" : "System status",
+      dot: "text-muted-foreground",
+    }
+  }
+  if (components.some((component) => component.state === "down")) {
+    return { label: "Major outage", dot: STATE.down.dot }
+  }
+  if (components.some((component) => component.state === "degraded")) {
+    return { label: "Partially degraded", dot: STATE.degraded.dot }
+  }
+  if (components.some((component) => component.state === "unknown")) {
+    return { label: "Status unknown", dot: STATE.unknown.dot }
+  }
+  return { label: "Operational", dot: STATE.operational.dot }
+}
+
+/** Header button showing platform health; opens every component's state. */
+export const SystemStatusButton = () => {
   const [components, setComponents] = useState<SystemComponentStatus[] | null>(
     null,
   )
   const [error, setError] = useState<string | null>(null)
+  const [open, setOpen] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -46,7 +76,7 @@ export const SystemStatus = () => {
           }
         })
 
-    load()
+    void load()
     const timer = setInterval(load, REFRESH_MS)
 
     return () => {
@@ -55,59 +85,61 @@ export const SystemStatus = () => {
     }
   }, [])
 
-  const healthy =
-    components?.every((component) => component.state === "operational") ??
-    false
+  // Nothing until the first answer, so the label never flips on load.
+  if (!components) {
+    return null
+  }
+
+  const summary = summarize(components, error)
 
   return (
-    <section aria-labelledby="system-status-heading" className="mt-10">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2
-          id="system-status-heading"
-          className="text-base font-medium text-foreground"
-        >
-          System status
-        </h2>
-        {error && components ? (
-          <p role="status" className="text-sm text-destructive">
-            Status may be out of date: {error}
-          </p>
-        ) : components ? (
-          <p
-            className={cn(
-              "text-sm",
-              healthy ? "text-muted-foreground" : "text-status-warning",
-            )}
-          >
-            {healthy
-              ? "All systems operational"
-              : "Some components need attention"}
-          </p>
-        ) : null}
-      </div>
+    <>
+      <Button
+        variant="ghost"
+        size="sm"
+        aria-haspopup="dialog"
+        onClick={() => setOpen(true)}
+        className="rounded-full text-muted-foreground hover:text-foreground"
+      >
+        <span aria-hidden="true" className={cn("status-dot", summary.dot)} />
+        <span className="hidden xl:inline">{summary.label}</span>
+        <span className="sr-only xl:hidden">{summary.label}</span>
+      </Button>
 
-      {error && !components ? (
-        <p className="mt-3 text-sm text-destructive">{error}</p>
-      ) : (
-        <ul
-          aria-busy={!components}
-          className={cn(
-            "mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3",
-            error && "opacity-60",
-          )}
-        >
-          {components
-            ? components.map((component) => (
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>System status</DialogTitle>
+            <DialogDescription>
+              {summary.label}. Refreshed every 30 seconds.
+            </DialogDescription>
+          </DialogHeader>
+
+          {error ? (
+            <p role="status" className="mt-4 text-sm text-destructive">
+              {components
+                ? `Status may be out of date: ${error}`
+                : error}
+            </p>
+          ) : null}
+
+          {components ? (
+            <ul
+              className={cn(
+                "mt-4 max-h-[60vh] divide-y divide-border overflow-y-auto rounded-xl border border-border",
+                error && "opacity-60",
+              )}
+            >
+              {components.map((component) => (
                 <ComponentRow key={component.id} component={component} />
-              ))
-            : Array.from({ length: SKELETON_COUNT }, (_, index) => (
-                <li key={index}>
-                  <Skeleton className="h-[58px] rounded-lg" />
-                </li>
               ))}
-        </ul>
-      )}
-    </section>
+            </ul>
+          ) : error ? null : (
+            <p className="mt-4 text-sm text-muted-foreground">Loading...</p>
+          )}
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }
 
@@ -115,7 +147,7 @@ const ComponentRow = ({ component }: { component: SystemComponentStatus }) => {
   const state = STATE[component.state]
 
   return (
-    <li className="flex items-center justify-between gap-3 rounded-lg border border-border bg-surface-raised px-3 py-2.5">
+    <li className="flex items-center justify-between gap-3 px-4 py-3">
       <div className="min-w-0">
         <p className="truncate text-sm font-medium text-foreground">
           {component.role}
@@ -125,11 +157,8 @@ const ComponentRow = ({ component }: { component: SystemComponentStatus }) => {
         </p>
       </div>
       <div className="flex shrink-0 flex-col items-end">
-        <span className="flex items-center gap-1.5 text-xs text-foreground">
-          <span
-            aria-hidden="true"
-            className={cn("size-2 rounded-full", state.dot)}
-          />
+        <span className="flex items-center gap-2 text-xs text-foreground">
+          <span aria-hidden="true" className={cn("status-dot", state.dot)} />
           {state.label}
         </span>
         {component.total > 0 ? (
