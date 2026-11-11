@@ -128,7 +128,7 @@ export const AuditLogView = ({ active }: AuditLogViewProps) => {
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-4 pt-20 pb-10 sm:px-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 className="text-base font-medium text-foreground">Audit Logs</h2>
+          <h2 className="text-base font-medium text-foreground">Audit Trail</h2>
           <p className="mt-1 text-sm text-muted-foreground">
             Who changed what in this project and its services, from where, and
             how it ended.

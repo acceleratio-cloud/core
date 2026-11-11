@@ -42,7 +42,7 @@ const SKELETON_ROWS = 2;
 export const ProjectSwitcher = ({
   activeTab = DEFAULT_PROJECT_TAB,
 }: {
-  /** Kept when switching, so Observability stays Observability. */
+  /** Kept when switching, so Usage Metrics stays Usage Metrics. */
   activeTab?: ProjectTabId;
 }) => {
   const router = useRouter();

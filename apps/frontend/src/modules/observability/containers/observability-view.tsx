@@ -35,7 +35,7 @@ import {
 } from '../utils/series';
 
 /**
- * The Observability tab: resource usage of the project's services from
+ * The Usage Metrics tab: resource usage of the project's services from
  * VictoriaMetrics. It only polls while `active`, so a hidden tab costs
  * nothing.
  */
@@ -509,7 +509,7 @@ const UnavailableState = ({
   >
     <div className="w-full rounded-lg border border-edge-subtle bg-surface-sunken p-3 text-left text-xs text-fg-secondary">
       <p>
-        Observability reads from VictoriaMetrics in the{' '}
+        Usage Metrics reads from VictoriaMetrics in the{' '}
         <span className="font-mono">victoria-metrics</span> namespace. Install
         it with:
       </p>

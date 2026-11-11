@@ -183,7 +183,7 @@ API and console from source on the Mac and points them at a cluster in an
 runs `deploy/install.sh` from your checkout (OrbStack shares the Mac filesystem
 with its machines), so the cluster is the one a server gets: k3s with embedded
 etcd, Cilium as the CNI, SeaweedFS and its CSI driver with the default
-StorageClass `seaweedfs-storage`, VictoriaMetrics for the project Observability
+StorageClass `seaweedfs-storage`, VictoriaMetrics for the project Usage Metrics
 tab, and VictoriaLogs with Vector for the Logs tab. The installer also deploys
 the released API and console into the cluster; `cluster.sh` scales them to zero
 so they do not compete with the copy you are developing.

@@ -41,7 +41,7 @@ src/
 ## Project page
 
 - `/project/[id]` is one route with four tabs (`modules/projects/tabs.ts`): Architecture (the workload
-  canvas), Observability, Logs and Settings. They are not routes: `ProjectView` reads `?tab=` through
+  canvas), Usage Metrics, Logs and Settings. They are not routes: `ProjectView` reads `?tab=` through
   `useSearchParams` and writes it with `history.replaceState` (Architecture omits it), so a reload or a
   shared link opens the same tab without a server round trip. The project switcher keeps the tab.
 - Panels mount on first visit and then stay mounted while hidden (`hidden` + `inert`), so the canvas

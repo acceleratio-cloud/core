@@ -13,9 +13,9 @@ export const PROJECT_TAB_PARAM = 'tab';
 
 export const PROJECT_TABS: ProjectTab[] = [
   { id: 'architecture', label: 'Architecture' },
-  { id: 'observability', label: 'Observability' },
+  { id: 'observability', label: 'Usage Metrics' },
   { id: 'logs', label: 'Logs' },
-  { id: 'audit', label: 'Audit Logs' },
+  { id: 'audit', label: 'Audit Trail' },
   { id: 'settings', label: 'Settings' },
 ];
 
