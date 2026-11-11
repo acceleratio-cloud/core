@@ -1,6 +1,7 @@
 import type {
   PostgresBackups,
   PostgresCredentials,
+  PostgresImportResult,
   PostgresExposure,
   PostgresOverview,
   PostgresRows,
@@ -10,7 +11,7 @@ import type {
   Workload,
 } from '@acceleratio/shared';
 
-import { api } from '@/api';
+import { api, getApiBaseUrl } from '@/api';
 
 const base = (projectId: string, id: string) =>
   `/projects/${projectId}/workloads/${id}/postgres`;
@@ -70,6 +71,26 @@ export const postgresApi = {
   rotateCredentials: async (projectId: string, id: string) => {
     const { data } = await api.post<PostgresCredentials>(
       `${base(projectId, id)}/credentials/rotate`,
+    );
+    return data;
+  },
+  /** A link the browser follows, so the dump streams to disk unbuffered. */
+  dumpUrl: (projectId: string, id: string) =>
+    `${getApiBaseUrl()}${base(projectId, id)}/dump`,
+  /** Sends the file as the raw body; the API streams it into the database. */
+  importDump: async (
+    projectId: string,
+    id: string,
+    file: File,
+    onProgress?: (loaded: number) => void,
+  ) => {
+    const { data } = await api.post<PostgresImportResult>(
+      `${base(projectId, id)}/import`,
+      file,
+      {
+        headers: { 'Content-Type': 'application/octet-stream' },
+        onUploadProgress: (event) => onProgress?.(event.loaded),
+      },
     );
     return data;
   },

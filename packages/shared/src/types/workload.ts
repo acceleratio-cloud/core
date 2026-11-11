@@ -296,6 +296,14 @@ export interface RestorePostgresPayload {
   target_time: string | null;
 }
 
+/**
+ * `POST …/postgres/import`: a dump loaded into the `app` database in one
+ * transaction. `custom` is a pg_dump `-Fc` archive, `sql` a plain script.
+ */
+export interface PostgresImportResult {
+  format: 'custom' | 'sql';
+}
+
 export interface PostgresConnectionStats {
   active: number;
   idle: number;

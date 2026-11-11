@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useId, useState } from 'react';
-import { DatabaseBackup, History } from 'lucide-react';
+import { DatabaseBackup, Download, History, Upload } from 'lucide-react';
 
 import type {
   PostgresBackup,
@@ -24,7 +24,7 @@ import {
   formatAbsoluteTime,
   formatPreciseTime,
 } from '@/modules/workloads/utils/format-time';
-import { Button } from '@/shared/components/ui/button';
+import { Button, buttonVariants } from '@/shared/components/ui/button';
 import {
   Dialog,
   DialogContent,
@@ -82,6 +82,8 @@ export const PostgresBackupsPanel = ({ workload }: { workload: Workload }) => {
   const [restoreOpen, setRestoreOpen] = useState(false);
   const [confirmOff, setConfirmOff] = useState(false);
   const [toggling, setToggling] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [imported, setImported] = useState<string | null>(null);
   const { replaceWorkload } = useProject();
   const body = useBody();
   const switchId = useId();
@@ -232,6 +234,74 @@ export const PostgresBackupsPanel = ({ workload }: { workload: Workload }) => {
     </Dialog>
   );
 
+  const exportSection = (
+    <DetailSection
+      title="Export and import"
+      description={
+        <>
+          The app database as it is now, as a pg_dump custom-format file. Load
+          it with <code className="font-mono">pg_restore</code> of PostgreSQL{' '}
+          {(workload.active_version?.config as PostgresConfig | undefined)
+            ?.postgres_version ?? ''}{' '}
+          or newer.
+        </>
+      }
+      action={
+        // A link, so the browser streams the file to disk itself.
+        <a
+          href={postgresApi.dumpUrl(workload.project_id, workload.id)}
+          download
+          className={buttonVariants({ variant: 'outline', size: 'sm' })}
+        >
+          <Download
+            data-icon="inline-start"
+            aria-hidden="true"
+            strokeWidth={1.75}
+          />
+          Download dump
+        </a>
+      }
+    >
+      <div className="divide-y divide-edge-subtle">
+        <p className="px-3 py-3 text-xs text-fg-tertiary">
+          The dump is made on request from the running database, not from the
+          backups above.
+        </p>
+        <div className="flex min-h-12 items-center justify-between gap-4 px-3 py-2">
+          <div className="min-w-0 text-xs">
+            <p className="text-fg-primary">Import a dump</p>
+            <p className="text-fg-tertiary">
+              {imported ??
+                'A pg_dump file (custom format or SQL), loaded all or nothing.'}
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setImportOpen(true)}
+          >
+            <Upload
+              data-icon="inline-start"
+              aria-hidden="true"
+              strokeWidth={1.75}
+            />
+            Import…
+          </Button>
+        </div>
+      </div>
+      <ImportDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        workload={workload}
+        canRestore={canRestore}
+        onImported={(name) =>
+          setImported(`${name} was imported ${new Date().toLocaleTimeString()}.`)
+        }
+      />
+    </DetailSection>
+  );
+
   if (!enabled) {
     return (
       <DetailStack>
@@ -240,6 +310,7 @@ export const PostgresBackupsPanel = ({ workload }: { workload: Workload }) => {
           Backups are off. This database cannot be restored to an earlier
           moment.
         </p>
+        {exportSection}
       </DetailStack>
     );
   }
@@ -331,6 +402,8 @@ export const PostgresBackupsPanel = ({ workload }: { workload: Workload }) => {
           </ul>
         )}
       </DetailSection>
+
+      {exportSection}
 
       {canRestore ? (
         <RestoreDialog
@@ -472,6 +545,131 @@ const RestoreDialog = ({
             </Button>
           </DialogFooter>
         </form>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+const ImportDialog = ({
+  open,
+  onOpenChange,
+  workload,
+  canRestore,
+  onImported,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  workload: Workload;
+  canRestore: boolean;
+  onImported: (fileName: string) => void;
+}) => {
+  const body = useBody();
+  const fileId = useId();
+  const [file, setFile] = useState<File | null>(null);
+  // Bytes sent; the import runs once all of them are.
+  const [sent, setSent] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const busy = sent !== null;
+
+  const close = (next: boolean) => {
+    if (busy) {
+      return;
+    }
+
+    onOpenChange(next);
+
+    if (!next) {
+      setFile(null);
+      setError(null);
+    }
+  };
+
+  const submit = async () => {
+    if (!file) {
+      return;
+    }
+
+    setSent(0);
+    setError(null);
+
+    try {
+      await postgresApi.importDump(
+        workload.project_id,
+        workload.id,
+        file,
+        setSent,
+      );
+      onImported(file.name);
+      setSent(null);
+      close(false);
+    } catch (importError) {
+      setError(getApiErrorMessage(importError));
+      setSent(null);
+    }
+  };
+
+  const progress =
+    sent === null || !file
+      ? null
+      : sent < file.size
+        ? `Uploading ${Math.floor((sent / file.size) * 100)}%…`
+        : 'Importing…';
+
+  return (
+    <Dialog open={open} onOpenChange={close}>
+      <DialogContent container={body} showCloseButton={!busy}>
+        <DialogHeader>
+          <DialogTitle>Import a dump</DialogTitle>
+          <DialogDescription>
+            Loads the file into {workload.name} as the app user. A custom-format
+            dump (pg_dump -Fc) replaces the tables and other objects it
+            contains; a SQL file runs as written and must be made with
+            pg_dump --no-owner --no-acl. If any statement fails,
+            nothing is changed.
+            {canRestore
+              ? ' To undo a successful import, restore to a moment before it from the backups.'
+              : ' Backups are not available, so a successful import cannot be undone.'}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="my-4 flex flex-col gap-1.5">
+          <Label htmlFor={fileId}>Dump file</Label>
+          <Input
+            id={fileId}
+            type="file"
+            accept=".dump,.backup,.sql,application/sql"
+            disabled={busy}
+            onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+          />
+          {progress ? (
+            <p aria-live="polite" className="text-xs text-fg-tertiary">
+              {progress}
+            </p>
+          ) : null}
+          {error ? (
+            <p role="alert" className="text-xs break-words text-status-danger">
+              {error}
+            </p>
+          ) : null}
+        </div>
+
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={busy}
+            onClick={() => close(false)}
+          >
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            disabled={busy || !file}
+            onClick={() => void submit()}
+          >
+            {busy ? 'Importing…' : `Import into ${workload.name}`}
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

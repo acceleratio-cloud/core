@@ -7,10 +7,14 @@ import {
   Post,
   Put,
   Query,
+  Req,
+  StreamableFile,
 } from '@nestjs/common';
+import type { Request } from 'express';
 import type {
   PostgresBackups,
   PostgresCredentials,
+  PostgresImportResult,
   PostgresExposure,
   PostgresOverview,
   PostgresRows,
@@ -19,6 +23,7 @@ import type {
   UpdatePostgresExposurePayload,
   Workload,
 } from '@acceleratio/shared';
+import { contentDisposition } from '../s3-bucket/s3-bucket-objects.service';
 import { PostgresBackupService } from './postgres-backup.service';
 import { PostgresAccessService } from './postgres-access.service';
 import { PostgresOverviewService } from './postgres-overview.service';
@@ -36,6 +41,33 @@ export class PostgresController {
     private readonly backups: PostgresBackupService,
     private readonly databases: PostgresWorkloadService,
   ) {}
+
+  /** The `app` database as a pg_dump custom-format file, current state. */
+  @Get('dump')
+  async dump(
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<StreamableFile> {
+    const file = await this.overview.dump(projectId, id);
+
+    return new StreamableFile(file.body, {
+      type: 'application/octet-stream',
+      disposition: contentDisposition(file.name),
+    });
+  }
+
+  /**
+   * Loads a dump sent as the raw request body (pg_dump `-Fc` or SQL) into
+   * the database in one transaction.
+   */
+  @Post('import')
+  import(
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() request: Request,
+  ): Promise<PostgresImportResult> {
+    return this.overview.import(projectId, id, request);
+  }
 
   @Get('backups')
   listBackups(

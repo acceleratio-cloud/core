@@ -33,6 +33,7 @@ import {
   tableExistsSql,
 } from '../postgres-overview.service';
 import { PostgresWorkloadService } from '../postgres.service';
+import type { PostgresAccessService } from '../postgres-access.service';
 import type { PostgresBackupService } from '../postgres-backup.service';
 
 // These pull the ESM-only Kubernetes client; every instance is faked.
@@ -585,6 +586,7 @@ describe('PostgresOverviewService', () => {
       overview: new PostgresOverviewService(
         databases,
         kubernetes as unknown as KubernetesService,
+        {} as PostgresAccessService,
       ),
       kubernetes,
     };

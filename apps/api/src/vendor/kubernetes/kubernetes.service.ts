@@ -1,6 +1,6 @@
 import http from 'node:http';
 import https from 'node:https';
-import { Writable, type Readable } from 'node:stream';
+import { PassThrough, Writable, type Readable } from 'node:stream';
 import { Injectable, Logger } from '@nestjs/common';
 import {
   AppsV1Api,
@@ -21,6 +21,9 @@ import {
 import type { ServiceProxyRequest, ServiceTarget } from './service-proxy';
 
 /** Options of an interactive command inside a Pod container. */
+/** runInPod's error when the command outlives `timeoutMs`; it may still be running. */
+export const COMMAND_TIMED_OUT = 'Command timed out';
+
 export interface PodExecRequest {
   namespace: string;
   pod: string;
@@ -111,7 +114,8 @@ export class KubernetesService {
   /**
    * Runs a command without a TTY and returns its stdout. Rejects with the
    * command's stderr when it exits non-zero, and closes it once `timeoutMs`
-   * passes or stdout grows past `maxBytes`.
+   * passes or stdout grows past `maxBytes`. `stdin` is sent to the command
+   * and closed when it ends.
    */
   async runInPod(request: {
     namespace: string;
@@ -120,6 +124,7 @@ export class KubernetesService {
     command: string[];
     timeoutMs: number;
     maxBytes: number;
+    stdin?: Readable;
   }): Promise<string> {
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
@@ -143,7 +148,7 @@ export class KubernetesService {
     return new Promise<string>((resolve, reject) => {
       let socket: { close(): void } | undefined;
       const timer = setTimeout(
-        () => fail(new Error('Command timed out')),
+        () => fail(new Error(COMMAND_TIMED_OUT)),
         request.timeoutMs,
       );
       const settle = () => {
@@ -164,7 +169,7 @@ export class KubernetesService {
           request.command,
           sink(stdout, true),
           sink(stderr, false),
-          null,
+          request.stdin ?? null,
           false,
           (status) => {
             settle();
@@ -187,6 +192,68 @@ export class KubernetesService {
         })
         .catch(fail);
     });
+  }
+
+  /**
+   * Runs a command without a TTY and streams its stdout. The stream fails
+   * with the command's stderr when it exits non-zero; destroying the stream
+   * ends the command. shortcut: exec writes ignore backpressure, so a slow
+   * reader buffers output in memory; fine for downloads to a browser.
+   */
+  streamFromPod(request: {
+    namespace: string;
+    pod: string;
+    container: string;
+    command: string[];
+  }): Readable {
+    const stdout = new PassThrough();
+    const stderr: Buffer[] = [];
+    let socket: { close(): void } | undefined;
+
+    stdout.on('close', () => socket?.close());
+
+    new Exec(this.config)
+      .exec(
+        request.namespace,
+        request.pod,
+        request.container,
+        request.command,
+        stdout,
+        new Writable({
+          write(chunk: Buffer, _encoding, callback) {
+            if (stderr.length < 64) {
+              stderr.push(chunk);
+            }
+
+            callback();
+          },
+        }),
+        null,
+        false,
+        (status) => {
+          if (status.status === 'Success') {
+            stdout.end();
+          } else {
+            stdout.destroy(
+              new Error(
+                Buffer.concat(stderr).toString('utf8').trim() ||
+                  status.message ||
+                  'Command failed',
+              ),
+            );
+          }
+        },
+      )
+      .then((opened) => {
+        socket = opened;
+
+        if (stdout.destroyed) {
+          opened.close();
+        }
+      })
+      .catch((error: Error) => stdout.destroy(error));
+
+    return stdout;
   }
 
   get coreV1(): CoreV1Api {

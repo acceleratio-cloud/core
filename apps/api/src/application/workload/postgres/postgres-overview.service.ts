@@ -1,3 +1,4 @@
+import { PassThrough, type Readable } from 'node:stream';
 import {
   BadRequestException,
   ConflictException,
@@ -8,12 +9,16 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import type {
+  PostgresImportResult,
   PostgresOverview,
   PostgresRows,
   PostgresTable,
 } from '@acceleratio/shared';
 import { projectNamespace } from '@/common/naming';
-import { KubernetesService } from '@/vendor/kubernetes/kubernetes.service';
+import {
+  COMMAND_TIMED_OUT,
+  KubernetesService,
+} from '@/vendor/kubernetes/kubernetes.service';
 import {
   CNPG_CLUSTER_LABEL,
   CNPG_ROLE_LABEL,
@@ -21,6 +26,7 @@ import {
   POSTGRES_DATABASE,
   POSTGRES_USERNAME,
 } from './postgres.manifests';
+import { PostgresAccessService } from './postgres-access.service';
 import { PostgresWorkloadService } from './postgres.service';
 
 export const ROWS_PAGE_SIZE = 50;
@@ -30,6 +36,131 @@ const MAX_TABLES = 500;
 const QUERY_TIMEOUT = '5s';
 const EXEC_TIMEOUT_MS = 15_000;
 const OUTPUT_MAX_BYTES = 4 * 1024 * 1024;
+const IMPORT_TIMEOUT_MS = 60 * 60 * 1000;
+/** The first bytes of a pg_dump custom-format archive. */
+const DUMP_MAGIC = 'PGDMP';
+
+export const isCustomDump = (head: Buffer): boolean =>
+  head.toString('latin1') === DUMP_MAGIC;
+
+/**
+ * Reads the password from the first line of stdin, so it never appears in a
+ * command line, then runs the command with the rest of stdin.
+ */
+const WITH_PASSWORD =
+  'IFS= read -r PGPASSWORD && export PGPASSWORD && exec "$@"';
+export const INTERRUPTED_MESSAGE =
+  'The upload was interrupted, so nothing was imported';
+/** Errors of a dump that sets owners or privileges of other roles. */
+const FOREIGN_ROLE_ERROR =
+  /role ".*" does not exist|must be (able to SET ROLE|member of role)|permission denied to (grant|change owner)/;
+export const FOREIGN_ROLE_HINT =
+  'The dump sets owners or privileges of other roles, which the app user cannot. Make it with pg_dump --no-owner --no-acl, or in the custom format (-Fc), which is imported without them.';
+
+/** The error to show for a failed import, with a way out when there is one. */
+export const importFailure = (message: string): string =>
+  `The dump was not imported, and the database is unchanged: ${message}`.slice(
+    0,
+    2000,
+  ) + (FOREIGN_ROLE_ERROR.test(message) ? ` ${FOREIGN_ROLE_HINT}` : '');
+
+export const UNKNOWN_OUTCOME_MESSAGE =
+  'The import did not finish within an hour and may still complete or roll back. Check the data before importing again.';
+
+/**
+ * Connects as `app` with its password over TCP, never as the superuser, so
+ * a dump cannot step outside what `app` may do and everything it creates
+ * belongs to `app`. The archive runs in one transaction that stops at the
+ * first error; a SQL script gets its transaction from importInput.
+ */
+export const importCommand = (format: 'custom' | 'sql'): string[] => [
+  'sh',
+  '-c',
+  WITH_PASSWORD,
+  'import',
+  ...(format === 'custom'
+    ? [
+        'pg_restore',
+        '--clean',
+        '--if-exists',
+        '--no-owner',
+        '--no-acl',
+        '--single-transaction',
+        '--exit-on-error',
+      ]
+    : ['psql', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-o', '/dev/null']),
+  '-h',
+  '127.0.0.1',
+  '-U',
+  POSTGRES_USERNAME,
+  '-d',
+  POSTGRES_DATABASE,
+];
+
+/**
+ * What the import command reads: the password line, then the dump. A SQL
+ * script is wrapped in BEGIN and a COMMIT that is only sent once the whole
+ * upload arrived, so a cut-off upload ends without a COMMIT and rolls back;
+ * an archive cut short fails pg_restore. Either way stdin is closed at once,
+ * so the command never waits on an upload that will not come.
+ */
+export const importInput = (
+  body: Readable,
+  format: 'custom' | 'sql',
+  password: string,
+): { stream: Readable; interrupted: () => boolean } => {
+  const stream = new PassThrough();
+  let interrupted = false;
+  const abort = () => {
+    if (!body.readableEnded && !stream.writableEnded) {
+      interrupted = true;
+      body.unpipe(stream);
+      stream.end();
+    }
+  };
+
+  stream.write(`${password}\n`);
+
+  if (format === 'sql') {
+    stream.write('BEGIN;\n');
+  }
+
+  body.pipe(stream, { end: false });
+  body.once('end', () => {
+    stream.end(format === 'sql' ? '\n;\nCOMMIT;\n' : undefined);
+  });
+  body.once('close', abort);
+  body.once('error', abort);
+
+  return { stream, interrupted: () => interrupted };
+};
+
+/** The first `size` bytes of a stream, put back so the stream still starts there. */
+export const peek = (stream: Readable, size: number): Promise<Buffer> =>
+  new Promise((resolve, reject) => {
+    const read = () => {
+      // Null until `size` bytes arrived, unless the stream ended shorter.
+      const head = stream.read(size) as Buffer | null;
+
+      if (head === null && !stream.readableEnded) {
+        return;
+      }
+
+      stream.off('readable', read);
+      stream.off('end', read);
+      stream.off('error', reject);
+
+      if (head) {
+        stream.unshift(head);
+      }
+
+      resolve(head ?? Buffer.alloc(0));
+    };
+
+    stream.on('readable', read);
+    stream.on('end', read);
+    stream.on('error', reject);
+  });
 const SYSTEM_SCHEMAS = `('pg_catalog', 'information_schema')`;
 const USER_RELATION = `n.nspname not in ${SYSTEM_SCHEMAS} and n.nspname not like 'pg\\_toast%' and n.nspname not like 'pg\\_temp%'`;
 
@@ -130,9 +261,13 @@ select json_build_object(
 export class PostgresOverviewService {
   private readonly logger = new Logger(PostgresOverviewService.name);
 
+  /** Databases an import is running into, one at a time each. */
+  private readonly importing = new Set<string>();
+
   constructor(
     private readonly databases: PostgresWorkloadService,
     private readonly kubernetes: KubernetesService,
+    private readonly access: PostgresAccessService,
   ) {}
 
   async overview(projectId: string, id: string): Promise<PostgresOverview> {
@@ -186,12 +321,93 @@ export class PostgresOverviewService {
     };
   }
 
-  private async query<T>(
+  /**
+   * The `app` database as a `pg_dump` custom-format archive, streamed from
+   * the primary. A dump that fails part way breaks the download instead of
+   * ending it, so a cut-off file is never saved as complete.
+   */
+  async dump(
     projectId: string,
     id: string,
-    sql: string,
-    role?: string,
-  ): Promise<T> {
+  ): Promise<{ name: string; body: Readable }> {
+    const { row, namespace, pod } = await this.primaryPod(projectId, id);
+    const stamp = new Date().toISOString().replace(/\D/g, '').slice(0, 14);
+
+    return {
+      name: `${row.external_name}-${stamp}.dump`,
+      body: this.kubernetes.streamFromPod({
+        namespace,
+        pod,
+        container: POSTGRES_CONTAINER,
+        command: ['pg_dump', '-Fc', '-d', POSTGRES_DATABASE],
+      }),
+    };
+  }
+
+  /**
+   * Loads a dump into the `app` database as the `app` user, all or nothing:
+   * a custom-format archive through pg_restore, replacing the objects it
+   * holds, anything else as SQL through psql. The body streams to the
+   * command's stdin. shortcut: exec stdin ignores backpressure, so the whole
+   * upload may sit in memory at once; stream it with flow control before
+   * allowing dumps much larger than the API's memory.
+   */
+  async import(
+    projectId: string,
+    id: string,
+    body: Readable,
+  ): Promise<PostgresImportResult> {
+    const { row, namespace, pod } = await this.primaryPod(projectId, id);
+
+    if (this.importing.has(row.id)) {
+      throw new ConflictException('An import into this database is running');
+    }
+
+    this.importing.add(row.id);
+
+    try {
+      const { password } = await this.access.credentials(projectId, id);
+      const format = isCustomDump(await peek(body, DUMP_MAGIC.length))
+        ? 'custom'
+        : 'sql';
+      const input = importInput(body, format, password);
+
+      try {
+        await this.kubernetes.runInPod({
+          namespace,
+          pod,
+          container: POSTGRES_CONTAINER,
+          command: importCommand(format),
+          stdin: input.stream,
+          timeoutMs: IMPORT_TIMEOUT_MS,
+          maxBytes: OUTPUT_MAX_BYTES,
+        });
+      } catch (error) {
+        if (input.interrupted()) {
+          throw new BadRequestException(INTERRUPTED_MESSAGE);
+        }
+
+        const message = error instanceof Error ? error.message : String(error);
+
+        if (message === COMMAND_TIMED_OUT) {
+          throw new ServiceUnavailableException(UNKNOWN_OUTCOME_MESSAGE);
+        }
+
+        throw new BadRequestException(importFailure(message));
+      }
+
+      // psql exits cleanly at the end of a cut-off script; it rolled back.
+      if (input.interrupted()) {
+        throw new BadRequestException(INTERRUPTED_MESSAGE);
+      }
+
+      return { format };
+    } finally {
+      this.importing.delete(row.id);
+    }
+  }
+
+  private async primaryPod(projectId: string, id: string) {
     const row = await this.databases.findDatabase(projectId, id);
     const namespace = projectNamespace(row.project_id);
     const { items } = await this.kubernetes.coreV1.listNamespacedPod({
@@ -204,12 +420,23 @@ export class PostgresOverviewService {
       throw new ConflictException('The database is not running');
     }
 
+    return { row, namespace, pod: pod.metadata.name };
+  }
+
+  private async query<T>(
+    projectId: string,
+    id: string,
+    sql: string,
+    role?: string,
+  ): Promise<T> {
+    const { row, namespace, pod } = await this.primaryPod(projectId, id);
+
     let output: string;
 
     try {
       output = await this.kubernetes.runInPod({
         namespace,
-        pod: pod.metadata.name,
+        pod,
         container: POSTGRES_CONTAINER,
         // Session settings travel in PGOPTIONS, so the only statement is
         // the query and stdout holds just its JSON value.
