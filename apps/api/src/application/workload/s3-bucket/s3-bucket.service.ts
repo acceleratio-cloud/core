@@ -62,25 +62,25 @@ import {
   BUCKET_ERROR_PREFIX,
   BUCKET_WORKLOAD_LABEL,
   bucketJobName,
-  buildBucketJob,
   buildJobSecret,
   BUCKET_MESSAGE_ANNOTATION,
   BUCKET_PHASE_ANNOTATION,
   buildProjectSecret,
   type BucketPhase,
-  DEFAULT_S3_ENDPOINT,
-  DEFAULT_SEAWEEDFS_FILER,
-  DEFAULT_SEAWEEDFS_MASTER,
-  DEFAULT_SEAWEEDFS_NAMESPACE,
-  DEFAULT_SEAWEEDFS_SHELL_IMAGE,
   projectSecretName,
   S3_REGION,
-  SHELL_CONTAINER,
   type BucketJobInput,
   type BucketKeys,
   type BucketOperation,
   type SeaweedfsTarget,
 } from './s3-bucket.manifests';
+import {
+  readBucketJob,
+  readBucketJobLog,
+  seaweedfsS3Endpoint,
+  seaweedfsTarget,
+  startBucketJob,
+} from './seaweedfs-jobs';
 
 export const UNSUPPORTED_ACTION_MESSAGE = 'Not supported for S3 buckets';
 export const LOCKED_BUCKET_MESSAGE =
@@ -257,19 +257,11 @@ export class S3BucketWorkloadService
   }
 
   private get target(): SeaweedfsTarget {
-    return {
-      namespace:
-        process.env.SEAWEEDFS_NAMESPACE?.trim() || DEFAULT_SEAWEEDFS_NAMESPACE,
-      master: process.env.SEAWEEDFS_MASTER?.trim() || DEFAULT_SEAWEEDFS_MASTER,
-      filer: process.env.SEAWEEDFS_FILER?.trim() || DEFAULT_SEAWEEDFS_FILER,
-      image:
-        process.env.SEAWEEDFS_SHELL_IMAGE?.trim() ||
-        DEFAULT_SEAWEEDFS_SHELL_IMAGE,
-    };
+    return seaweedfsTarget();
   }
 
   private get endpoint(): string {
-    return process.env.SEAWEEDFS_S3_ENDPOINT?.trim() || DEFAULT_S3_ENDPOINT;
+    return seaweedfsS3Endpoint();
   }
 
   async list(projectId: string): Promise<Workload[]> {
@@ -774,31 +766,8 @@ export class S3BucketWorkloadService
   }
 
   /** Replaces a Job left from an earlier attempt, then starts this one. */
-  private async startJob(input: BucketJobInput): Promise<V1Job> {
-    const name = bucketJobName(input.workloadId, input.operation);
-    const namespace = input.target.namespace;
-
-    await this.ignoreNotFound(() =>
-      this.kubernetes.batchV1.deleteNamespacedJob({
-        name,
-        namespace,
-        propagationPolicy: 'Foreground',
-      }),
-    );
-
-    // Foreground deletion keeps the object until its pods are gone.
-    for (let attempt = 0; attempt < 30; attempt += 1) {
-      if ((await this.readJob(name)) === null) {
-        break;
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, 500));
-    }
-
-    return this.kubernetes.batchV1.createNamespacedJob({
-      namespace,
-      body: buildBucketJob(input),
-    });
+  private startJob(input: BucketJobInput): Promise<V1Job> {
+    return startBucketJob(this.kubernetes, input);
   }
 
   /** Waits for a Job; a failure carries the message the Job left. */
@@ -978,41 +947,12 @@ export class S3BucketWorkloadService
     });
   }
 
-  private async readJob(name: string): Promise<V1Job | null> {
-    try {
-      return await this.kubernetes.batchV1.readNamespacedJob({
-        name,
-        namespace: this.target.namespace,
-      });
-    } catch (error) {
-      if (getKubernetesStatusCode(error) === 404) {
-        return null;
-      }
-
-      throw error;
-    }
+  private readJob(name: string): Promise<V1Job | null> {
+    return readBucketJob(this.kubernetes, name, this.target.namespace);
   }
 
-  private async readLog(name: string): Promise<string | null> {
-    try {
-      const pods = await this.kubernetes.coreV1.listNamespacedPod({
-        namespace: this.target.namespace,
-        labelSelector: `job-name=${name}`,
-      });
-      const pod = pods.items[0]?.metadata?.name;
-
-      if (!pod) {
-        return null;
-      }
-
-      return await this.kubernetes.coreV1.readNamespacedPodLog({
-        name: pod,
-        namespace: this.target.namespace,
-        container: SHELL_CONTAINER,
-      });
-    } catch {
-      return null;
-    }
+  private readLog(name: string): Promise<string | null> {
+    return readBucketJobLog(this.kubernetes, name, this.target.namespace);
   }
 
   private async upsertProjectSecret(body: V1Secret): Promise<void> {

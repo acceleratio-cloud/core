@@ -68,6 +68,11 @@ export interface BucketJobInput {
     'replication' | 'disk_type' | 'ttl'
   >;
   target: SeaweedfsTarget;
+  /**
+   * `create` succeeds when the bucket already exists and replaces the
+   * identity's keys (a retried setup).
+   */
+  tolerateExisting?: boolean;
 }
 
 export const bucketIdentity = (workloadId: string): string =>
@@ -99,7 +104,7 @@ const locationPrefix = (bucket: string): string => `/buckets/${bucket}/`;
 export const bucketCommands = (
   input: Pick<
     BucketJobInput,
-    'workloadId' | 'bucket' | 'operation' | 'parameters'
+    'workloadId' | 'bucket' | 'operation' | 'parameters' | 'tolerateExisting'
   >,
 ): { command: string; tolerate?: string }[] => {
   const identity = bucketIdentity(input.workloadId);
@@ -156,8 +161,21 @@ export const bucketCommands = (
   ].join(' ');
 
   return [
-    { command: `s3.bucket.create -name ${input.bucket}` },
+    {
+      command: `s3.bucket.create -name ${input.bucket}`,
+      ...(input.tolerateExisting ? { tolerate: 'already exist' } : {}),
+    },
     { command: rule },
+    // A retried setup drops the identity first: s3.configure adds keys, so
+    // keys of an interrupted attempt would otherwise stay valid.
+    ...(input.tolerateExisting
+      ? [
+          {
+            command: `s3.configure -user=${identity} -delete -apply`,
+            tolerate: 'not found',
+          },
+        ]
+      : []),
     registerIdentity,
   ];
 };

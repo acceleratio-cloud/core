@@ -42,6 +42,19 @@ describe('bucketCommands', () => {
     ]);
   });
 
+  it('on a retried setup, keeps the bucket and replaces the identity keys', () => {
+    const commands = bucketCommands(input({ tolerateExisting: true }));
+
+    expect(commands[0]).toEqual({
+      command: 's3.bucket.create -name demo-assets',
+      tolerate: 'already exist',
+    });
+    expect(commands.map(({ command }) => command).slice(2)).toEqual([
+      `s3.configure -user=acc-${workloadId} -delete -apply`,
+      `s3.configure -user=acc-${workloadId} -access_key=$S3_ACCESS_KEY -secret_key=$S3_SECRET_KEY -buckets=demo-assets -actions=Read,Write,List,Tagging -apply`,
+    ]);
+  });
+
   it('adds disk type and TTL only when the profile sets them', () => {
     const [, rule] = bucketCommands(
       input({
