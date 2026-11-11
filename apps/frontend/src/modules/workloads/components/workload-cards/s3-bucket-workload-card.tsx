@@ -1,12 +1,13 @@
 'use client';
 
 import type { Node, NodeProps } from '@xyflow/react';
-import { Activity, Globe, HardDrive, LoaderCircle } from 'lucide-react';
+import { Activity, Globe, LoaderCircle } from 'lucide-react';
 
 import type { Workload } from '@acceleratio/shared';
 import { WorkloadStatus } from '@/modules/workloads/components/workload-status';
 import { bucketStatusLabel } from '@/modules/workloads/utils/s3-bucket';
 import { BucketIcon } from '@/shared/icons/bucket-icon';
+import { internalAddress } from '@/modules/workloads/utils/internal-hostname';
 import {
   NodeCard,
   NodeHeader,
@@ -31,6 +32,7 @@ export const S3BucketWorkloadCard = ({
     <NodeHeader
       icon={<BucketIcon className="size-4" />}
       title={data.name}
+      subtitle={internalAddress(data)}
       status={data.status}
     />
 
@@ -42,9 +44,6 @@ export const S3BucketWorkloadCard = ({
           compact
           className="items-end"
         />
-      </NodeRow>
-      <NodeRow icon={HardDrive} label="Bucket" title={data.external_name}>
-        {data.external_name}
       </NodeRow>
       <NodeRow icon={Globe} label="Endpoint" title={data.s3?.endpoint}>
         {data.s3 ? endpointHost(data.s3.endpoint) : '—'}

@@ -7,6 +7,7 @@ import {
   Clock,
   LoaderCircle,
   Rocket,
+  TriangleAlert,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -92,21 +93,34 @@ export const StatusMeter = ({ status }: { status: WorkloadStatusValue }) => {
 export const NodeHeader = ({
   icon,
   title,
+  subtitle,
   status,
 }: {
   icon: ReactNode;
   title: string;
+  /** How other services of the project reach this one, such as `api.internal`. */
+  subtitle?: string | null;
   status: WorkloadStatusValue;
 }) => (
   <div className="flex items-center gap-2.5 border-b border-edge-subtle bg-surface-muted/40 px-3 py-2.5">
     <span className="flex size-7 shrink-0 items-center justify-center rounded-md border border-border bg-surface-sunken">
       {icon}
     </span>
-    <span
-      title={title}
-      className="min-w-0 flex-1 truncate text-sm leading-tight font-semibold tracking-tight text-foreground"
-    >
-      {title}
+    <span className="flex min-w-0 flex-1 flex-col">
+      <span
+        title={title}
+        className="truncate text-sm leading-tight font-semibold tracking-tight text-foreground"
+      >
+        {title}
+      </span>
+      {subtitle ? (
+        <span
+          title={subtitle}
+          className="nodrag nopan mt-0.5 cursor-text truncate font-mono text-[11px] leading-tight text-muted-foreground select-text"
+        >
+          {subtitle}
+        </span>
+      ) : null}
     </span>
     <StatusMeter status={status} />
   </div>
@@ -141,12 +155,35 @@ export const NodeRow = ({
   </div>
 );
 
+const NOTICE_TONES = {
+  error: {
+    icon: CircleAlert,
+    box: 'border-status-danger/40 bg-status-danger/10',
+    text: 'text-status-danger',
+  },
+  warning: {
+    icon: TriangleAlert,
+    box: 'border-status-warning/40 bg-status-warning/10',
+    text: 'text-status-warning',
+  },
+} as const;
+
 /**
- * A failure message from the cluster. Red marks only the icon and title; the
- * message itself is neutral text on a lightly tinted well, which stays readable at small
- * sizes. Long messages clamp to three lines and expand in place.
+ * A failure message from the cluster, or a warning such as a volume running
+ * out of space. Color marks only the icon and title; the message itself is
+ * neutral text on a lightly tinted well, which stays readable at small sizes.
+ * Long messages clamp to three lines and expand in place.
  */
-export const NodeNotice = ({ children }: { children: string }) => {
+export const NodeNotice = ({
+  tone = 'error',
+  title = 'Error',
+  children,
+}: {
+  tone?: keyof typeof NOTICE_TONES;
+  title?: string;
+  children: string;
+}) => {
+  const { icon: Icon, box, text } = NOTICE_TONES[tone];
   const messageId = useId();
   const messageRef = useRef<HTMLParagraphElement>(null);
   const [expanded, setExpanded] = useState(false);
@@ -169,15 +206,17 @@ export const NodeNotice = ({ children }: { children: string }) => {
   }, [children, expanded]);
 
   return (
-    <div className="mx-3 mb-3 rounded-md border border-status-danger/40 bg-status-danger/10">
+    <div className={cn('mx-3 mb-3 rounded-md border', box)}>
       <div className="flex h-7 items-center gap-1.5 pr-1 pl-2.5">
-        <CircleAlert
+        <Icon
           aria-hidden="true"
           strokeWidth={1.75}
-          className="size-3.5 shrink-0 text-status-danger"
+          className={cn('size-3.5 shrink-0', text)}
         />
-        <span className="min-w-0 flex-1 truncate text-xs font-medium text-status-danger">
-          Error
+        <span
+          className={cn('min-w-0 flex-1 truncate text-xs font-medium', text)}
+        >
+          {title}
         </span>
         {overflows || expanded ? (
           <Button

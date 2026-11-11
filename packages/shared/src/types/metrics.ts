@@ -101,3 +101,15 @@ export interface ProjectMetrics {
   workloads: WorkloadMetrics[];
   postgres: PostgresMetrics;
 }
+
+/**
+ * How full one disk is, from kubelet stats: a volume of a service, or the
+ * data disk of a PostgreSQL database.
+ */
+export interface VolumeUsage {
+  /** The volume id in the service config, or the PostgreSQL workload id. */
+  id: string;
+  used_bytes: number;
+  /** Size of the mounted filesystem; null when the kubelet does not report it. */
+  capacity_bytes: number | null;
+}

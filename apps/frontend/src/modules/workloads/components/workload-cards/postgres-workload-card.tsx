@@ -1,11 +1,14 @@
 'use client';
 
 import type { Node, NodeProps } from '@xyflow/react';
-import { Activity, Globe, HardDrive } from 'lucide-react';
+import { Activity, Plug, Tag } from 'lucide-react';
 
 import type { PostgresConfig, Workload } from '@acceleratio/shared';
+import { useProject } from '@/modules/projects/providers/project-provider';
 import { WorkloadStatus } from '@/modules/workloads/components/workload-status';
+import { volumeFill } from '@/modules/workloads/utils/volume-usage';
 import { PostgresIcon } from '@/shared/icons/postgres-icon';
+import { internalAddress } from '@/modules/workloads/utils/internal-hostname';
 import {
   NodeCard,
   NodeHeader,
@@ -13,6 +16,7 @@ import {
   NodeRow,
   NodeRows,
 } from './node-card-primitives';
+import { DiskFullNotice, DiskTile } from './node-volumes';
 
 export type PostgresWorkloadNode = Node<
   Workload & Record<string, unknown>,
@@ -24,12 +28,17 @@ export const PostgresWorkloadCard = ({
   selected,
 }: NodeProps<PostgresWorkloadNode>) => {
   const config = data.active_version?.config as PostgresConfig | undefined;
+  const { volumeUsage } = useProject();
+  const fill = config
+    ? volumeFill(config.size_gb, volumeUsage.get(data.id))
+    : null;
 
   return (
     <NodeCard selected={selected}>
       <NodeHeader
         icon={<PostgresIcon className="size-4" />}
         title={data.name}
+        subtitle={internalAddress(data)}
         status={data.status}
       />
 
@@ -37,17 +46,27 @@ export const PostgresWorkloadCard = ({
         <NodeRow icon={Activity} label="Status">
           <WorkloadStatus status={data.status} compact className="items-end" />
         </NodeRow>
-        <NodeRow icon={HardDrive} label="Version">
-          {config
-            ? `PostgreSQL ${config.postgres_version} · ${config.size_gb} GiB`
-            : '—'}
+        <NodeRow icon={Tag} label="Version">
+          {config ? `PostgreSQL ${config.postgres_version}` : '—'}
         </NodeRow>
-        <NodeRow icon={Globe} label="Host" title={data.postgres?.host}>
-          {data.postgres
-            ? `${data.external_name}-rw:${data.postgres.port}`
-            : '—'}
+        <NodeRow icon={Plug} label="Port" title={data.postgres?.host}>
+          {data.postgres?.port ?? '—'}
         </NodeRow>
       </NodeRows>
+
+      {config ? (
+        <ul aria-label="Disk" className="mx-3 mb-3">
+          <DiskTile label="Data" sizeGb={config.size_gb} fill={fill} showFree />
+        </ul>
+      ) : null}
+
+      {fill && fill.level !== 'ok' ? (
+        <DiskFullNotice
+          subject="The database disk"
+          fill={fill}
+          title="Disk almost full"
+        />
+      ) : null}
 
       {data.status === 'failed' && data.status_message ? (
         <NodeNotice key={data.status_message}>{data.status_message}</NodeNotice>

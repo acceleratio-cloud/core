@@ -5,6 +5,7 @@ import { Activity, FileUp, PanelsTopLeft } from 'lucide-react';
 
 import type { StaticWorkloadConfig, Workload } from '@acceleratio/shared';
 import { WorkloadStatus } from '@/modules/workloads/components/workload-status';
+import { internalAddress } from '@/modules/workloads/utils/internal-hostname';
 import {
   NodeCard,
   NodeHeader,
@@ -37,6 +38,7 @@ export const StaticWorkloadCard = ({
           />
         }
         title={data.name}
+        subtitle={internalAddress(data)}
         status={data.status}
       />
 

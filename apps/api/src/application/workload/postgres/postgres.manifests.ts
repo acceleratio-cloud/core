@@ -20,6 +20,8 @@ export const CNPG_VERSION = 'v1';
 export const CNPG_CLUSTER_PLURAL = 'clusters';
 export const CNPG_CLUSTER_LABEL = 'cnpg.io/cluster';
 export const CNPG_ROLE_LABEL = 'cnpg.io/instanceRole';
+/** `PG_DATA` on the claim that holds an instance's data directory. */
+export const CNPG_PVC_ROLE_LABEL = 'cnpg.io/pvcRole';
 export const HIBERNATION_ANNOTATION = 'cnpg.io/hibernation';
 /** The annotation `kubectl cnpg restart` sets; CNPG restarts the instances. */
 export const RESTART_ANNOTATION = 'kubectl.kubernetes.io/restartedAt';

@@ -1,4 +1,8 @@
-import type { MetricsRange, ProjectMetrics } from '@acceleratio/shared';
+import type {
+  MetricsRange,
+  ProjectMetrics,
+  VolumeUsage,
+} from '@acceleratio/shared';
 
 import { api } from '@/api';
 
@@ -7,6 +11,12 @@ export const metricsApi = {
     const { data } = await api.get<ProjectMetrics>(
       `/projects/${projectId}/metrics`,
       { params: { range }, signal },
+    );
+    return data;
+  },
+  volumes: async (projectId: string) => {
+    const { data } = await api.get<VolumeUsage[]>(
+      `/projects/${projectId}/metrics/volumes`,
     );
     return data;
   },

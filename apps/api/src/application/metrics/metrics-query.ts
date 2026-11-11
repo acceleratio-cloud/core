@@ -127,29 +127,44 @@ export const instanceQueries = (
   } as const;
 };
 
-/** The value of each series of an instant query, keyed by its `pod` label. */
-export const valuesByPod = (series: PromSeries[]): Map<string, number> => {
+/** The value of each series of an instant query, keyed by one of its labels. */
+export const valuesByLabel = (
+  series: PromSeries[],
+  label: string,
+): Map<string, number> => {
   const values = new Map<string, number>();
 
   for (const item of series) {
-    const pod = item.metric.pod;
+    const key = item.metric[label];
     const raw = item.value?.[1];
     const value = raw === undefined ? null : toNumber(raw);
 
-    if (pod && value !== null) {
-      values.set(pod, value);
+    if (key && value !== null) {
+      values.set(key, value);
     }
   }
 
   return values;
 };
 
+/** The value of each series of an instant query, keyed by its `pod` label. */
+export const valuesByPod = (series: PromSeries[]): Map<string, number> =>
+  valuesByLabel(series, 'pod');
+
+/**
+ * Kubelet volume stats arrive through two scrape jobs (nodes and the API
+ * server proxy), so each claim is taken once with `max` before summing.
+ */
 export const volumeQueries = (namespace: string) => {
   const ns = `namespace=${quote(namespace)}`;
+  const byClaim = (metric: string) =>
+    `max by (persistentvolumeclaim) (${metric}{${ns}})`;
 
   return {
-    used: `sum(kubelet_volume_stats_used_bytes{${ns}})`,
-    capacity: `sum(kubelet_volume_stats_capacity_bytes{${ns}})`,
+    used: `sum(${byClaim('kubelet_volume_stats_used_bytes')})`,
+    capacity: `sum(${byClaim('kubelet_volume_stats_capacity_bytes')})`,
+    usedByClaim: byClaim('kubelet_volume_stats_used_bytes'),
+    capacityByClaim: byClaim('kubelet_volume_stats_capacity_bytes'),
   } as const;
 };
 

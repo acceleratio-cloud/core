@@ -6,7 +6,11 @@ import {
   ParseUUIDPipe,
   Query,
 } from '@nestjs/common';
-import { METRICS_RANGES, type ProjectMetrics } from '@acceleratio/shared';
+import {
+  METRICS_RANGES,
+  type ProjectMetrics,
+  type VolumeUsage,
+} from '@acceleratio/shared';
 import { DEFAULT_METRICS_RANGE, isMetricsRange } from './metrics-query';
 import { MetricsService } from './metrics.service';
 
@@ -28,5 +32,12 @@ export class MetricsController {
     }
 
     return this.metricsService.getProjectMetrics(projectId, selected);
+  }
+
+  @Get('volumes')
+  volumes(
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+  ): Promise<VolumeUsage[]> {
+    return this.metricsService.getVolumeUsage(projectId);
   }
 }

@@ -11,13 +11,21 @@ import {
   type MetricsRange,
   type ProjectMetrics,
   type ProjectMetricsSummary,
+  type VolumeUsage,
   type Workload,
   type WorkloadMetrics,
 } from '@acceleratio/shared';
 import { projectNamespace } from '@/common/naming';
 import { ProjectService } from '@/application/project/project.service';
 import { WorkloadService } from '@/application/workload/workload.service';
-import { WORKLOAD_ID_LABEL } from '@/application/workload/docker/docker-workload.manifests';
+import {
+  VOLUME_ID_LABEL,
+  WORKLOAD_ID_LABEL,
+} from '@/application/workload/docker/docker-workload.manifests';
+import {
+  CNPG_PVC_ROLE_LABEL,
+  CNPG_ROLE_LABEL,
+} from '@/application/workload/postgres/postgres.manifests';
 import { getKubernetesStatusCode } from '@/vendor/kubernetes/kubernetes-error';
 import { KubernetesService } from '@/vendor/kubernetes/kubernetes.service';
 import { isActivePod, listNamespacePods } from '@/vendor/kubernetes/pods';
@@ -36,6 +44,7 @@ import {
   postgresQueries,
   projectQueries,
   scalarValue,
+  valuesByLabel,
   volumeQueries,
   type WorkloadRef,
 } from './metrics-query';
@@ -104,6 +113,23 @@ const pvcCapacity = (claim: V1PersistentVolumeClaim): number =>
  * network and disk I/O, folded by workload, plus live readiness, restarts and
  * limits from the Kubernetes API.
  */
+/**
+ * The id a claim's usage is reported under: its service volume, or the
+ * database whose primary data disk it is. Other claims are not reported.
+ */
+const diskIdOf = (claim: V1PersistentVolumeClaim): string | null => {
+  const labels = claim.metadata?.labels ?? {};
+
+  if (labels[VOLUME_ID_LABEL]) {
+    return labels[VOLUME_ID_LABEL];
+  }
+
+  return labels[CNPG_PVC_ROLE_LABEL] === 'PG_DATA' &&
+    labels[CNPG_ROLE_LABEL] === 'primary'
+    ? (labels[WORKLOAD_ID_LABEL] ?? null)
+    : null;
+};
+
 @Injectable()
 export class MetricsService {
   private readonly logger = new Logger(MetricsService.name);
@@ -272,6 +298,55 @@ export class MetricsService {
         network_tx_bytes_per_second: tx.get(workload.id) ?? null,
       };
     });
+  }
+
+  /**
+   * How full each service volume and PostgreSQL data disk of the project is,
+   * at `now`.
+   */
+  async getVolumeUsage(
+    projectId: string,
+    now = Math.floor(Date.now() / 1000),
+  ): Promise<VolumeUsage[]> {
+    if (!(await this.projectService.exists(projectId))) {
+      throw new NotFoundException('Project not found');
+    }
+
+    const namespace = projectNamespace(projectId);
+    const queries = volumeQueries(namespace);
+    const [claims, used, capacity] = await Promise.all([
+      this.listClaims(namespace),
+      this.queryByClaim(queries.usedByClaim, now),
+      this.queryByClaim(queries.capacityByClaim, now),
+    ]);
+
+    return claims.flatMap((claim) => {
+      const name = claim.metadata?.name;
+      const id = diskIdOf(claim);
+      const usedBytes = name ? used.get(name) : undefined;
+
+      // A claim no running pod mounts has no stats yet.
+      return name && id && usedBytes !== undefined
+        ? [
+            {
+              id,
+              used_bytes: usedBytes,
+              capacity_bytes: capacity.get(name) ?? null,
+            },
+          ]
+        : [];
+    });
+  }
+
+  private async queryByClaim(promql: string, time: number) {
+    try {
+      return valuesByLabel(
+        await this.victoriaMetrics.query(promql, time),
+        'persistentvolumeclaim',
+      );
+    } catch (error) {
+      throw this.unavailable(error);
+    }
   }
 
   private async querySignals<Name extends string>(

@@ -112,7 +112,7 @@ const build = (
     { queryRange, query } as unknown as VictoriaMetricsClient,
   );
 
-  return { service, coreV1, queryRange };
+  return { service, coreV1, queryRange, query };
 };
 
 describe('postgresQueries', () => {
@@ -129,6 +129,65 @@ describe('postgresQueries', () => {
 });
 
 describe('MetricsService', () => {
+  it('reports usage per service volume and database disk, skipping claims without stats', async () => {
+    const { service, coreV1, query } = build();
+    const claim = (name: string, labels: Record<string, string> = {}) => ({
+      metadata: { name, labels },
+    });
+    const database = (name: string, instanceRole: string) =>
+      claim(name, {
+        'acceleratio.io/workload-id': 'w-db',
+        'cnpg.io/pvcRole': 'PG_DATA',
+        'cnpg.io/instanceRole': instanceRole,
+      });
+    coreV1.listNamespacedPersistentVolumeClaim.mockResolvedValue({
+      items: [
+        claim('api-vol-a', { 'acceleratio.io/volume-id': 'vol-a' }),
+        claim('api-vol-b', { 'acceleratio.io/volume-id': 'vol-b' }),
+        database('db-1', 'primary'),
+        database('db-2', 'replica'),
+        claim('other'),
+      ],
+    });
+    query.mockImplementation((promql: string) =>
+      Promise.resolve<PromSeries[]>([
+        {
+          metric: { persistentvolumeclaim: 'api-vol-a' },
+          value: [0, promql.includes('used') ? '900' : '1000'],
+        },
+        ...['db-1', 'db-2', 'other'].map((name) => ({
+          metric: { persistentvolumeclaim: name },
+          value: [0, '5'] as [number, string],
+        })),
+      ]),
+    );
+
+    await expect(service.getVolumeUsage(projectId, 0)).resolves.toEqual([
+      { id: 'vol-a', used_bytes: 900, capacity_bytes: 1000 },
+      { id: 'w-db', used_bytes: 5, capacity_bytes: 5 },
+    ]);
+    expect(query).toHaveBeenCalledWith(
+      `max by (persistentvolumeclaim) (kubelet_volume_stats_used_bytes{namespace="${namespace}"})`,
+      0,
+    );
+  });
+
+  it('counts each claim once in the disk totals', async () => {
+    const { service, query } = build();
+
+    await service.getProjectMetrics(projectId, '1h', 3600);
+
+    // Kubelet stats arrive from two scrape jobs; a plain sum doubles them.
+    expect(query).toHaveBeenCalledWith(
+      `sum(max by (persistentvolumeclaim) (kubelet_volume_stats_used_bytes{namespace="${namespace}"}))`,
+      3600,
+    );
+    expect(query).toHaveBeenCalledWith(
+      `sum(max by (persistentvolumeclaim) (kubelet_volume_stats_capacity_bytes{namespace="${namespace}"}))`,
+      3600,
+    );
+  });
+
   it('folds PostgreSQL exporter series per database and drops unknown pods', async () => {
     const { service } = build({
       queryRange: (promql) =>

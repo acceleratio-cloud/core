@@ -6,12 +6,14 @@ import { Activity, FolderGit2, GitBranch } from 'lucide-react';
 import type { GithubWorkloadConfig, Workload } from '@acceleratio/shared';
 import { GithubIcon } from '@/shared/icons/github-icon';
 import { WorkloadStatus } from '@/modules/workloads/components/workload-status';
+import { internalAddress } from '@/modules/workloads/utils/internal-hostname';
 import {
   NodeCard,
   NodeHeader,
   NodeRow,
   NodeRows,
 } from './node-card-primitives';
+import { NodeVolumes } from './node-volumes';
 
 export type GithubWorkloadNode = Node<
   Workload & Record<string, unknown>,
@@ -32,6 +34,7 @@ export const GithubWorkloadCard = ({
       <NodeHeader
         icon={<GithubIcon className="size-4" />}
         title={data.name}
+        subtitle={internalAddress(data)}
         status={data.status}
       />
 
@@ -50,6 +53,8 @@ export const GithubWorkloadCard = ({
           {config?.branch ?? '—'}
         </NodeRow>
       </NodeRows>
+
+      <NodeVolumes workload={data} />
     </NodeCard>
   );
 };

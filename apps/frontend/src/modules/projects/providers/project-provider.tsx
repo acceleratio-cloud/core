@@ -13,12 +13,18 @@ import {
 
 import type {
   Project,
+  VolumeUsage,
   Workload,
   WorkloadEvent,
   WorkloadPosition,
 } from '@acceleratio/shared';
 import { getApiErrorMessage } from '@/api';
+import { metricsApi } from '@/api/metrics';
 import { workloadsApi } from '@/api/workloads';
+import {
+  isUsageStale,
+  projectHasDisks,
+} from '@/modules/workloads/utils/volume-usage';
 
 type ProjectContextValue = {
   project: Project;
@@ -34,6 +40,8 @@ type ProjectContextValue = {
     position: WorkloadPosition,
   ) => Promise<void>;
   refreshWorkloads: () => Promise<void>;
+  /** Latest fill of each volume and database disk, keyed by volume or workload id. */
+  volumeUsage: ReadonlyMap<string, VolumeUsage>;
 };
 
 const ProjectContext = createContext<ProjectContextValue | null>(null);
@@ -48,6 +56,7 @@ const WORKLOAD_STATUSES = new Set<string>([
 
 const STREAM_RECONNECT_DELAY_MS = 5000;
 const WORKLOAD_RECONCILE_INTERVAL_MS = 60_000;
+const VOLUME_USAGE_INTERVAL_MS = 60_000;
 const STREAM_UNAVAILABLE_MESSAGE =
   'Lost the workload status stream. Reconnecting...';
 
@@ -178,6 +187,9 @@ export const ProjectProvider = ({
   const [workloads, setWorkloads] = useState<Workload[]>([]);
   const [isLoadingWorkloads, setIsLoadingWorkloads] = useState(true);
   const [workloadsError, setWorkloadsError] = useState<string | null>(null);
+  const [volumeUsage, setVolumeUsage] = useState<
+    ReadonlyMap<string, VolumeUsage>
+  >(() => new Map());
   const isMounted = useRef(true);
   const workloadsRef = useRef<Workload[]>([]);
   const listRequestId = useRef(0);
@@ -446,6 +458,51 @@ export const ProjectProvider = ({
     };
   }, [refreshWorkloads]);
 
+  const hasDisks = projectHasDisks(workloads);
+
+  useEffect(() => {
+    if (!hasDisks) {
+      return;
+    }
+
+    let active = true;
+    let loadedAt = 0;
+
+    const loadVolumeUsage = () => {
+      if (document.visibilityState !== 'visible') {
+        return;
+      }
+
+      metricsApi
+        .volumes(project.id)
+        .then((items) => {
+          if (active) {
+            loadedAt = Date.now();
+            setVolumeUsage(new Map(items.map((item) => [item.id, item])));
+          }
+        })
+        .catch(() => {
+          // Keep a recent reading through a blip; an old one would look current.
+          if (active && isUsageStale(loadedAt, Date.now())) {
+            setVolumeUsage(new Map());
+          }
+        });
+    };
+
+    loadVolumeUsage();
+    const intervalId = window.setInterval(
+      loadVolumeUsage,
+      VOLUME_USAGE_INTERVAL_MS,
+    );
+    document.addEventListener('visibilitychange', loadVolumeUsage);
+
+    return () => {
+      active = false;
+      window.clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', loadVolumeUsage);
+    };
+  }, [project.id, hasDisks]);
+
   const replaceProject = useCallback((next: Project) => {
     setProject((current) => (current.id === next.id ? next : current));
   }, []);
@@ -461,6 +518,7 @@ export const ProjectProvider = ({
       replaceWorkload,
       moveWorkload,
       refreshWorkloads,
+      volumeUsage,
     }),
     [
       project,
@@ -472,6 +530,7 @@ export const ProjectProvider = ({
       replaceWorkload,
       moveWorkload,
       refreshWorkloads,
+      volumeUsage,
     ],
   );
 

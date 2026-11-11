@@ -8,6 +8,13 @@ import type {
   DockerWorkloadVolume,
   StorageClass,
 } from '@acceleratio/shared';
+import { cn } from '@/lib/utils';
+import { useProject } from '@/modules/projects/providers/project-provider';
+import { formatBytes } from '@/modules/observability/utils/format';
+import {
+  FILL_TEXT_TONE,
+  VolumeUsageBar,
+} from '@/modules/workloads/components/volume-usage-bar';
 import { DetailSection } from '@/modules/workloads/components/workload-details/detail-primitives';
 import { useStorageProfiles } from '@/modules/workloads/hooks/use-storage-profiles';
 import {
@@ -18,6 +25,11 @@ import {
   VOLUMES_MAX,
   type VolumeChange,
 } from '@/modules/workloads/utils/workload-config';
+import {
+  formatFillPercent,
+  volumeFill,
+  type VolumeFill,
+} from '@/modules/workloads/utils/volume-usage';
 import { Button, buttonVariants } from '@/shared/components/ui/button';
 import {
   DropdownMenu,
@@ -55,6 +67,7 @@ const withVolumes = (
 
 const VolumeRow = ({
   volume,
+  fill,
   change,
   profile,
   disabled,
@@ -62,6 +75,7 @@ const VolumeRow = ({
   onRemove,
 }: {
   volume: DockerWorkloadVolume;
+  fill: VolumeFill | null;
   change: VolumeChange;
   profile: StorageClass | null;
   disabled: boolean;
@@ -94,6 +108,25 @@ const VolumeRow = ({
             {profile?.name ?? 'Platform default'}
           </span>
         </p>
+        {fill ? (
+          <div className="mt-1.5 mb-0.5 flex items-center gap-3">
+            <VolumeUsageBar
+              fill={fill}
+              label={`Volume ${volume.mount_path} usage`}
+              className="h-1.5 max-w-64 flex-1"
+            />
+            <span
+              className={cn(
+                'shrink-0 text-xs tabular-nums',
+                FILL_TEXT_TONE[fill.level],
+                fill.level !== 'ok' && 'font-medium',
+              )}
+            >
+              {formatBytes(fill.usedBytes)} used · {formatFillPercent(fill)}
+              {fill.level === 'ok' ? null : ' — almost full'}
+            </span>
+          </div>
+        ) : null}
       </div>
 
       {change ? (
@@ -161,6 +194,7 @@ const VolumeRow = ({
  */
 export const DockerWorkloadVolumes = () => {
   const { workload, pendingAction, saveConfig } = useWorkloadActions();
+  const { volumeUsage } = useProject();
   const profiles = useStorageProfiles();
   const config = effectiveConfig(workload);
   const volumes = config.volumes ?? [];
@@ -217,6 +251,10 @@ export const DockerWorkloadVolumes = () => {
               <VolumeRow
                 key={volume.id}
                 volume={volume}
+                fill={volumeFill(
+                  volume.size_gb,
+                  volume.id ? volumeUsage.get(volume.id) : undefined,
+                )}
                 change={volumeChange(workload, volume)}
                 profile={profileOf(volume)}
                 disabled={isLocked}

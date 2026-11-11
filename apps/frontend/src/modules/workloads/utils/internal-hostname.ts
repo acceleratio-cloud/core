@@ -1,3 +1,5 @@
+import type { Workload } from '@acceleratio/shared';
+
 /**
  * Private hostname rules, mirrored from the API (`common/naming.ts` and
  * `docker-workload-network.internal.ts`): the console cannot import runtime
@@ -36,4 +38,20 @@ export const internalHostnameError = (value: string): string | null => {
   }
 
   return null;
+};
+
+/**
+ * How other services of the project reach this one: its `.internal` name, a
+ * database's read-write Service, or a bucket's name. Null for anything else.
+ */
+export const internalAddress = (workload: Workload): string | null => {
+  if (workload.internal_domain) {
+    return workload.internal_domain;
+  }
+
+  if (workload.type === 'postgres') {
+    return `${workload.external_name}-rw`;
+  }
+
+  return workload.type === 's3_bucket' ? workload.external_name : null;
 };
