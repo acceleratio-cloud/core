@@ -30,4 +30,4 @@ export const terminalTheme: ITheme = {
 };
 
 export const TERMINAL_FONT_FAMILY =
-  'var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace';
+  'var(--font-code), ui-monospace, SFMono-Regular, Menlo, monospace';
