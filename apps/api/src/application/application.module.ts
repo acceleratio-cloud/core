@@ -1,4 +1,8 @@
 import { Module } from '@nestjs/common';
+import { APP_INTERCEPTOR } from '@nestjs/core';
+import { AuditLogController } from '@/application/audit/audit-log.controller';
+import { AuditLogInterceptor } from '@/application/audit/audit-log.interceptor';
+import { AuditLogService } from '@/application/audit/audit-log.service';
 import { AuthController } from '@/application/auth/auth.controller';
 import { PasswordAttemptLimiter } from '@/application/auth/password-attempt-limiter';
 import { HealthController } from '@/application/health/health.controller';
@@ -75,6 +79,7 @@ import { VictoriaMetricsClient } from '@/vendor/victoriametrics/victoriametrics.
  */
 @Module({
   controllers: [
+    AuditLogController,
     AuthController,
     GithubController,
     HealthController,
@@ -93,6 +98,8 @@ import { VictoriaMetricsClient } from '@/vendor/victoriametrics/victoriametrics.
     PostgresController,
   ],
   providers: [
+    AuditLogService,
+    { provide: APP_INTERCEPTOR, useClass: AuditLogInterceptor },
     PasswordAttemptLimiter,
     MarketplaceService,
     MarketplaceDeployService,

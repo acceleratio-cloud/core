@@ -68,7 +68,11 @@ export const SystemStatus = () => {
         >
           System status
         </h2>
-        {components ? (
+        {error && components ? (
+          <p role="status" className="text-sm text-destructive">
+            Status may be out of date: {error}
+          </p>
+        ) : components ? (
           <p
             className={cn(
               "text-sm",
@@ -87,7 +91,10 @@ export const SystemStatus = () => {
       ) : (
         <ul
           aria-busy={!components}
-          className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3"
+          className={cn(
+            "mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3",
+            error && "opacity-60",
+          )}
         >
           {components
             ? components.map((component) => (

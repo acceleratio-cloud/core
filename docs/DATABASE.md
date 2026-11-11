@@ -448,6 +448,30 @@ unique across Apps. Rows are removed with their App (`ON DELETE CASCADE`) and ke
 App's `installation` and `installation_repositories` webhooks. Repositories are not stored: they are
 read from GitHub on demand.
 
+### `audit_log`
+
+Append-only record of what was done in a project (migration `0029`), shown in the project's Audit
+Logs tab. A global API interceptor writes one row per change made through a project route (create,
+update, delete, deploy, start, stop, rollback, domains, database and bucket actions), whether it
+succeeded or failed, plus reads that reveal secrets or export data (`*.reveal`, `database.dump`,
+`bucket.object.download`). Opened terminals and deploys started by a GitHub push are written by
+their services. `action` is a dotted name such as `service.deploy`; `outcome` is `success` or
+`failure` with `status_code` and `error`. `actor_type` is `user` (`actor_id`, `actor_name`,
+`actor_email` and `session_id` from the better-auth session) or `github` (the pusher's login in
+`actor_name`). `ip_address` is the client: the X-Forwarded-For hop when the socket peer is a private
+or loopback address (Traefik, the pod network), else the peer itself, kept in
+`metadata.remote_address` when they differ. `metadata` holds the route parameters, the query, the
+request body and the ids the response created. Values of secret-looking fields, every value under
+`inputs`/`env` and passwords inside URLs are replaced by `[redacted]` before the write.
+
+The table has no foreign keys on purpose: entries outlive the service, project and account they
+name, so `workload_name` and the actor's name and email are copied at write time. `project_id` is
+null only for a failed project create or marketplace deploy, which never got a project; those rows
+are not shown in any project. Repeated reveals by the same account of the same service are written
+once per 10 minutes. Rows older than `AUDIT_RETENTION_DAYS` (default 365, `0` keeps them) are
+deleted daily in batches of 5,000. `audit_log_project_created_idx` serves the newest-first project
+page, keyed by `(created_at, id)`; `audit_log_created_idx` serves retention.
+
 ### better-auth tables
 
 `user`, `session`, `account`, and `verification` are written by better-auth, not by application code.

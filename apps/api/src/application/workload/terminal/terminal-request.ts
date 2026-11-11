@@ -1,5 +1,5 @@
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+import { isUuid } from '@/common/validation';
+
 /** Kubernetes object names: DNS-1123 subdomain. */
 const POD_NAME_PATTERN = /^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$/;
 const TERMINAL_PATH_PATTERN =
@@ -56,8 +56,8 @@ export const parseTerminalRequest = (
   }
 
   if (
-    !UUID_PATTERN.test(projectId) ||
-    !UUID_PATTERN.test(workloadId) ||
+    !isUuid(projectId) ||
+    !isUuid(workloadId) ||
     !POD_NAME_PATTERN.test(pod)
   ) {
     return null;

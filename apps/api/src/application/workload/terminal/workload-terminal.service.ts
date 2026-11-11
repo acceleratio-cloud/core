@@ -17,6 +17,11 @@ import type {
   WorkloadTerminalServerMessage,
 } from '@acceleratio/shared';
 import { WebSocket, WebSocketServer, type RawData } from 'ws';
+import { AuditLogService } from '@/application/audit/audit-log.service';
+import {
+  clientAddress,
+  userAgentOf,
+} from '@/application/audit/audit-log.request';
 import { projectNamespace } from '@/common/naming';
 import { getKubernetesStatusCode } from '@/vendor/kubernetes/kubernetes-error';
 import {
@@ -62,6 +67,8 @@ class UpgradeRejection extends Error {
 interface AuthorizedTarget extends TerminalRequest {
   namespace: string;
   userId: string;
+  user: { name: string; email: string };
+  sessionId: string;
 }
 
 /**
@@ -190,6 +197,7 @@ export class WorkloadTerminalService
     private readonly authService: AuthService,
     private readonly instances: WorkloadInstancesService,
     private readonly kubernetes: KubernetesService,
+    private readonly audit: AuditLogService,
   ) {}
 
   onApplicationBootstrap(): void {
@@ -228,9 +236,12 @@ export class WorkloadTerminalService
     socket.on('error', () => undefined);
 
     let target: AuthorizedTarget;
+    // What authorize learned before it failed, so a refused signed-in user is
+    // still on the audit log.
+    const seen: Partial<AuthorizedTarget> = {};
 
     try {
-      target = await this.authorize(request);
+      target = await this.authorize(request, seen);
     } catch (error) {
       const rejection =
         error instanceof UpgradeRejection
@@ -245,39 +256,67 @@ export class WorkloadTerminalService
         this.logger.warn(`Terminal upgrade failed: ${describeError(error)}`);
       }
 
+      void this.recordTerminal(
+        request,
+        seen,
+        rejection.status,
+        rejection.message,
+      );
       reject(socket, rejection.status, rejection.message);
       return;
     }
 
     this.sockets.handleUpgrade(request, socket, head, (client) => {
-      void this.start(client, target);
+      void this.start(client, target, request);
     });
   }
 
-  private async authorize(request: IncomingMessage): Promise<AuthorizedTarget> {
+  private async authorize(
+    request: IncomingMessage,
+    seen: Partial<AuthorizedTarget>,
+  ): Promise<AuthorizedTarget> {
     const origin = request.headers.origin;
 
+    const target = parseTerminalRequest(request.url);
+    const readSession = () =>
+      this.authService.api.getSession({
+        headers: fromNodeHeaders(request.headers),
+      });
+    const remember = (session: Awaited<ReturnType<typeof readSession>>) => {
+      if (session?.user) {
+        Object.assign(seen, {
+          userId: session.user.id,
+          user: { name: session.user.name, email: session.user.email },
+          sessionId: session.session.id,
+        });
+      }
+    };
+
     // Browsers always send Origin on WebSockets; a foreign one is a
-    // cross-site hijack attempt riding the session cookie.
+    // cross-site hijack attempt riding the session cookie. The session is
+    // read only to name the victim on the audit log; nothing is opened.
     if (origin !== undefined && !isTrustedOrigin(origin)) {
+      if (target) {
+        Object.assign(seen, target);
+        remember(await readSession().catch(() => null));
+      }
       throw new UpgradeRejection(403, 'Origin is not allowed');
     }
-
-    const target = parseTerminalRequest(request.url);
 
     if (!target) {
       throw new UpgradeRejection(404, 'Instance not found');
     }
 
-    const session = await this.authService.api.getSession({
-      headers: fromNodeHeaders(request.headers),
-    });
+    Object.assign(seen, target);
+
+    const session = await readSession();
 
     if (!session?.user) {
       throw new UpgradeRejection(401, 'Sign in to open a terminal');
     }
 
     const userId = session.user.id;
+    remember(session);
 
     if (this.sessionCountOf(userId) >= MAX_SESSIONS_PER_USER) {
       throw new UpgradeRejection(429, 'Too many open terminals');
@@ -296,7 +335,58 @@ export class WorkloadTerminalService
       throw new UpgradeRejection(409, 'Instance is not running');
     }
 
-    return { ...target, namespace, userId };
+    return {
+      ...target,
+      namespace,
+      userId,
+      user: { name: session.user.name, email: session.user.email },
+      sessionId: session.session.id,
+    };
+  }
+
+  /**
+   * A shell into a service is a privileged action: every attempt by a
+   * signed-in user goes on the audit log, with how it ended.
+   */
+  private async recordTerminal(
+    request: IncomingMessage,
+    target: Partial<AuthorizedTarget>,
+    status: number,
+    error: string | null,
+  ): Promise<void> {
+    if (!target.userId || !target.projectId || !target.workloadId) {
+      return;
+    }
+
+    const { ip, remote } = clientAddress(request);
+
+    await this.audit.record({
+      project_id: target.projectId,
+      action: 'service.terminal.open',
+      outcome: error ? 'failure' : 'success',
+      status_code: status,
+      error,
+      actor_type: 'user',
+      actor_id: target.userId,
+      actor_name: target.user?.name ?? null,
+      actor_email: target.user?.email ?? null,
+      session_id: target.sessionId ?? null,
+      ip_address: ip,
+      user_agent: userAgentOf(request),
+      workload_id: target.workloadId,
+      workload_name: await this.audit.workloadName(
+        target.projectId,
+        target.workloadId,
+      ),
+      http_method: 'GET',
+      http_path: request.url?.split('?')[0] ?? null,
+      duration_ms: null,
+      metadata: {
+        pod: target.pod,
+        ...(request.headers.origin && { origin: request.headers.origin }),
+        ...(remote && remote !== ip && { remote_address: remote }),
+      },
+    });
   }
 
   private async readPod(namespace: string, name: string): Promise<V1Pod> {
@@ -329,6 +419,7 @@ export class WorkloadTerminalService
   private async start(
     client: WebSocket,
     target: AuthorizedTarget,
+    request: IncomingMessage,
   ): Promise<void> {
     const label = `${target.namespace}/${target.pod}`;
     const input = new PassThrough();
@@ -434,8 +525,16 @@ export class WorkloadTerminalService
         { type: 'error', message: 'Could not start a shell in the instance' },
         CLOSE_INTERNAL_ERROR,
       );
+      void this.recordTerminal(
+        request,
+        target,
+        500,
+        `Could not start a shell: ${describeError(error)}`,
+      );
       return;
     }
+
+    void this.recordTerminal(request, target, 101, null);
 
     // The browser left while the exec stream was opening.
     if (client.readyState !== WebSocket.OPEN) {

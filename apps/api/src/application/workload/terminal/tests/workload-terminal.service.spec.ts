@@ -16,6 +16,7 @@ jest.mock('../../instances/workload-instances.service', () => ({
   WorkloadInstancesService: class WorkloadInstancesService {},
 }));
 
+import type { AuditLogService } from '@/application/audit/audit-log.service';
 import { EventEmitter } from 'node:events';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -113,10 +114,15 @@ describe('WorkloadTerminalService', () => {
   let execInPod: jest.Mock;
   let connection: FakeConnection;
   let execRequest: PodExecRequest | undefined;
+  let record: jest.Mock;
 
   beforeEach(async () => {
+    record = jest.fn().mockResolvedValue(undefined);
     server = http.createServer();
-    getSession = jest.fn().mockResolvedValue({ user: { id: 'user-1' } });
+    getSession = jest.fn().mockResolvedValue({
+      user: { id: 'user-1', name: 'Ada', email: 'ada@example.com' },
+      session: { id: 'session-1' },
+    });
     assertDocker = jest.fn().mockResolvedValue(undefined);
     readNamespacedPod = jest.fn().mockResolvedValue(runningPod());
     connection = new FakeConnection();
@@ -136,6 +142,10 @@ describe('WorkloadTerminalService', () => {
         coreV1: { readNamespacedPod },
         execInPod,
       } as unknown as KubernetesService,
+      {
+        record,
+        workloadName: jest.fn().mockResolvedValue('web'),
+      } as unknown as AuditLogService,
     );
     service.onApplicationBootstrap();
 
@@ -182,13 +192,58 @@ describe('WorkloadTerminalService', () => {
     await expect(rejectionStatus(PATH, 'https://evil.example')).resolves.toBe(
       403,
     );
-    expect(getSession).not.toHaveBeenCalled();
+    expect(execInPod).not.toHaveBeenCalled();
+    // The victim's session names them on the audit log; nothing is opened.
+    await waitFor(() => record.mock.calls.length > 0);
+    expect(record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outcome: 'failure',
+        status_code: 403,
+        actor_id: 'user-1',
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        metadata: expect.objectContaining({ origin: 'https://evil.example' }),
+      }),
+    );
   });
 
   it('refuses a request without a session', async () => {
     getSession.mockResolvedValue(null);
 
     await expect(rejectionStatus(PATH)).resolves.toBe(401);
+    expect(record).not.toHaveBeenCalled();
+  });
+
+  it('audits an opened shell and a refused one', async () => {
+    const client = await connect();
+    await waitFor(() => record.mock.calls.length > 0);
+
+    expect(record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'service.terminal.open',
+        outcome: 'success',
+        status_code: 101,
+        actor_id: 'user-1',
+        actor_email: 'ada@example.com',
+        session_id: 'session-1',
+        workload_name: 'web',
+        metadata: { pod: POD, origin: 'http://localhost:3000' },
+      }),
+    );
+    client.close();
+
+    record.mockClear();
+    readNamespacedPod.mockResolvedValue(
+      runningPod({ status: { phase: 'Pending' } }),
+    );
+    await expect(rejectionStatus(PATH)).resolves.toBe(409);
+    await waitFor(() => record.mock.calls.length > 0);
+    expect(record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outcome: 'failure',
+        status_code: 409,
+        error: 'Instance is not running',
+      }),
+    );
   });
 
   it('refuses a non-Docker workload with its HTTP status', async () => {

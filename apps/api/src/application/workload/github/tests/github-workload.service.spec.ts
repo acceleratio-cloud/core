@@ -31,7 +31,10 @@ const source = {
 };
 const image = `registry.acceleratio.internal/p1/w1@sha256:${'a'.repeat(64)}`;
 
-const build = (github: Record<string, jest.Mock> = {}) => {
+const build = (
+  github: Record<string, jest.Mock> = {},
+  record: jest.Mock = jest.fn().mockResolvedValue(undefined),
+) => {
   const none = {} as never;
   const service = new GithubWorkloadService(
     none,
@@ -44,6 +47,7 @@ const build = (github: Record<string, jest.Mock> = {}) => {
     none,
     none,
     github as never,
+    { record } as never,
   );
   const internals = service as unknown as {
     normalizeConfig: (config: unknown) => Record<string, unknown>;
@@ -309,15 +313,19 @@ describe('GithubWorkloadService.handlePush', () => {
   const run = async (
     payload: Record<string, unknown>,
     running?: { id: string },
+    deployError?: Error,
   ) => {
-    const { service } = build();
+    const record = jest.fn().mockResolvedValue(undefined);
+    const { service } = build({}, record);
     const rows = [
       deployed('follows', source),
       deployed('other-branch', { ...source, branch: 'dev' }),
       deployed('other-repo', { ...source, repository: 'acme/web' }),
       deployed('other-app', { ...source, github_app_id: 'app2' }),
     ];
-    const deploy = jest.spyOn(service, 'deploy').mockResolvedValue({} as never);
+    const deploy = deployError
+      ? jest.spyOn(service, 'deploy').mockRejectedValue(deployError)
+      : jest.spyOn(service, 'deploy').mockResolvedValue({} as never);
     const stopBuild = jest.fn().mockResolvedValue(undefined);
 
     Object.assign(service, {
@@ -328,7 +336,7 @@ describe('GithubWorkloadService.handlePush', () => {
 
     await service.handlePush('app', payload);
 
-    return { deploy, stopBuild };
+    return { deploy, stopBuild, record };
   };
 
   const push = {
@@ -341,6 +349,40 @@ describe('GithubWorkloadService.handlePush', () => {
 
     expect(deploy.mock.calls).toEqual([['p1', 'follows', null]]);
     expect(stopBuild).not.toHaveBeenCalled();
+  });
+
+  it('audits the deploy with the pusher as the actor', async () => {
+    const { record } = await run({
+      ...push,
+      after: 'abc123',
+      sender: { login: 'octo' },
+    });
+
+    expect(record).toHaveBeenCalledTimes(1);
+    expect(record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        project_id: 'p1',
+        action: 'service.deploy',
+        outcome: 'success',
+        actor_type: 'github',
+        actor_name: 'octo',
+        workload_id: 'follows',
+        metadata: {
+          trigger: 'push',
+          repository: 'acme/api',
+          ref: 'refs/heads/main',
+          commit: 'abc123',
+        },
+      }),
+    );
+  });
+
+  it('audits a push deploy that failed', async () => {
+    const { record } = await run(push, undefined, new Error('No Dockerfile'));
+
+    expect(record).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: 'failure', error: 'No Dockerfile' }),
+    );
   });
 
   it('cancels a build of an older commit first', async () => {

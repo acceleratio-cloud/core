@@ -19,6 +19,7 @@ import type {
   WorkloadConfig,
 } from '@acceleratio/shared';
 import { and, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
+import { AuditLogService } from '@/application/audit/audit-log.service';
 import { GithubService } from '@/application/integration/github/github.service';
 import { ProjectIsolationService } from '@/application/project/project-isolation.service';
 import { ProjectService } from '@/application/project/project.service';
@@ -76,6 +77,8 @@ const SOURCE_KEYS = [
 /** The fields of a GitHub `push` delivery this service reads. */
 export interface GithubPushPayload {
   ref?: string;
+  /** The commit the branch points to after the push. */
+  after?: string;
   deleted?: boolean;
   repository?: { full_name?: string };
   sender?: { login?: string };
@@ -186,6 +189,7 @@ export class GithubWorkloadService extends DockerWorkloadService {
     network: DockerWorkloadNetworkService,
     storageClasses: StorageClassService,
     private readonly github: GithubService,
+    private readonly audit: AuditLogService,
   ) {
     super(
       db,
@@ -438,6 +442,8 @@ export class GithubWorkloadService extends DockerWorkloadService {
         continue;
       }
 
+      const author = pushAuthor(payload);
+
       try {
         const running = await this.runningBuildRow(row.id);
 
@@ -449,13 +455,49 @@ export class GithubWorkloadService extends DockerWorkloadService {
           );
         }
 
-        await this.deploy(row.project_id, row.id, pushAuthor(payload));
+        await this.deploy(row.project_id, row.id, author);
+        await this.recordPushDeploy(row, payload, author, null);
       } catch (error) {
         this.buildLogger.warn(
           `Push to ${repository}@${branch} did not deploy ${row.name}: ${(error as Error).message}`,
         );
+        await this.recordPushDeploy(row, payload, author, error as Error);
       }
     }
+  }
+
+  /** A deploy started by a push: the GitHub account is the actor. */
+  private recordPushDeploy(
+    row: { id: string; name: string; project_id: string },
+    payload: GithubPushPayload,
+    author: ReturnType<typeof pushAuthor>,
+    error: Error | null,
+  ): Promise<void> {
+    return this.audit.record({
+      project_id: row.project_id,
+      action: 'service.deploy',
+      outcome: error ? 'failure' : 'success',
+      status_code: null,
+      error: error?.message ?? null,
+      actor_type: 'github',
+      actor_id: null,
+      actor_name: author?.github_login ?? payload.sender?.login ?? null,
+      actor_email: author?.email ?? null,
+      session_id: null,
+      ip_address: null,
+      user_agent: null,
+      workload_id: row.id,
+      workload_name: row.name,
+      http_method: null,
+      http_path: null,
+      duration_ms: null,
+      metadata: {
+        trigger: 'push',
+        repository: payload.repository?.full_name ?? null,
+        ref: payload.ref ?? null,
+        commit: payload.after ?? null,
+      },
+    });
   }
 
   /** The stored log of a finished build, else what the builder printed so far. */

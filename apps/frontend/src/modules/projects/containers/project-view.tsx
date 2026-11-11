@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'next/navigation';
 
 import { cn } from '@/lib/utils';
+import { AuditLogView } from '@/modules/audit/containers/audit-log-view';
 import { LogsView } from '@/modules/logs/containers/logs-view';
 import { setLogsTargetParams } from '@/modules/logs/utils/links';
 import { ObservabilityView } from '@/modules/observability/containers/observability-view';
@@ -123,6 +124,16 @@ export const ProjectView = () => {
           direction={direction}
         >
           <LogsView active={activeTab === 'logs'} />
+        </TabPanel>
+
+        <TabPanel
+          tab="audit"
+          activeTab={activeTab}
+          visited={visited}
+          direction={direction}
+          scrollable
+        >
+          <AuditLogView active={activeTab === 'audit'} />
         </TabPanel>
 
         <TabPanel
