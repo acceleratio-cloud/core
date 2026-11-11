@@ -39,6 +39,7 @@ import { DockerWorkloadNetworkService } from '@/application/workload/docker/dock
 import { DockerWorkloadService } from '@/application/workload/docker/docker-workload.service';
 import { GithubWorkloadService } from '@/application/workload/github/github-workload.service';
 import { PostgresAccessService } from '@/application/workload/postgres/postgres-access.service';
+import { PostgresBackupService } from '@/application/workload/postgres/postgres-backup.service';
 import { PostgresOverviewService } from '@/application/workload/postgres/postgres-overview.service';
 import { PostgresController } from '@/application/workload/postgres/postgres.controller';
 import { PostgresWorkloadService } from '@/application/workload/postgres/postgres.service';
@@ -121,6 +122,7 @@ import { VictoriaMetricsClient } from '@/vendor/victoriametrics/victoriametrics.
     PostgresWorkloadService,
     PostgresOverviewService,
     PostgresAccessService,
+    PostgresBackupService,
     GithubWorkloadService,
     StaticWorkloadService,
     S3BucketObjectsService,

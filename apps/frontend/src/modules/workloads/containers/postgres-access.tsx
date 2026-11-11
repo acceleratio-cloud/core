@@ -49,7 +49,7 @@ const RAM_RANGE = { min: 256, max: 16384, step: 256 };
 const DISK_MAX_GB = 100;
 
 /** The panel's portal ignores pointer events; dialogs mount on the body. */
-const useBody = () => {
+export const useBody = () => {
   const ref = useRef<HTMLElement | null>(null);
 
   useEffect(() => {

@@ -65,6 +65,18 @@ const normalizeStorageClassId = (value: unknown): string | null => {
   return value;
 };
 
+const normalizeBackups = (value: unknown): boolean | undefined => {
+  if (value !== undefined && typeof value !== 'boolean') {
+    throw new BadRequestException('backups must be true or false');
+  }
+
+  return value;
+};
+
+/** Backups are on unless a version turned them off. */
+export const backupsEnabled = (config: PostgresConfig | null): boolean =>
+  config?.backups !== false;
+
 /** Absent CPU/RAM stay absent, so the defaults apply and compare equal. */
 export const normalizePostgresConfig = (input: unknown): PostgresConfig => {
   const value = (
@@ -72,6 +84,7 @@ export const normalizePostgresConfig = (input: unknown): PostgresConfig => {
   ) as ConfigInput;
   const cpu = normalizeCpuMax(value.cpu_max);
   const ram = normalizeRamMax(value.ram_max);
+  const backups = normalizeBackups(value.backups);
 
   return {
     postgres_version: normalizeVersion(value.postgres_version),
@@ -79,6 +92,7 @@ export const normalizePostgresConfig = (input: unknown): PostgresConfig => {
     storage_class_id: normalizeStorageClassId(value.storage_class_id),
     ...(cpu === undefined ? {} : { cpu_max: cpu }),
     ...(ram === undefined ? {} : { ram_max: ram }),
+    ...(backups === undefined ? {} : { backups }),
   };
 };
 
@@ -99,6 +113,7 @@ export const updatePostgresConfig = (
     storage_class_id: current.storage_class_id,
     cpu_max: 'cpu_max' in value ? value.cpu_max : current.cpu_max,
     ram_max: 'ram_max' in value ? value.ram_max : current.ram_max,
+    backups: 'backups' in value ? value.backups : current.backups,
   });
 
   if (

@@ -40,6 +40,17 @@ export const DEFAULT_CNPG_NAMESPACE = 'cnpg-system';
 export const DEFAULT_POSTGRES_IMAGE_REPOSITORY =
   'ghcr.io/cloudnative-pg/postgresql';
 
+export const CNPG_BACKUP_PLURAL = 'backups';
+export const CNPG_SCHEDULED_BACKUP_PLURAL = 'scheduledbackups';
+/** Base backups and the WAL they need are kept this long. */
+export const BACKUP_RETENTION = '7d';
+/** Daily at 03:00 UTC; CNPG's schedule has a leading seconds field. */
+export const BACKUP_SCHEDULE = '0 0 3 * * *';
+export const BACKUP_ACCESS_KEY = 'ACCESS_KEY_ID';
+export const BACKUP_SECRET_KEY = 'ACCESS_SECRET_KEY';
+/** The name `bootstrap.recovery` refers to the source database by. */
+const RECOVERY_SOURCE = 'origin';
+
 /** Where pods of every namespace get their addresses (k3s `cluster-cidr`). */
 export const DEFAULT_POD_CIDR = '10.42.0.0/16';
 /** On the external Service: the source networks its policy allows. */
@@ -63,6 +74,51 @@ export const tlsOutsidePodNetwork = (
 
 export const credentialsSecretName = (externalName: string): string =>
   `${externalName}-credentials`;
+
+/** One SeaweedFS bucket per database holds its base backups and WAL. */
+export const backupBucketName = (workloadId: string): string =>
+  `pg-backup-${workloadId}`;
+
+/** The bucket keys the instances use, next to the database. */
+export const backupSecretName = (externalName: string): string =>
+  `${externalName}-backup`;
+
+export const scheduledBackupName = (externalName: string): string =>
+  `${externalName}-daily`;
+
+/**
+ * Where a database archives to. shortcut: CNPG's in-tree barmanObjectStore
+ * (deprecated in favour of the Barman Cloud plugin, which needs
+ * cert-manager); move to the plugin before CNPG drops it.
+ */
+export const backupObjectStore = (
+  workloadId: string,
+  externalName: string,
+  endpoint: string,
+) => ({
+  destinationPath: `s3://${backupBucketName(workloadId)}/`,
+  endpointURL: endpoint,
+  s3Credentials: {
+    accessKeyId: {
+      name: backupSecretName(externalName),
+      key: BACKUP_ACCESS_KEY,
+    },
+    secretAccessKey: {
+      name: backupSecretName(externalName),
+      key: BACKUP_SECRET_KEY,
+    },
+  },
+  wal: { compression: 'gzip' },
+  data: { compression: 'gzip' },
+});
+
+export const buildClusterBackup = (
+  input: PostgresManifestInput,
+  endpoint: string,
+) => ({
+  retentionPolicy: BACKUP_RETENTION,
+  barmanObjectStore: backupObjectStore(input.id, input.external_name, endpoint),
+});
 
 export const clusterPolicyName = (externalName: string): string =>
   `${externalName}-postgres`;
@@ -103,9 +159,11 @@ export interface CnpgCluster {
     labels?: Record<string, string>;
     annotations?: Record<string, string>;
     resourceVersion?: string;
+    uid?: string;
   };
   spec: Record<string, unknown>;
   status?: {
+    firstRecoverabilityPoint?: string;
     phase?: string;
     phaseReason?: string;
     readyInstances?: number;
@@ -114,12 +172,21 @@ export interface CnpgCluster {
   };
 }
 
+/** A new database that starts from another one's backups. */
+export interface PostgresRecovery {
+  source: PostgresManifestInput;
+  /** ISO 8601; null replays all archived WAL. */
+  targetTime: string | null;
+  endpoint: string;
+}
+
 export const buildCluster = (
   input: PostgresManifestInput,
   config: PostgresConfig,
   storageClassName: string,
   imageRepository: string = DEFAULT_POSTGRES_IMAGE_REPOSITORY,
   podCidr?: string,
+  recovery?: PostgresRecovery,
 ): CnpgCluster => ({
   apiVersion: `${CNPG_GROUP}/${CNPG_VERSION}`,
   kind: 'Cluster',
@@ -137,13 +204,42 @@ export const buildCluster = (
       // quarter of the volume.
       parameters: { max_wal_size: `${config.size_gb * 256}MB` },
     },
-    bootstrap: {
-      initdb: {
-        database: POSTGRES_DATABASE,
-        owner: POSTGRES_USERNAME,
-        secret: { name: credentialsSecretName(input.external_name) },
-      },
-    },
+    bootstrap: recovery
+      ? {
+          recovery: {
+            source: RECOVERY_SOURCE,
+            database: POSTGRES_DATABASE,
+            owner: POSTGRES_USERNAME,
+            secret: { name: credentialsSecretName(input.external_name) },
+            ...(recovery.targetTime
+              ? { recoveryTarget: { targetTime: recovery.targetTime } }
+              : {}),
+          },
+        }
+      : {
+          initdb: {
+            database: POSTGRES_DATABASE,
+            owner: POSTGRES_USERNAME,
+            secret: { name: credentialsSecretName(input.external_name) },
+          },
+        },
+    ...(recovery
+      ? {
+          externalClusters: [
+            {
+              name: RECOVERY_SOURCE,
+              barmanObjectStore: {
+                ...backupObjectStore(
+                  recovery.source.id,
+                  recovery.source.external_name,
+                  recovery.endpoint,
+                ),
+                serverName: recovery.source.external_name,
+              },
+            },
+          ],
+        }
+      : {}),
     // Pods carry the workload labels, so logs, metrics and the terminal
     // find them like a Docker service's. The annotations let the bundled
     // VictoriaMetrics scrape the exporter (its `kubernetes-pods` job).
@@ -156,6 +252,50 @@ export const buildCluster = (
     },
   },
 });
+
+/** The daily base backup; the first one runs right away. */
+export const buildScheduledBackup = (input: PostgresManifestInput) => ({
+  apiVersion: `${CNPG_GROUP}/${CNPG_VERSION}`,
+  kind: 'ScheduledBackup',
+  metadata: metadata(input, scheduledBackupName(input.external_name)),
+  spec: {
+    schedule: BACKUP_SCHEDULE,
+    immediate: true,
+    method: 'barmanObjectStore',
+    // Backups it makes are deleted with the Cluster.
+    backupOwnerReference: 'cluster',
+    cluster: { name: input.external_name },
+  },
+});
+
+/** A base backup started from the console, deleted with the Cluster. */
+export const buildBackup = (
+  input: PostgresManifestInput,
+  name: string,
+  clusterUid: string,
+) => {
+  const base = metadata(input, name);
+
+  return {
+    apiVersion: `${CNPG_GROUP}/${CNPG_VERSION}`,
+    kind: 'Backup',
+    metadata: {
+      ...base,
+      ownerReferences: [
+        {
+          apiVersion: `${CNPG_GROUP}/${CNPG_VERSION}`,
+          kind: 'Cluster',
+          name: input.external_name,
+          uid: clusterUid,
+        },
+      ],
+    },
+    spec: {
+      method: 'barmanObjectStore',
+      cluster: { name: input.external_name },
+    },
+  };
+};
 
 export const buildCredentialsSecret = (
   input: PostgresManifestInput,

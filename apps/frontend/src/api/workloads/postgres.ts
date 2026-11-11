@@ -1,10 +1,13 @@
 import type {
+  PostgresBackups,
   PostgresCredentials,
   PostgresExposure,
   PostgresOverview,
   PostgresRows,
   PostgresTable,
+  RestorePostgresPayload,
   UpdatePostgresExposurePayload,
+  Workload,
 } from '@acceleratio/shared';
 
 import { api } from '@/api';
@@ -67,6 +70,30 @@ export const postgresApi = {
   rotateCredentials: async (projectId: string, id: string) => {
     const { data } = await api.post<PostgresCredentials>(
       `${base(projectId, id)}/credentials/rotate`,
+    );
+    return data;
+  },
+  backups: async (projectId: string, id: string) => {
+    const { data } = await api.get<PostgresBackups>(
+      `${base(projectId, id)}/backups`,
+    );
+    return data;
+  },
+  backUp: async (projectId: string, id: string) => {
+    const { data } = await api.post<PostgresBackups>(
+      `${base(projectId, id)}/backups`,
+    );
+    return data;
+  },
+  /** A new database with this one's data at `target_time`. */
+  restore: async (
+    projectId: string,
+    id: string,
+    payload: RestorePostgresPayload,
+  ) => {
+    const { data } = await api.post<Workload>(
+      `${base(projectId, id)}/restore`,
+      payload,
     );
     return data;
   },

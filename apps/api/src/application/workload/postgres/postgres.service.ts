@@ -13,6 +13,7 @@ import {
 import type {
   CreateWorkloadPayload,
   PostgresConfig,
+  RestorePostgresPayload,
   UpdateWorkloadPayload,
   Workload,
   WorkloadVersion as WorkloadVersionContract,
@@ -60,7 +61,10 @@ import {
   toWorkloadVersion,
   WorkloadVersionService,
 } from '../workload-version.service';
+import { PostgresBackupService } from './postgres-backup.service';
+import { findPostgresRow, readPostgresCluster } from './postgres.lookup';
 import {
+  backupsEnabled,
   normalizePostgresConfig,
   updatePostgresConfig,
 } from './postgres.config';
@@ -82,6 +86,7 @@ import {
   POSTGRES_DATABASE,
   POSTGRES_PORT,
   POSTGRES_USERNAME,
+  type PostgresRecovery,
   readWriteHost,
   RESTART_ANNOTATION,
 } from './postgres.manifests';
@@ -142,6 +147,7 @@ export class PostgresWorkloadService
     private readonly events: WorkloadEventsService,
     private readonly versions: WorkloadVersionService,
     private readonly storageClasses: StorageClassService,
+    private readonly backups: PostgresBackupService,
   ) {}
 
   /** Databases that were starting when the API stopped are followed again. */
@@ -240,8 +246,65 @@ export class PostgresWorkloadService
       throw new BadRequestException('Unsupported workload type');
     }
 
+    return this.createDatabase(
+      projectId,
+      normalizeName(payload?.name),
+      normalizePostgresConfig(payload?.config),
+    );
+  }
+
+  /**
+   * A new database in the same project with the source's data as it was at
+   * `target_time`, from the source's backups. The source keeps running.
+   */
+  async restore(
+    projectId: string,
+    sourceId: string,
+    payload: RestorePostgresPayload,
+  ): Promise<Workload> {
+    const source = await this.findRow(projectId, sourceId);
+    const config = configOf(await this.activeVersion(source));
+
+    if (config === null) {
+      throw new ConflictException('The database has no applied settings');
+    }
+
     const name = normalizeName(payload?.name);
-    const config = normalizePostgresConfig(payload?.config);
+    const first = await this.backups.firstRecoverabilityPoint(source);
+    // Recent minutes may not be archived yet; recovery can only reach those that are.
+    await this.backups.flushWal(source);
+    let targetTime: string | null = null;
+
+    if (payload?.target_time != null) {
+      const time = new Date(payload.target_time);
+
+      if (
+        typeof payload.target_time !== 'string' ||
+        Number.isNaN(time.getTime())
+      ) {
+        throw new BadRequestException('target_time must be an ISO 8601 time');
+      }
+
+      if (time < new Date(first) || time > new Date()) {
+        throw new BadRequestException(`Pick a time between ${first} and now`);
+      }
+
+      targetTime = time.toISOString();
+    }
+
+    return this.createDatabase(projectId, name, config, {
+      source,
+      targetTime,
+      endpoint: this.backups.endpoint,
+    });
+  }
+
+  private async createDatabase(
+    projectId: string,
+    name: string,
+    config: PostgresConfig,
+    recovery?: PostgresRecovery,
+  ): Promise<Workload> {
     let storageClassName: string;
 
     try {
@@ -299,6 +362,7 @@ export class PostgresWorkloadService
           storageClassName,
           this.imageRepository,
           this.podCidr,
+          recovery,
         ),
       });
       await this.versions.record({
@@ -315,6 +379,7 @@ export class PostgresWorkloadService
     }
 
     this.follow(row, Date.now());
+    this.backups.ensure(row);
 
     return this.get(projectId, row.id);
   }
@@ -360,6 +425,12 @@ export class PostgresWorkloadService
       const resized =
         next.cpu_max !== current.cpu_max || next.ram_max !== current.ram_max;
       const grown = next.size_gb > current.size_gb;
+      const toggled = backupsEnabled(next) !== backupsEnabled(current);
+
+      // Refused before anything changes, so a refusal leaves backups on.
+      if (toggled && !backupsEnabled(next)) {
+        await this.assertNotRestoring(existing);
+      }
 
       if (grown) {
         await this.assertExpandable(next.storage_class_id);
@@ -398,12 +469,26 @@ export class PostgresWorkloadService
               ]
             : []),
         ]);
+        changes.last_deployed_at = new Date();
+      }
+
+      if (resized || grown || toggled) {
+        // Recorded first: the backup setup reads it to know whether to run.
         await this.versions.record({
           id: randomUUID(),
           workloadId: existing.id,
           config: next,
         });
-        changes.last_deployed_at = new Date();
+      }
+
+      if (toggled && backupsEnabled(next)) {
+        this.backups.ensure(existing);
+      } else if (toggled) {
+        try {
+          await this.backups.disable(existing);
+        } catch (error) {
+          throw this.mapClusterError(error);
+        }
       }
     }
 
@@ -449,14 +534,20 @@ export class PostgresWorkloadService
     );
   }
 
-  /** Deletes the Cluster; Kubernetes deletes its volume and data with it. */
+  /**
+   * Deletes the Cluster, and Kubernetes deletes its volume and data with it,
+   * then its backups.
+   */
   async remove(projectId: string, id: string): Promise<void> {
     const row = await this.findRow(projectId, id);
 
+    // Its backups go with it, so a restore must not still be reading them.
+    await this.assertNotRestoring(row);
     this.stopFollowing(row.id);
 
     try {
       await this.removeFromCluster(row);
+      await this.backups.remove(row);
     } catch (error) {
       throw this.mapClusterError(error);
     }
@@ -526,6 +617,18 @@ export class PostgresWorkloadService
           ]),
         },
         {
+          key: 'backups',
+          label: 'Backups',
+          changes: changesOf([
+            compareField({
+              path: 'backups',
+              label: 'Backups',
+              before: before && (backupsEnabled(before) ? 'On' : 'Off'),
+              after: after && (backupsEnabled(after) ? 'On' : 'Off'),
+            }),
+          ]),
+        },
+        {
           key: 'storage',
           label: 'Storage',
           changes: changesOf([
@@ -574,6 +677,14 @@ export class PostgresWorkloadService
   /** The workload row of a database, for the overview. */
   findDatabase(projectId: string, id: string): Promise<WorkloadRow> {
     return this.findRow(projectId, id);
+  }
+
+  private async assertNotRestoring(row: WorkloadRow): Promise<void> {
+    try {
+      await this.backups.assertNotRestoringFrom(row);
+    } catch (error) {
+      throw this.mapClusterError(error);
+    }
   }
 
   private unsupported(): Promise<never> {
@@ -689,6 +800,11 @@ export class PostgresWorkloadService
         const settled = status !== 'deploying';
 
         if (settled || Date.now() - startedAt > GIVE_UP_AFTER_MS) {
+          // Finishes a backup setup that gave up waiting for a long start.
+          if (status === 'running') {
+            this.backups.ensure(row);
+          }
+
           this.events.publish({
             type: 'status',
             workload_id: row.id,
@@ -731,25 +847,11 @@ export class PostgresWorkloadService
 
   private async readCluster(row: WorkloadRow): Promise<CnpgCluster | null> {
     try {
-      const cluster =
-        (await this.kubernetes.customObjects.getNamespacedCustomObject({
-          group: CNPG_GROUP,
-          version: CNPG_VERSION,
-          namespace: projectNamespace(row.project_id),
-          plural: CNPG_CLUSTER_PLURAL,
-          name: row.external_name,
-        })) as CnpgCluster;
-
-      // A Cluster of that name that this workload did not create is not its.
-      return cluster.metadata.labels?.[WORKLOAD_ID_LABEL] === row.id
-        ? cluster
-        : null;
+      return await readPostgresCluster(this.kubernetes, row);
     } catch (error) {
-      if (getKubernetesStatusCode(error) !== 404) {
-        this.logger.warn(
-          `Could not read database ${row.external_name}: ${describeError(error)}`,
-        );
-      }
+      this.logger.warn(
+        `Could not read database ${row.external_name}: ${describeError(error)}`,
+      );
 
       return null;
     }
@@ -819,24 +921,8 @@ export class PostgresWorkloadService
     return toNestException(error);
   }
 
-  private async findRow(projectId: string, id: string): Promise<WorkloadRow> {
-    const [row] = await this.db
-      .select()
-      .from(workload)
-      .where(
-        and(
-          eq(workload.id, id),
-          eq(workload.project_id, projectId),
-          eq(workload.type, this.type),
-        ),
-      )
-      .limit(1);
-
-    if (!row) {
-      throw new NotFoundException('Workload not found');
-    }
-
-    return row;
+  private findRow(projectId: string, id: string): Promise<WorkloadRow> {
+    return findPostgresRow(this.db, projectId, id);
   }
 
   private async activeVersion(

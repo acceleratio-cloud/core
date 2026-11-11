@@ -9,15 +9,20 @@ import {
   Query,
 } from '@nestjs/common';
 import type {
+  PostgresBackups,
   PostgresCredentials,
   PostgresExposure,
   PostgresOverview,
   PostgresRows,
   PostgresTable,
+  RestorePostgresPayload,
   UpdatePostgresExposurePayload,
+  Workload,
 } from '@acceleratio/shared';
+import { PostgresBackupService } from './postgres-backup.service';
 import { PostgresAccessService } from './postgres-access.service';
 import { PostgresOverviewService } from './postgres-overview.service';
+import { PostgresWorkloadService } from './postgres.service';
 
 /**
  * A PostgreSQL workload's Overview tab (state, structure, rows), its external
@@ -28,7 +33,35 @@ export class PostgresController {
   constructor(
     private readonly overview: PostgresOverviewService,
     private readonly access: PostgresAccessService,
+    private readonly backups: PostgresBackupService,
+    private readonly databases: PostgresWorkloadService,
   ) {}
+
+  @Get('backups')
+  listBackups(
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<PostgresBackups> {
+    return this.backups.list(projectId, id);
+  }
+
+  @Post('backups')
+  backUp(
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<PostgresBackups> {
+    return this.backups.backUp(projectId, id);
+  }
+
+  /** A new database from this one's backups; this one is left as it is. */
+  @Post('restore')
+  restore(
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() payload: RestorePostgresPayload,
+  ): Promise<Workload> {
+    return this.databases.restore(projectId, id, payload);
+  }
 
   @Get('overview')
   state(

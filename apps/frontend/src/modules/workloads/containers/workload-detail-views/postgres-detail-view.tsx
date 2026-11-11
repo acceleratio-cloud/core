@@ -1,4 +1,9 @@
-import { LayoutDashboard, SlidersHorizontal, Table2 } from 'lucide-react';
+import {
+  DatabaseBackup,
+  LayoutDashboard,
+  SlidersHorizontal,
+  Table2,
+} from 'lucide-react';
 
 import type { Workload } from '@acceleratio/shared';
 import { DetailStack } from '@/modules/workloads/components/workload-details/detail-primitives';
@@ -12,6 +17,7 @@ import {
   PostgresExternalAccessSection,
   PostgresResourcesSection,
 } from '../postgres-access';
+import { PostgresBackupsPanel } from '../postgres-backups';
 import {
   WorkloadDeleteSection,
   WorkloadLifecycleActions,
@@ -42,6 +48,12 @@ export const getPostgresDetailView = (
       content: <PostgresData workload={workload} />,
     },
     {
+      id: 'backups',
+      label: 'Backups',
+      icon: DatabaseBackup,
+      content: <PostgresBackupsPanel workload={workload} />,
+    },
+    {
       id: 'settings',
       label: 'Settings',
       icon: SlidersHorizontal,
@@ -51,7 +63,7 @@ export const getPostgresDetailView = (
           <PostgresExternalAccessSection workload={workload} />
           <PostgresCredentialsSection workload={workload} />
           <WorkloadIdentitySection workload={workload} />
-          <WorkloadDeleteSection consequence="Deletes the database, its volume and every row stored in it, and its credentials." />
+          <WorkloadDeleteSection consequence="Deletes the database, its volume and every row stored in it, its credentials and all of its backups." />
         </DetailStack>
       ),
     },

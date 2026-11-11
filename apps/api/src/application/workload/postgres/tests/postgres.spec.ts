@@ -33,6 +33,7 @@ import {
   tableExistsSql,
 } from '../postgres-overview.service';
 import { PostgresWorkloadService } from '../postgres.service';
+import type { PostgresBackupService } from '../postgres-backup.service';
 
 // These pull the ESM-only Kubernetes client; every instance is faked.
 jest.mock('@/vendor/kubernetes/kubernetes.service', () => ({
@@ -163,6 +164,44 @@ describe('postgres manifests', () => {
           'prometheus.io/port': '9187',
         },
       },
+    });
+  });
+
+  it('restores from the source bucket up to the target time', () => {
+    const source = { ...input, id: 'src-id', external_name: 'orders-src' };
+    const body = buildCluster(
+      input,
+      normalizePostgresConfig({ postgres_version: '17', size_gb: 2 }),
+      'sc',
+      undefined,
+      undefined,
+      {
+        source,
+        targetTime: '2026-11-10T12:00:00.000Z',
+        endpoint: 'http://s3.test:8333',
+      },
+    );
+
+    expect(body.spec.bootstrap).toEqual({
+      recovery: {
+        source: 'origin',
+        database: 'app',
+        owner: 'app',
+        secret: { name: 'orders-db-3f9a1b2c-credentials' },
+        recoveryTarget: { targetTime: '2026-11-10T12:00:00.000Z' },
+      },
+    });
+    expect(body.spec).toMatchObject({
+      externalClusters: [
+        {
+          name: 'origin',
+          barmanObjectStore: {
+            destinationPath: 's3://pg-backup-src-id/',
+            serverName: 'orders-src',
+            endpointURL: 'http://s3.test:8333',
+          },
+        },
+      ],
     });
   });
 
@@ -319,6 +358,17 @@ const createService = (selects: unknown[][]) => {
     record: jest.fn().mockResolvedValue({}),
     findByIds: jest.fn().mockResolvedValue(new Map()),
   };
+  const backups = {
+    ensure: jest.fn(),
+    disable: jest.fn().mockResolvedValue(undefined),
+    assertNotRestoringFrom: jest.fn().mockResolvedValue(undefined),
+    flushWal: jest.fn().mockResolvedValue(undefined),
+    remove: jest.fn().mockResolvedValue(undefined),
+    firstRecoverabilityPoint: jest
+      .fn()
+      .mockResolvedValue('2026-11-10T03:00:00Z'),
+    endpoint: 'http://s3.test:8333',
+  };
   const service = new PostgresWorkloadService(
     db,
     { exists: jest.fn().mockResolvedValue(true) } as unknown as ProjectService,
@@ -329,9 +379,10 @@ const createService = (selects: unknown[][]) => {
     {
       kubernetesName: jest.fn().mockResolvedValue('seaweedfs-storage'),
     } as unknown as StorageClassService,
+    backups as unknown as PostgresBackupService,
   );
 
-  return { service, kubernetes, versions, deletes };
+  return { service, kubernetes, versions, deletes, backups };
 };
 
 describe('PostgresWorkloadService', () => {
@@ -340,7 +391,10 @@ describe('PostgresWorkloadService', () => {
   it('creates the Secret, policy and Cluster and never returns the password', async () => {
     jest.useFakeTimers();
     // nextWorkloadPosition, then get() → findRow.
-    const { service, kubernetes, versions } = createService([[], [row()]]);
+    const { service, kubernetes, versions, backups } = createService([
+      [],
+      [row()],
+    ]);
 
     const created = await service.create(projectId, {
       name: 'Orders DB',
@@ -371,14 +425,36 @@ describe('PostgresWorkloadService', () => {
       secret_name: 'orders-db-3f9a1b2c-credentials',
     });
     expect(JSON.stringify(created)).not.toContain(password);
+    expect(backups.ensure).toHaveBeenCalledWith(
+      expect.objectContaining({ id: workloadId }),
+    );
     service.onModuleDestroy();
   });
 
+  it('refuses a restore time outside the backup window', async () => {
+    const { service, versions } = createService([
+      [{ ...row(), active_version_id: 'v1' }],
+    ]);
+
+    versions.findByIds.mockResolvedValue(
+      new Map([['v1', { config: normalizePostgresConfig({ size_gb: 1 }) }]]),
+    );
+
+    await expect(
+      service.restore(projectId, workloadId, {
+        name: 'Orders copy',
+        target_time: '2026-11-01T00:00:00Z',
+      }),
+    ).rejects.toThrow('Pick a time between');
+  });
+
   it('deletes the Cluster, external Service, Secret and policy before the row', async () => {
-    const { service, kubernetes, deletes } = createService([[row()]]);
+    const { service, kubernetes, deletes, backups } = createService([[row()]]);
 
     await service.remove(projectId, workloadId);
 
+    expect(backups.assertNotRestoringFrom).toHaveBeenCalled();
+    expect(backups.remove).toHaveBeenCalled();
     expect(
       argsOf<{ plural: string }>(
         kubernetes.customObjects.deleteNamespacedCustomObject,
@@ -390,6 +466,39 @@ describe('PostgresWorkloadService', () => {
       namespace,
     });
     expect(deletes).toHaveBeenCalledTimes(1);
+  });
+
+  it('turns backups off and on as a version, without touching the Cluster', async () => {
+    const config = normalizePostgresConfig({ size_gb: 1 });
+    const { service, kubernetes, versions, backups } = createService([
+      [{ ...row(), active_version_id: 'v1' }],
+      [row()],
+      [{ ...row(), active_version_id: 'v2' }],
+      [row()],
+    ]);
+
+    versions.findByIds.mockResolvedValueOnce(new Map([['v1', { config }]]));
+    await service.update(projectId, workloadId, {
+      config: { ...config, backups: false },
+    });
+
+    expect(backups.disable).toHaveBeenCalledTimes(1);
+    expect(versions.record).toHaveBeenCalledWith(
+      expect.objectContaining({ config: { ...config, backups: false } }),
+    );
+    expect(
+      kubernetes.customObjects.patchNamespacedCustomObject,
+    ).not.toHaveBeenCalled();
+
+    versions.findByIds.mockResolvedValueOnce(
+      new Map([['v2', { config: { ...config, backups: false } }]]),
+    );
+    await service.update(projectId, workloadId, {
+      config: { ...config, backups: true },
+    });
+
+    expect(backups.ensure).toHaveBeenCalledTimes(1);
+    expect(backups.disable).toHaveBeenCalledTimes(1);
   });
 
   it('grows the disk in place and raises the WAL cap with it', async () => {

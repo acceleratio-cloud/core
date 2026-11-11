@@ -192,6 +192,8 @@ export interface PostgresConfig {
   cpu_max?: number | null;
   /** Memory limit in MiB. Absent means 1024 MiB, null no limit. */
   ram_max?: number | null;
+  /** Continuous backups and point-in-time recovery. Absent means on. */
+  backups?: boolean;
 }
 
 export type WorkloadConfig =
@@ -250,6 +252,48 @@ export interface PostgresCredentials {
   username: string;
   password: string;
   secret_name: string;
+}
+
+/**
+ * Where a database's backups stand: `off` when they are turned off,
+ * `provisioning` while its bucket is being made, `active` while WAL reaches
+ * the bucket, `failing` when archiving or the bucket setup fails (see
+ * `message`).
+ */
+export type PostgresBackupState = 'off' | 'provisioning' | 'active' | 'failing';
+
+/** One base backup, as CloudNativePG reports it. */
+export interface PostgresBackup {
+  name: string;
+  /** CloudNativePG's phase, such as `running`, `completed` or `failed`. */
+  phase: string;
+  /** True for the daily backup, false for one started from the console. */
+  scheduled: boolean;
+  started_at: string | null;
+  stopped_at: string | null;
+  error: string | null;
+}
+
+/** `GET …/postgres/backups`: the backup state and the restore window. */
+export interface PostgresBackups {
+  state: PostgresBackupState;
+  message: string | null;
+  /** Retention of base backups and WAL, such as `7d`. */
+  retention: string;
+  /** Earliest time a restore can reach; null before the first backup finished. */
+  first_recoverability_point: string | null;
+  /** Newest first. */
+  backups: PostgresBackup[];
+}
+
+/**
+ * `POST …/postgres/restore`: a new database in the same project with the
+ * data as it was at `target_time` (ISO 8601), or as late as the archive
+ * reaches when null.
+ */
+export interface RestorePostgresPayload {
+  name: string;
+  target_time: string | null;
 }
 
 export interface PostgresConnectionStats {
