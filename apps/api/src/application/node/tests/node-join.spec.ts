@@ -197,6 +197,25 @@ describe('install script', () => {
     );
   });
 
+  it('opens an active UFW for the pod and service CIDRs before k3s, like install.sh', () => {
+    const script = installScript(options);
+
+    // Not grep -q: under pipefail an early exit would SIGPIPE ufw and skip the rules.
+    expect(script).toContain('grep "Status: active" >/dev/null');
+    expect(script).toContain("for cidr in '10.42.0.0/16' '10.43.0.0/16'; do");
+
+    for (const rule of ['allow from', 'route allow from', 'route allow to']) {
+      expect(script).toContain(
+        `ufw ${rule} "$cidr" comment acceleratio-cluster`,
+      );
+    }
+
+    expect(script).not.toMatch(/ufw (disable|reset|--force)/);
+    expect(script.indexOf('ufw allow')).toBeLessThan(
+      script.indexOf('get.k3s.io'),
+    );
+  });
+
   it('mirrors the image registry on the new node', () => {
     // The service CIDR 10.43.0.0/16 places the registry at .50, as install.sh does.
     expect(installScript(options)).toContain(

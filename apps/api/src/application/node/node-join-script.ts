@@ -376,12 +376,36 @@ export const LONGHORN_HOST_SETUP = [
 ];
 
 /**
+ * `configure_ufw` from `deploy/install.sh`: UFW's default deny drops pod
+ * traffic to the host (no DNS, no API server), so an active UFW gets the pod
+ * and service CIDRs allowed, tagged for uninstall.sh. UFW stays on.
+ */
+export const ufwSetup = (target: JoinTarget): string[] => {
+  // k3s defaults, as install.sh uses when the CIDRs are not set.
+  const cidrs = [
+    target.clusterCidr ?? '10.42.0.0/16',
+    target.serviceCidr ?? '10.43.0.0/16',
+  ].map(shellQuote);
+
+  return [
+    'if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep "Status: active" >/dev/null; then',
+    `  for cidr in ${cidrs.join(' ')}; do`,
+    '    ufw allow from "$cidr" comment acceleratio-cluster',
+    '    ufw route allow from "$cidr" comment acceleratio-cluster',
+    '    ufw route allow to "$cidr" comment acceleratio-cluster',
+    '  done',
+    'fi',
+  ];
+};
+
+/**
  * Installs k3s at the cluster's version. The config, which carries the join
  * token, arrives on stdin as part of this script, never on a command line.
  */
 export const installScript = (options: InstallOptions): string =>
   [
     'set -euo pipefail',
+    ...ufwSetup(options.target),
     ...LONGHORN_HOST_SETUP,
     'umask 077',
     'mkdir -p /etc/rancher/k3s',
