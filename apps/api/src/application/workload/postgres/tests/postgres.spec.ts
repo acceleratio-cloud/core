@@ -79,7 +79,7 @@ const cluster = (
   status: CnpgCluster['status'],
   annotations: Record<string, string> = {},
 ): CnpgCluster => ({
-  ...buildCluster(input, normalizePostgresConfig({}), 'seaweedfs-storage'),
+  ...buildCluster(input, normalizePostgresConfig({}), 'longhorn'),
   metadata: {
     name: input.external_name,
     namespace,
@@ -379,7 +379,7 @@ const createService = (selects: unknown[][]) => {
     { publish: jest.fn() } as unknown as WorkloadEventsService,
     versions as unknown as WorkloadVersionService,
     {
-      kubernetesName: jest.fn().mockResolvedValue('seaweedfs-storage'),
+      kubernetesName: jest.fn().mockResolvedValue('longhorn'),
     } as unknown as StorageClassService,
     backups as unknown as PostgresBackupService,
   );
