@@ -2,24 +2,16 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useEffect, useRef, useSyncExternalStore } from 'react';
-import { House, Search, Server, Settings, Store } from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
+import { House, Server, Settings, Store } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import { Separator } from '@/shared/components/ui/separator';
-import { Kbd } from '../components/ui/kbd';
 import { LogoIcon } from '../icons/logo-icon';
 import { SystemStatusButton } from '@/modules/system/containers/system-status';
+import { CommandSearch, type CommandPage } from './command-search';
 import { UserMenu } from './user-menu';
 
-type NavLink = {
-  label: string;
-  href: string;
-  icon: LucideIcon;
-};
-
-const links: NavLink[] = [
+const links: CommandPage[] = [
   { label: 'Overview', href: '/', icon: House },
   { label: 'Marketplace', href: '/marketplace', icon: Store },
   { label: 'Servers', href: '/servers', icon: Server },
@@ -31,39 +23,8 @@ const isActivePath = (pathname: string, href: string) =>
     ? pathname === '/'
     : pathname === href || pathname.startsWith(`${href}/`);
 
-const subscribeToPlatform = () => () => {};
-
-const useIsApplePlatform = () =>
-  useSyncExternalStore(
-    subscribeToPlatform,
-    () => /mac|iphone|ipad/i.test(navigator.userAgent),
-    () => true,
-  );
-
 export const Navbar = () => {
   const pathname = usePathname();
-  const searchRef = useRef<HTMLInputElement>(null);
-  const isApple = useIsApplePlatform();
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      // Autofill and datalist picks dispatch keydown events without a key.
-      if (
-        typeof event.key !== 'string' ||
-        event.key.toLowerCase() !== 'k' ||
-        !(event.metaKey || event.ctrlKey)
-      ) {
-        return;
-      }
-
-      event.preventDefault();
-      searchRef.current?.focus();
-      searchRef.current?.select();
-    };
-
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
 
   return (
     <div className="flex h-full items-center gap-3 px-4 sm:px-5">
@@ -96,27 +57,7 @@ export const Navbar = () => {
 
       <div className="ml-auto flex items-center gap-3">
         <SystemStatusButton />
-        <div
-          role="search"
-          className="hidden h-8 w-64 items-center gap-2 rounded-full border border-border bg-background px-3 transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/30 lg:flex"
-        >
-          <Search
-            aria-hidden="true"
-            strokeWidth={1.75}
-            className="size-3.5 shrink-0 text-muted-foreground"
-          />
-          <input
-            ref={searchRef}
-            type="text"
-            aria-label="Quick search"
-            aria-keyshortcuts="Meta+K Control+K"
-            autoComplete="off"
-            spellCheck={false}
-            placeholder="Quick search..."
-            className="min-w-0 flex-1 bg-transparent text-[13px] text-foreground outline-none placeholder:text-muted-foreground"
-          />
-          <Kbd>{isApple ? '⌘K' : 'Ctrl K'}</Kbd>
-        </div>
+        <CommandSearch pages={links} />
 
         <UserMenu />
       </div>
@@ -124,7 +65,7 @@ export const Navbar = () => {
   );
 };
 
-const NavItem = ({ link, active }: { link: NavLink; active: boolean }) => {
+const NavItem = ({ link, active }: { link: CommandPage; active: boolean }) => {
   const Icon = link.icon;
 
   return (
