@@ -307,6 +307,7 @@ export class S3BucketWorkloadService
           draft_config: null,
           position: await nextWorkloadPosition(this.db, projectId),
           external_name: bucket,
+          bucket_name: bucket,
           last_deployed_at: new Date(),
         })
         .returning();

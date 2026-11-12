@@ -1,2 +1,0 @@
-DROP INDEX "workload_s3_bucket_name_unique";--> statement-breakpoint
-CREATE UNIQUE INDEX "workload_s3_bucket_name_unique" ON "workload" USING btree ("external_name") WHERE "workload"."type" = 's3_bucket';

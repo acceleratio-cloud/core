@@ -13,12 +13,10 @@ import {
   pgTable,
   timestamp,
   unique,
-  uniqueIndex,
   uuid,
   varchar,
 } from 'drizzle-orm/pg-core';
 import { project } from '../../project/schemas/project.schema';
-import { storageClass } from '../../storage-class/schemas/storage-class.schema';
 import { workloadVersion } from './workload-version.schema';
 
 export const workloadTypeEnum = pgEnum('workload_type', [
@@ -60,15 +58,17 @@ export const workload = pgTable(
     // Icon shown in the console: a built-in pack id or an `https://` SVG URL.
     // Null shows the default icon of the type. Metadata only, never deployed.
     icon: varchar('icon', { length: WORKLOAD_ICON_URL_MAX_LENGTH }),
-    // Storage profile of an `s3_bucket` workload; null for other types. A
-    // profile cannot be deleted while a bucket uses it.
+    // Bucket of an `s3_bucket` workload (its `external_name`); null for other
+    // types. RustFS has one bucket namespace for the whole cluster, so it is
+    // unique across projects. A plain column, not an index on `type`:
+    // PostgreSQL cannot use an enum value in the transaction that adds it,
+    // and a fresh database applies every migration in one transaction.
+    bucket_name: varchar('bucket_name', { length: 63 }).unique(
+      'workload_bucket_name_unique',
+    ),
     // `github` workloads: a push to the followed branch deploys it. Applies at
     // once, outside versions. Other types ignore it.
     auto_deploy: boolean('auto_deploy').notNull().default(true),
-    storage_class_id: uuid('storage_class_id').references(
-      () => storageClass.id,
-      { onDelete: 'restrict' },
-    ),
     // When a deploy action last ran, not when the rollout finished. The
     // status itself is not stored: it is derived from the cluster on read.
     last_deployed_at: timestamp('last_deployed_at'),
@@ -96,11 +96,6 @@ export const workload = pgTable(
       table.project_id,
       table.internal_hostname,
     ),
-    // RustFS has one bucket namespace for the whole cluster, so a bucket
-    // name is unique across projects, not only within one.
-    uniqueIndex('workload_s3_bucket_name_unique')
-      .on(table.external_name)
-      .where(sql`${table.type} = 's3_bucket'`),
   ],
 );
 

@@ -44,7 +44,7 @@ const row = (overrides: Partial<WorkloadRow> = {}): WorkloadRow => ({
   position: { x: 0, y: 0 },
   external_name: 'demo-assets',
   internal_hostname: null,
-  storage_class_id: null,
+  bucket_name: 'demo-assets',
   last_deployed_at: new Date('2026-11-04T10:00:00.000Z'),
   icon: null,
   created_at: new Date('2026-11-04T10:00:00.000Z'),
@@ -238,6 +238,7 @@ describe('S3BucketWorkloadService.create', () => {
       name: 'demo-assets',
       type: 's3_bucket',
       external_name: 'demo-assets',
+      bucket_name: 'demo-assets',
     });
     expect(calls.insertValues[0]).not.toHaveProperty('status');
     const [[recorded]] = context.versions.record.mock.calls as [

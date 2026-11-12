@@ -198,7 +198,7 @@ Columns: `id`, `name`, `created_at`, `updated_at`.
 One row per deployable node on the project canvas. `project_id` scopes every read and write.
 
 Columns: `id`, `project_id`, `name`, `type`, `active_version_id`, `draft_config`, `position`,
-`external_name`, `internal_hostname`, `icon`, `storage_class_id`, `last_deployed_at`, `created_at`,
+`external_name`, `internal_hostname`, `icon`, `bucket_name`, `last_deployed_at`, `created_at`,
 `updated_at`.
 
 Invariants:
@@ -230,17 +230,20 @@ Invariants:
   Secret `<external_name>-env` and loads it with `envFrom`, and deletes the Secret when the version
   has none. Empty entrypoint/command/env lists are omitted, so older configs need no migration. Adding a type means adding an enum value and a config
   schema together.
-- An `s3_bucket` workload is a RustFS bucket. Its `name` and `external_name` are both the bucket
-  name, which is unique across all projects (partial unique index `workload_s3_bucket_name_unique`
-  on `type = 's3_bucket'`, migration `0031`, because RustFS has one bucket namespace); names starting
+- An `s3_bucket` workload is a RustFS bucket. Its `name`, `external_name` and `bucket_name` are all
+  the bucket name, which is unique across all projects (`workload_bucket_name_unique` on
+  `bucket_name`, migration `0031`, because RustFS has one bucket namespace; a plain column because a
+  fresh database applies every migration in one transaction, where PostgreSQL cannot use the
+  `s3_bucket` enum value in an index predicate); names starting
   with `acceleratio-` or `pg-backup-` are reserved for the platform's own buckets. Its config is `{}`,
   recorded once as version 1 and never changed. It has no draft and no Deployment: the API sets
   its status from the provisioning Job (`deploying` until the bucket exists, then `running` or
   `failed`) and keeps it on the project Secret as the annotations `acceleratio.io/bucket-phase`
   (`provisioning`, `ready`, `failed`) and `acceleratio.io/bucket-message`; a Secret without the
   annotation predates it and counts as ready. The access keys live in the Secret `s3-<bucket>` in the project namespace, never in the
-  database; in RustFS they are a user attached to the policy `acc-<workload id>`. `storage_class_id`
-  is null for buckets.
+  database; in RustFS they are a user attached to the policy `acc-<workload id>`. `bucket_name` is
+  null for other types. Migration `0032` dropped `workload.storage_class_id`, which tied a bucket to
+  a storage profile.
 - A `static` workload is a site of uploaded files served by a Docker-style Deployment of
   `joseluisq/static-web-server`. Its config is `{ cpu_max?, ram_max?, replicas?, release_id? }`; the API drops
   every other Docker field, and the server image and flags are set on each apply, not stored, so versions never
@@ -253,8 +256,8 @@ Invariants:
   config is `{ postgres_version, size_gb, storage_class_id, cpu_max?, ram_max? }`; the version and storage
   profile are fixed after creation, `size_gb` can only grow (and only on a StorageClass that allows
   volume expansion; the claim grows in place and `max_wal_size` follows at a quarter of the disk), and
-  every change is applied at once and recorded as a new version (there is no draft, deploy or rollback). `storage_class_id` stays in the
-  config and the column stays null. Like a bucket it has no
+  every change is applied at once and recorded as a new version (there is no draft, deploy or rollback). `storage_class_id` is
+  part of the config. Like a bucket it has no
   Deployment: the API reads its status from the Cluster. The password lives only in the Secret
   `<external_name>-credentials`, never in the database. The API reads it only on request
   (`GET …/postgres/credentials`, the console's show button) and returns a new one once from regeneration. External access is not stored either: the NodePort Service `<external_name>-external`
@@ -366,9 +369,8 @@ Invariants:
   forbids changing them on an existing StorageClass, so the console duplicates a class instead.
   `name`, `description` and `allow_volume_expansion` can change; the last one is patched on the live
   object.
-- Resources that pick a class (volumes) reference it with
-  `storage_class_id uuid references storage_class(id) on delete restrict`. The restriction is the
-  database half of the delete guard; the API also refuses to delete a class that PersistentVolumes,
+- Volumes and databases name a class by id inside their config (`storage_class_id`), not by a
+  foreign key, so the API is the delete guard: it refuses to delete a class that PersistentVolumes,
   claims in the cluster or saved service volumes still use.
 
 ### `storage_benchmark`

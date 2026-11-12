@@ -1,5 +1,5 @@
 {
-  "id": "2dcbeb02-866e-4086-b515-95e9313d4ccb",
+  "id": "8afb49f1-698b-4380-b521-e93724bc1e25",
   "prevId": "43d666c4-0e5c-4d65-a6b7-26ee93bc48f4",
   "version": "7",
   "dialect": "postgresql",
@@ -1957,6 +1957,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "bucket_name": {
+          "name": "bucket_name",
+          "type": "varchar(63)",
+          "primaryKey": false,
+          "notNull": false
+        },
         "auto_deploy": {
           "name": "auto_deploy",
           "type": "boolean",
@@ -2006,22 +2012,6 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
-        },
-        "workload_s3_bucket_name_unique": {
-          "name": "workload_s3_bucket_name_unique",
-          "columns": [
-            {
-              "expression": "external_name",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"workload\".\"type\" = 's3_bucket'",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
         }
       },
       "foreignKeys": {
@@ -2067,6 +2057,13 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
+        "workload_bucket_name_unique": {
+          "name": "workload_bucket_name_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "bucket_name"
+          ]
+        },
         "workload_project_id_external_name_unique": {
           "name": "workload_project_id_external_name_unique",
           "nullsNotDistinct": false,
