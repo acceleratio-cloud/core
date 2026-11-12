@@ -6,8 +6,8 @@ import {
   releaseIdOf,
 } from '../static-workload.config';
 import {
-  buildSiteClaim,
-  buildSiteVolume,
+  buildSiteFilesContainer,
+  buildSiteKeySecret,
   SITE_READINESS_PROBE,
   siteServerArgs,
   STATIC_SERVER_IMAGE,
@@ -51,27 +51,44 @@ describe('isServedPath', () => {
 });
 
 describe('static site manifests', () => {
-  it('mounts the filer folder of the site read-only through a pre-bound volume', () => {
-    const volume = buildSiteVolume(site);
-    const claim = buildSiteClaim(site);
-
-    expect(volume.spec?.csi).toMatchObject({
-      driver: 'seaweedfs-csi-driver',
-      readOnly: true,
-      volumeAttributes: { path: `/sites/${workloadId}` },
-    });
-    expect(volume.spec?.claimRef).toEqual({
-      namespace: `project-${projectId}`,
-      name: claim.metadata?.name,
-    });
-    expect(claim.spec?.volumeName).toBe(volume.metadata?.name);
-    // The Docker claim prune keys on this label; the site claim must lack it.
-    expect(claim.metadata?.labels).not.toHaveProperty(
-      'acceleratio.io/volume-id',
-    );
+  const init = buildSiteFilesContainer({
+    workloadId,
+    releaseId,
+    bucket: 'acceleratio-sites',
+    endpoint: 'http://rustfs.rustfs.svc.cluster.local:9000',
+    image: 'rustfs/rc:test',
   });
 
-  it('serves the release from the read-only claim', () => {
+  it('copies its own release with the site key from its Secret', () => {
+    expect(init.command?.[2]).toContain(
+      `rc mirror --quiet site/acceleratio-sites/${workloadId}/${releaseId}/ /site/${releaseId}/`,
+    );
+    expect(init.envFrom).toEqual([
+      { secretRef: { name: `static-site-${workloadId}` } },
+    ]);
+    expect(JSON.stringify(init)).not.toContain('AWS_SECRET_ACCESS_KEY":');
+  });
+
+  it('keeps the key Secret out of the Docker prune', () => {
+    const secret = buildSiteKeySecret(site, {
+      accessKeyId: 'AK',
+      secretAccessKey: 'SK',
+    });
+
+    expect(secret.metadata).toMatchObject({
+      name: `static-site-${workloadId}`,
+      namespace: `project-${projectId}`,
+    });
+    expect(secret.metadata?.labels).not.toHaveProperty(
+      'acceleratio.io/workload-id',
+    );
+    expect(secret.stringData).toEqual({
+      AWS_ACCESS_KEY_ID: 'AK',
+      AWS_SECRET_ACCESS_KEY: 'SK',
+    });
+  });
+
+  it('serves the release from an emptyDir the init container fills', () => {
     const deployment = buildDeployment({
       ...site,
       external_name: 'docs-3f9a1b2c',
@@ -79,7 +96,7 @@ describe('static site manifests', () => {
         docker_image: STATIC_SERVER_IMAGE,
         command: siteServerArgs(releaseId),
       },
-      read_only_claim: { name: 'static-site-x', mount_path: '/site' },
+      files: { mount_path: '/site', init },
       readiness_probe: SITE_READINESS_PROBE,
     });
     const pod = deployment.spec!.template.spec!;
@@ -100,13 +117,12 @@ describe('static site manifests', () => {
     expect(pod.containers[0].volumeMounts).toEqual([
       { name: 'files', mountPath: '/site', readOnly: true },
     ]);
-    expect(pod.volumes).toEqual([
-      {
-        name: 'files',
-        persistentVolumeClaim: { claimName: 'static-site-x', readOnly: true },
-      },
-    ]);
-    // Read-only files never need the Recreate strategy volumes force.
+    expect(pod.initContainers?.[0]).toMatchObject({
+      name: 'fetch-files',
+      volumeMounts: [{ name: 'files', mountPath: '/site' }],
+    });
+    expect(pod.volumes).toEqual([{ name: 'files', emptyDir: {} }]);
+    // Copied files never need the Recreate strategy volumes force.
     expect(deployment.spec?.strategy).toBeUndefined();
   });
 });

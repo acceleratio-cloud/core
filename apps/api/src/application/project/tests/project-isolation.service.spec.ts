@@ -162,18 +162,17 @@ describe('ProjectIsolationService.ensure', () => {
             },
           ],
         },
-        // Only the SeaweedFS S3 port, for project workloads using buckets.
+        // Only the RustFS S3 port, for buckets and static site files.
         {
           toEndpoints: [
             {
               matchLabels: {
-                'k8s:io.kubernetes.pod.namespace': 'seaweedfs',
-                'app.kubernetes.io/name': 'seaweedfs',
-                'app.kubernetes.io/component': 'filer',
+                'k8s:io.kubernetes.pod.namespace': 'rustfs',
+                'app.kubernetes.io/name': 'rustfs',
               },
             },
           ],
-          toPorts: [{ ports: [{ port: '8333', protocol: 'TCP' }] }],
+          toPorts: [{ ports: [{ port: '9000', protocol: 'TCP' }] }],
         },
         { toEntities: ['world'] },
       ],

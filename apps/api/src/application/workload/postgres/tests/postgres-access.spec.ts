@@ -75,7 +75,7 @@ describe('exposure manifests', () => {
     const cluster = buildCluster(
       input,
       normalizePostgresConfig({}),
-      'seaweedfs-storage',
+      'longhorn',
       undefined,
       '10.60.0.0/16',
     );

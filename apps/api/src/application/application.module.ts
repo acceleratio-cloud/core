@@ -64,7 +64,7 @@ import { WorkloadStatusDeriverRegistry } from '@/application/workload/workload-s
 import { WorkloadTypeRegistry } from '@/application/workload/workload-type.registry';
 import { WorkloadTypeResolver } from '@/application/workload/workload-type.resolver';
 import { WorkloadVersionService } from '@/application/workload/workload-version.service';
-import { SeaweedfsFilerClient } from '@/vendor/seaweedfs/seaweedfs-filer.client';
+import { S3StorageClient } from '@/vendor/s3/s3.client';
 import { TraefikClient } from '@/vendor/traefik/traefik.client';
 import { GithubClient } from '@/vendor/github/github.client';
 import { VictoriaLogsClient } from '@/vendor/victorialogs/victorialogs.client';
@@ -133,7 +133,7 @@ import { VictoriaMetricsClient } from '@/vendor/victoriametrics/victoriametrics.
     GithubWorkloadService,
     StaticWorkloadService,
     S3BucketObjectsService,
-    SeaweedfsFilerClient,
+    S3StorageClient,
     TraefikClient,
     VictoriaMetricsClient,
     MetricsService,

@@ -1,4 +1,4 @@
-import type { StorageClass, WorkloadStatus } from '@acceleratio/shared';
+import type { WorkloadStatus } from '@acceleratio/shared';
 
 export const BUCKET_NAME_MIN_LENGTH = 3;
 export const BUCKET_NAME_MAX_LENGTH = 63;
@@ -38,32 +38,6 @@ export const bucketNameProblem = (value: string): string | null => {
   }
 
   return null;
-};
-
-/** Copies SeaweedFS keeps for a replication code `xyz`. */
-const copies = (replication: string) =>
-  1 +
-  Array.from(replication).reduce(
-    (sum, digit) => sum + (Number.parseInt(digit, 10) || 0),
-    0,
-  );
-
-/** The settings of a profile that a bucket uses, in one short line. */
-export const describeStorageProfile = (profile: StorageClass): string => {
-  const parameters = profile.parameters;
-
-  if (!parameters) {
-    return 'SeaweedFS defaults.';
-  }
-
-  const count = copies(parameters.replication);
-  const parts = [
-    count === 1 ? 'One copy' : `${count} copies`,
-    parameters.disk_type ? `${parameters.disk_type} disks` : null,
-    parameters.ttl ? `objects expire after ${parameters.ttl}` : null,
-  ].filter(Boolean);
-
-  return `${parts.join(', ')}.`;
 };
 
 /**

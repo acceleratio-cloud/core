@@ -12,8 +12,10 @@
 #
 # The machine runs deploy/install.sh from this checkout (OrbStack shares the
 # Mac filesystem with its machines), so local development gets k3s with
-# embedded etcd, Cilium, SeaweedFS + CSI, VictoriaMetrics and VictoriaLogs
-# exactly as a server does. The installer also deploys the released API and
+# embedded etcd, Cilium, RustFS, VictoriaMetrics and VictoriaLogs as a server
+# does. Storage is the one difference: Longhorn needs iSCSI, which OrbStack's
+# LXC machines cannot run, so volumes use the k3s local-path provisioner
+# (STORAGE_BACKEND=local-path) and storage profiles are unavailable. The installer also deploys the released API and
 # console into the cluster; they are scaled to zero because `make dev` runs
 # them from source on the Mac.
 #
@@ -140,10 +142,11 @@ K3S_PUBLIC_IP=${ip}
 ACCELERATIO_PUBLIC_HOST=${ip}
 ACCELERATIO_CONSOLE_URL=http://${ip}:30300
 ACCELERATIO_API_URL=http://${ip}:30080
+STORAGE_BACKEND=local-path
 EOF
   vm chmod 600 /root/install.env
 
-  log "Installing the cluster (k3s, Cilium, SeaweedFS, VictoriaMetrics, VictoriaLogs); this takes a few minutes the first time"
+  log "Installing the cluster (k3s, Cilium, RustFS, VictoriaMetrics, VictoriaLogs); this takes a few minutes the first time"
   for attempt in 1 2 3; do
     if vm bash "${ROOT_DIR}/deploy/install.sh" --config /root/install.env >&2; then
       return 0
@@ -264,6 +267,10 @@ print_env() {
   # generated sslip.io domains resolve to it and work locally.
   value="$(kube get nodes -o 'jsonpath={.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null || true)"
   [[ -n "$value" ]] && printf 'ACCELERATIO_PUBLIC_IP=%s\n' "$value"
+
+  # local-path here, not the server's longhorn.
+  value="$(kube get storageclass -o 'jsonpath={range .items[?(@.metadata.annotations.storageclass\.kubernetes\.io/is-default-class=="true")]}{.metadata.name}{end}' 2>/dev/null || true)"
+  [[ -n "$value" ]] && printf 'PLATFORM_STORAGE_CLASS_NAME=%s\n' "$value"
   return 0
 }
 

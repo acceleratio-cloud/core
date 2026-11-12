@@ -438,10 +438,10 @@ export const BenchmarkReportView = ({ id }: { id: string }) => {
                 value={String(report.environment.nodes)}
               />
             ) : null}
-            {report.environment?.volume_servers != null ? (
+            {report.environment?.storage_nodes != null ? (
               <Row
                 label="Storage servers"
-                value={String(report.environment.volume_servers)}
+                value={String(report.environment.storage_nodes)}
               />
             ) : null}
             {report.environment?.kubernetes_version ? (

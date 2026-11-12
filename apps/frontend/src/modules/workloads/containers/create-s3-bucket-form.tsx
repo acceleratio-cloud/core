@@ -1,13 +1,12 @@
 'use client';
 
 import { useState } from 'react';
-import { ArrowLeft, ChevronRight } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 
 import type { CreateWorkloadPayload, Workload } from '@acceleratio/shared';
 import { getApiErrorMessage } from '@/api';
 import { workloadsApi } from '@/api/workloads';
-import { useStorageProfiles } from '@/modules/workloads/hooks/use-storage-profiles';
 import {
   GeneratedNameInput,
   generateName,
@@ -27,16 +26,8 @@ import {
   FieldLabel,
 } from '@/shared/components/ui/field';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/shared/components/ui/select';
-import {
   BUCKET_NAME_MAX_LENGTH,
   bucketNameProblem,
-  describeStorageProfile,
 } from '../utils/s3-bucket';
 
 interface S3BucketForm {
@@ -52,9 +43,6 @@ export const CreateS3BucketForm = ({
   onCreated: (workload: Workload) => void;
   onBack: () => void;
 }) => {
-  const profiles = useStorageProfiles();
-  // Null keeps the platform profile, which the API resolves.
-  const [profileId, setProfileId] = useState<string | null>(null);
   // Generated once per opened form, not on every render.
   const [initialName] = useState(generateName);
   const {
@@ -68,11 +56,6 @@ export const CreateS3BucketForm = ({
     defaultValues: { name: initialName },
   });
 
-  const available = profiles.status === 'ready' ? profiles.profiles : [];
-  const platform = available.find((profile) => profile.kind === 'platform');
-  const selectedId = profileId ?? platform?.id ?? null;
-  const selected = available.find((profile) => profile.id === selectedId);
-
   const onSubmit = handleSubmit(async ({ name }) => {
     clearErrors('root');
 
@@ -81,11 +64,6 @@ export const CreateS3BucketForm = ({
         name: name.trim(),
         type: 's3_bucket',
       };
-
-      if (profileId) {
-        payload.config = { storage_class_id: profileId };
-      }
-
       const workload = await workloadsApi.create(projectId, payload);
 
       onCreated(workload);
@@ -99,7 +77,7 @@ export const CreateS3BucketForm = ({
       <DialogHeader>
         <DialogTitle>Create S3 bucket</DialogTitle>
         <DialogDescription>
-          An S3-compatible bucket in SeaweedFS, with its own access keys.
+          An S3-compatible bucket with its own access keys.
         </DialogDescription>
       </DialogHeader>
 
@@ -133,65 +111,6 @@ export const CreateS3BucketForm = ({
             </FieldDescription>
             <FieldError errors={[errors.name]} />
           </Field>
-
-          <details className="group border-t border-border pt-4">
-            <summary className="flex cursor-pointer list-none items-center gap-1.5 text-[13px] font-medium text-foreground outline-none focus-visible:underline">
-              <ChevronRight
-                aria-hidden="true"
-                strokeWidth={1.75}
-                className="size-3.5 text-muted-foreground transition-transform group-open:rotate-90 motion-reduce:transition-none"
-              />
-              Advanced settings
-              <span className="truncate font-normal text-muted-foreground">
-                {selected ? selected.name : 'Platform default'}
-              </span>
-            </summary>
-
-            <Field className="mt-4">
-              <FieldLabel htmlFor="bucket-storage-profile">
-                Storage profile
-              </FieldLabel>
-              {profiles.status === 'error' ? (
-                <FieldDescription className="text-destructive">
-                  Could not load storage profiles: {profiles.message}. The
-                  bucket will use the platform default.
-                </FieldDescription>
-              ) : (
-                <>
-                  <Select
-                    value={selectedId}
-                    items={available.map((profile) => ({
-                      value: profile.id,
-                      label: profile.name,
-                    }))}
-                    disabled={profiles.status === 'loading'}
-                    onValueChange={(next) => {
-                      if (typeof next === 'string') {
-                        setProfileId(next === platform?.id ? null : next);
-                      }
-                    }}
-                  >
-                    <SelectTrigger id="bucket-storage-profile">
-                      <SelectValue placeholder="Loading profiles…" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {available.map((profile) => (
-                        <SelectItem key={profile.id} value={profile.id}>
-                          {profile.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <FieldDescription>
-                    {selected
-                      ? describeStorageProfile(selected)
-                      : 'Replication, disk type and expiry of the stored objects.'}{' '}
-                    Fixed once the bucket exists.
-                  </FieldDescription>
-                </>
-              )}
-            </Field>
-          </details>
 
           <FieldError>{errors.root?.message}</FieldError>
         </FieldGroup>

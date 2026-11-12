@@ -17,22 +17,28 @@ export type StorageClassClusterStatus =
   'ready' | 'missing' | 'drifted' | 'unknown';
 
 /**
- * SeaweedFS CSI tuning. Every field maps to one StorageClass parameter that
- * the driver passes to `weed mount`. `null` leaves the driver default.
+ * Where Longhorn keeps a copy relative to the pod that uses the volume.
+ * `disabled`: anywhere; `best-effort`: one copy on the pod's server when it
+ * can; `strict-local`: one copy, always on the pod's server.
+ */
+export type StorageClassDataLocality =
+  'disabled' | 'best-effort' | 'strict-local';
+
+export type StorageClassFsType = 'ext4' | 'xfs';
+
+/**
+ * Longhorn volume settings. Every field maps to one StorageClass parameter
+ * of the `driver.longhorn.io` provisioner.
  */
 export interface StorageClassParameters {
-  /** SeaweedFS replication code `xyz`: copies in other DCs, racks, servers. */
-  replication: string;
-  /** Volume server disk tag, such as `hdd` or `ssd`. */
-  disk_type: string | null;
-  /** Shared collection; null gives every volume its own collection. */
-  collection: string | null;
-  /** Time to live of written data, such as `7d`. Data is deleted after it. */
-  ttl: string | null;
-  cache_capacity_mb: number | null;
-  concurrent_writers: number | null;
-  chunk_size_limit_mb: number | null;
-  writeback_cache: boolean;
+  /** Copies of each volume, each on a different server (1–3). */
+  number_of_replicas: number;
+  data_locality: StorageClassDataLocality;
+  fs_type: StorageClassFsType;
+  /** Longhorn disk tags a copy's disk must have; null allows any disk. */
+  disk_selector: string[] | null;
+  /** Longhorn node tags a copy's server must have; null allows any server. */
+  node_selector: string[] | null;
 }
 
 export interface StorageClass {
@@ -79,9 +85,10 @@ export interface UpdateStorageClassPayload {
 }
 
 export interface StorageEnvironment {
+  /** Longhorn's CSI driver; false on a development cluster (local-path). */
   csi_driver_installed: boolean | null;
-  /** SeaweedFS volume servers; null when unknown. */
-  volume_servers: number | null;
+  /** Servers Longhorn may place copies on (Ready, scheduling allowed); null when unknown. */
+  storage_nodes: number | null;
 }
 
 export type StorageBenchmarkStatus =
@@ -159,7 +166,7 @@ export interface StorageBenchmarkProfileSnapshot {
 
 export interface StorageBenchmarkEnvironment {
   nodes: number | null;
-  volume_servers: number | null;
+  storage_nodes: number | null;
   kubernetes_version: string | null;
 }
 

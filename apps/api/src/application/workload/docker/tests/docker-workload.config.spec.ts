@@ -3,6 +3,7 @@ import {
   ENV_MAX_ITEMS,
   newDockerConfig,
   normalizeDockerConfig,
+  VOLUME_REPLICAS_MESSAGE,
 } from '../docker-workload.config';
 
 const normalize = (config: Record<string, unknown>) =>
@@ -229,6 +230,19 @@ describe('normalizeDockerConfig volumes', () => {
     expect(normalize({ docker_image: 'nginx', volumes: [] })).toEqual({
       docker_image: 'nginx',
     });
+  });
+
+  it('allows one instance only with a volume', () => {
+    expect(
+      normalize({ docker_image: 'nginx', replicas: 1, volumes: [volume] })
+        .volumes,
+    ).toHaveLength(1);
+    expect(() =>
+      normalize({ docker_image: 'nginx', replicas: 2, volumes: [volume] }),
+    ).toThrow(VOLUME_REPLICAS_MESSAGE);
+    expect(
+      normalize({ docker_image: 'nginx', replicas: 2, volumes: [] }).replicas,
+    ).toBe(2);
   });
 
   it.each([

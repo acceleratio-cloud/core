@@ -311,16 +311,27 @@ const LimitField = ({
 const ReplicasField = ({
   control,
   disabled,
+  hasVolumes,
 }: {
   control: Control<DockerConfigForm>;
   disabled: boolean;
+  /** A volume is attached to one server at a time, so one replica runs. */
+  hasVolumes: boolean;
 }) => {
   const labelId = useId();
   const { field } = useController({ control, name: 'replicas' });
   const max = Math.max(REPLICAS_MAX, field.value);
 
   return (
-    <SettingRow label="Replicas" labelId={labelId} hint="Running copies.">
+    <SettingRow
+      label="Replicas"
+      labelId={labelId}
+      hint={
+        hasVolumes
+          ? 'One copy: a service with a volume runs on one server at a time.'
+          : 'Running copies.'
+      }
+    >
       <div className="flex h-8 items-center">
         <SliderValue>{formatReplicas(field.value)}</SliderValue>
       </div>
@@ -331,7 +342,7 @@ const ReplicasField = ({
           min={REPLICAS_MIN}
           max={max}
           step={1}
-          disabled={disabled}
+          disabled={disabled || (hasVolumes && field.value <= 1)}
           onValueChange={(next) => {
             field.onChange(Math.round(Array.isArray(next) ? next[0] : next));
           }}
@@ -663,7 +674,11 @@ export const EditDockerWorkloadConfig = () => {
               format={formatMemory}
               disabled={isLocked}
             />
-            <ReplicasField control={control} disabled={isLocked} />
+            <ReplicasField
+              control={control}
+              disabled={isLocked}
+              hasVolumes={(config.volumes?.length ?? 0) > 0}
+            />
           </div>
         </DetailSection>
 

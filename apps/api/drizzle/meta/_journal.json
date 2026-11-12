@@ -218,6 +218,20 @@
       "when": 1794461604936,
       "tag": "0030_workload_icon",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1794505537698,
+      "tag": "0031_workload_bucket_name",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1794505543560,
+      "tag": "0032_drop_workload_storage_class",
+      "breakpoints": true
     }
   ]
 }

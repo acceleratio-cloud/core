@@ -2,18 +2,18 @@
 #
 # Acceleratio uninstaller.
 #
-# Removes the Helm releases, Cilium networking, k3s, SeaweedFS,
-# VictoriaMetrics and VictoriaLogs data that
-# deploy/install.sh created. This is destructive.
+# Removes the Helm releases, Cilium networking, k3s, Longhorn volumes, RustFS,
+# VictoriaMetrics and VictoriaLogs data that deploy/install.sh created. This is
+# destructive.
 #
 # Usage: sudo ./deploy/uninstall.sh [--dry-run] [--yes]
 #
 set -Eeuo pipefail
 
-SEAWEEDFS_NAMESPACE="${SEAWEEDFS_NAMESPACE:-seaweedfs}"
-SEAWEEDFS_RELEASE="${SEAWEEDFS_RELEASE:-seaweedfs}"
-SEAWEEDFS_CSI_RELEASE="${SEAWEEDFS_CSI_RELEASE:-seaweedfs-csi}"
-SEAWEEDFS_DATA_DIR="${SEAWEEDFS_DATA_DIR:-/var/lib/seaweedfs}"
+LONGHORN_NAMESPACE="${LONGHORN_NAMESPACE:-longhorn-system}"
+LONGHORN_RELEASE="${LONGHORN_RELEASE:-longhorn}"
+LONGHORN_DATA_DIR="${LONGHORN_DATA_DIR:-/var/lib/longhorn}"
+RUSTFS_NAMESPACE="${RUSTFS_NAMESPACE:-rustfs}"
 VICTORIAMETRICS_NAMESPACE="${VICTORIAMETRICS_NAMESPACE:-victoria-metrics}"
 VICTORIAMETRICS_RELEASE="${VICTORIAMETRICS_RELEASE:-victoria-metrics}"
 VICTORIAMETRICS_DATA_DIR="${VICTORIAMETRICS_DATA_DIR:-/var/lib/victoria-metrics}"
@@ -70,10 +70,11 @@ Acceleratio uninstaller
 
 Removes:
   - the Acceleratio namespace (PostgreSQL, API, console) and its database files
-  - SeaweedFS CSI and SeaweedFS Helm releases
+  - project namespaces, RustFS and the Longhorn Helm release with every volume
   - Cilium Helm release and its CNI files/interfaces
   - k3s and its embedded etcd
-  - SeaweedFS hostPath data, PostgreSQL data and /etc/acceleratio
+  - Longhorn data (/var/lib/longhorn), iSCSI sessions, PostgreSQL data,
+    /etc/acceleratio and the UFW rules the installer added
 
 CILIUM_CNI_CONF_PATH and CILIUM_CNI_BIN_PATH are respected if the installer
 used custom CNI paths. Kubeconfigs in /root/.kube and user home directories
@@ -136,7 +137,7 @@ confirm() {
   if [ ! -t 0 ]; then
     die "--yes is required when stdin is not a terminal."
   fi
-  printf 'This deletes k3s, etcd, Cilium, SeaweedFS and database data. Type "uninstall" to continue: '
+  printf 'This deletes k3s, etcd, Cilium, every volume (Longhorn, RustFS) and database data. Type "uninstall" to continue: '
   read -r answer
   if [ "$answer" != "uninstall" ]; then
     die "Uninstall aborted."
@@ -155,16 +156,24 @@ uninstall_helm_releases() {
   if command -v k3s >/dev/null 2>&1; then
     run k3s kubectl delete namespace "$ACCELERATIO_NAMESPACE" --ignore-not-found --wait=true --timeout=180s || true
     run k3s kubectl delete clusterrolebinding acceleratio-api --ignore-not-found || true
+    # Pods that use volumes go before Longhorn, so it can detach them.
+    run k3s kubectl delete namespace -l app.kubernetes.io/managed-by=acceleratio --wait=true --timeout=180s || true
+    run k3s kubectl delete namespace "$RUSTFS_NAMESPACE" --ignore-not-found --wait=true --timeout=180s || true
+    # Longhorn refuses to uninstall until this flag is set.
+    if k3s kubectl -n "$LONGHORN_NAMESPACE" get settings.longhorn.io deleting-confirmation-flag >/dev/null 2>&1; then
+      run k3s kubectl -n "$LONGHORN_NAMESPACE" patch settings.longhorn.io deleting-confirmation-flag \
+        --type merge -p '{"value":"true"}' || true
+      run "$helm_cmd" uninstall "$LONGHORN_RELEASE" -n "$LONGHORN_NAMESPACE" --ignore-not-found --wait --timeout 10m ||
+        log_warn "Longhorn did not uninstall cleanly; removing k3s clears what is left."
+    fi
   fi
 
   run "$helm_cmd" uninstall "$VICTORIALOGS_RELEASE" -n "$VICTORIALOGS_NAMESPACE" --ignore-not-found
   run "$helm_cmd" uninstall "$VICTORIAMETRICS_RELEASE" -n "$VICTORIAMETRICS_NAMESPACE" --ignore-not-found
-  run "$helm_cmd" uninstall "$SEAWEEDFS_CSI_RELEASE" -n "$SEAWEEDFS_NAMESPACE" --ignore-not-found
-  run "$helm_cmd" uninstall "$SEAWEEDFS_RELEASE" -n "$SEAWEEDFS_NAMESPACE" --ignore-not-found
   run "$helm_cmd" uninstall cilium -n kube-system --ignore-not-found
 
   if [ -f "$K3S_KUBECONFIG" ] && command -v k3s >/dev/null 2>&1; then
-    run k3s kubectl delete namespace "$SEAWEEDFS_NAMESPACE" --ignore-not-found --wait=true --timeout=180s || true
+    run k3s kubectl delete namespace "$LONGHORN_NAMESPACE" --ignore-not-found --wait=true --timeout=180s || true
     run k3s kubectl delete namespace "$VICTORIAMETRICS_NAMESPACE" --ignore-not-found --wait=true --timeout=180s || true
     run k3s kubectl delete namespace "$VICTORIALOGS_NAMESPACE" --ignore-not-found --wait=true --timeout=180s || true
   fi
@@ -216,6 +225,23 @@ remove_cilium() {
   fi
 }
 
+# The Longhorn blacklist install.sh added between these markers.
+remove_multipath() {
+  local conf=/etc/multipath.conf
+  [ -f "$conf" ] && grep -qxF "# BEGIN acceleratio longhorn" "$conf" || return 0
+  run sed -i '/^# BEGIN acceleratio longhorn$/,/^# END acceleratio longhorn$/d' "$conf"
+  if systemctl is-active --quiet multipathd 2>/dev/null; then
+    run systemctl restart multipathd || true
+  fi
+}
+
+# Longhorn volumes are iSCSI sessions on the host; removing k3s does not end
+# them.
+logout_iscsi() {
+  command -v iscsiadm >/dev/null 2>&1 || return 0
+  run iscsiadm -m node --logoutall=all || true
+}
+
 remove_k3s() {
   if [ -x /usr/local/bin/k3s-uninstall.sh ]; then
     run /usr/local/bin/k3s-uninstall.sh
@@ -234,7 +260,7 @@ remove_k3s() {
 
 validate_data_dir() {
   local dir
-  for dir in "$SEAWEEDFS_DATA_DIR" "$VICTORIAMETRICS_DATA_DIR" "$VICTORIALOGS_DATA_DIR" "$POSTGRES_DATA_DIR"; do
+  for dir in "$LONGHORN_DATA_DIR" "$VICTORIAMETRICS_DATA_DIR" "$VICTORIALOGS_DATA_DIR" "$POSTGRES_DATA_DIR"; do
     case "$dir" in
       ""|"/"|"/var"|"/var/lib"|"/etc")
         die "Refusing to remove unsafe data directory: '${dir}'"
@@ -255,7 +281,8 @@ validate_cni_paths() {
 }
 
 remove_data() {
-  run rm -rf "$SEAWEEDFS_DATA_DIR"
+  run rm -rf "$LONGHORN_DATA_DIR"
+  run rm -f /etc/modules-load.d/acceleratio.conf
   run rm -rf "$VICTORIAMETRICS_DATA_DIR"
   run rm -rf "$VICTORIALOGS_DATA_DIR"
   run rm -rf "$VECTOR_DATA_DIR"
@@ -269,16 +296,26 @@ remove_data() {
   fi
 }
 
+# Deletes the UFW rules install.sh tagged with this comment, highest number
+# first so the remaining numbers stay valid.
+remove_ufw_rules() {
+  command -v ufw >/dev/null 2>&1 || return 0
+  local number
+  for number in $(ufw status numbered 2>/dev/null | sed -n 's/^\[ *\([0-9]*\)\].*# acceleratio-cluster *$/\1/p' | sort -rn); do
+    run ufw --force delete "$number"
+  done
+}
+
 print_summary() {
   if (( DRY_RUN )); then
     printf '\n%s\n' "${C_GREEN}Acceleratio uninstall dry run complete${C_RESET}"
-    printf 'Would remove: k3s, etcd, Cilium, Acceleratio, SeaweedFS, VictoriaMetrics, VictoriaLogs, %s, %s and %s\n' "$SEAWEEDFS_DATA_DIR" "$VICTORIAMETRICS_DATA_DIR" "$VICTORIALOGS_DATA_DIR"
+    printf 'Would remove: k3s, etcd, Cilium, Acceleratio, Longhorn, RustFS, VictoriaMetrics, VictoriaLogs, %s, %s and %s\n' "$LONGHORN_DATA_DIR" "$VICTORIAMETRICS_DATA_DIR" "$VICTORIALOGS_DATA_DIR"
     printf 'Would keep: /root/.kube/config and user kubeconfigs\n'
     printf 'Dry run complete: no changes were made.\n'
   else
     printf '\n%s\n' "${C_GREEN}Acceleratio uninstall complete${C_RESET}"
     printf 'Kept: /root/.kube/config and user kubeconfigs\n'
-    printf 'Removed: k3s, etcd, Cilium, Acceleratio, SeaweedFS, VictoriaMetrics, VictoriaLogs, %s, %s and %s\n' "$SEAWEEDFS_DATA_DIR" "$VICTORIAMETRICS_DATA_DIR" "$VICTORIALOGS_DATA_DIR"
+    printf 'Removed: k3s, etcd, Cilium, Acceleratio, Longhorn, RustFS, VictoriaMetrics, VictoriaLogs, %s, %s and %s\n' "$LONGHORN_DATA_DIR" "$VICTORIAMETRICS_DATA_DIR" "$VICTORIALOGS_DATA_DIR"
     printf 'Reinstall: sudo ./deploy/install.sh\n'
   fi
 }
@@ -294,7 +331,10 @@ main() {
   detach_cilium_bpf
   remove_cilium
   remove_k3s
+  logout_iscsi
+  remove_multipath
   remove_data
+  remove_ufw_rules
   print_summary
 }
 

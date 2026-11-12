@@ -5,7 +5,10 @@ import type {
   V1Pod,
   V1PodCondition,
 } from '@kubernetes/client-node';
-import { deriveStatus } from '../docker-workload.status';
+import {
+  deriveStatus,
+  UNSCHEDULABLE_GRACE_MS,
+} from '../docker-workload.status';
 
 interface DeploymentOptions {
   replicas?: number;
@@ -339,6 +342,35 @@ describe('deriveStatus', () => {
       status: 'failed',
       status_message: 'Unschedulable: 0/3 nodes are available',
     });
+  });
+
+  it('waits a grace period before an unschedulable pod counts as failed', () => {
+    const since = new Date('2026-11-12T10:00:00Z');
+    const pending = [
+      createPod(
+        [],
+        [
+          {
+            type: 'PodScheduled',
+            status: 'False',
+            reason: 'Unschedulable',
+            message: 'pod has unbound immediate PersistentVolumeClaims',
+            lastTransitionTime: since,
+          },
+        ],
+      ),
+    ];
+
+    expect(
+      deriveStatus(createDeployment(), pending, since.getTime() + 5_000),
+    ).toEqual({ status: 'deploying', status_message: null });
+    expect(
+      deriveStatus(
+        createDeployment(),
+        pending,
+        since.getTime() + UNSCHEDULABLE_GRACE_MS,
+      ).status,
+    ).toBe('failed');
   });
 
   it('keeps a PodScheduled=False pod without Unschedulable deploying', () => {

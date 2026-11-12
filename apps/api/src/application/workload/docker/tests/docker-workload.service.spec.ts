@@ -77,7 +77,7 @@ const baseRow: WorkloadRow = {
   position: { x: 0, y: 0 },
   external_name: externalName,
   internal_hostname: 'my-api',
-  storage_class_id: null,
+  bucket_name: null,
   last_deployed_at: new Date('2026-11-01T10:00:00.000Z'),
   icon: null,
   created_at: new Date('2026-11-01T09:00:00.000Z'),
@@ -242,7 +242,7 @@ const createService = () => {
   };
   const storageClasses = {
     kubernetesName: jest.fn((id: string | null) =>
-      Promise.resolve(id === null ? 'seaweedfs-storage' : `sc-${id}`),
+      Promise.resolve(id === null ? 'longhorn' : `sc-${id}`),
     ),
     assertVolumeProfile: jest.fn(() => Promise.resolve()),
   };
@@ -1641,7 +1641,7 @@ describe('DockerWorkloadService volumes', () => {
           name: `${externalName}-vol-7c8d9e0f1a2b4c3d8e4f5a6b7c8d9e0f`,
         },
         spec: {
-          storageClassName: 'seaweedfs-storage',
+          storageClassName: 'longhorn',
           resources: { requests: { storage: '10Gi' } },
         },
       },

@@ -49,18 +49,15 @@ import {
   describeOutcomes,
   DISK_CHOICES,
   EMPTY_FORM,
-  EXPIRY_CHOICES,
-  INTEGER_LIMITS,
+  formCopies,
+  FS_CHOICES,
+  LOCALITY_CHOICES,
   NAME_MAX_LENGTH,
   presetForm,
   RECLAIM_CHOICES,
-  REPLICATION_PATTERN,
-  replicationCopies,
   STORAGE_PRESETS,
-  TAG_PATTERN,
   toForm,
-  TTL_PATTERN,
-  validateInteger,
+  validateTags,
   type Choice,
   type StorageClassDialogMode,
   type StorageClassForm,
@@ -86,7 +83,7 @@ const TITLES: Record<StorageClassDialogMode, string> = {
 
 const DESCRIPTIONS: Record<StorageClassDialogMode, string> = {
   create:
-    'A storage profile decides how volumes and buckets keep their data: how many copies, on which disks, and for how long.',
+    'A storage profile decides how volumes keep their data: how many copies, on which disks and servers.',
   duplicate:
     'Creates a new profile from these settings. The original stays unchanged.',
   edit: 'How data is stored is fixed once a profile exists, so volumes never change under you. Duplicate the profile to change it.',
@@ -201,10 +198,10 @@ const FormChoice = ({
 );
 
 const PresetPicker = ({
-  volumeServers,
+  storageServers,
   onPick,
 }: {
-  volumeServers: number | null;
+  storageServers: number | null;
   onPick: (preset: StoragePreset) => void;
 }) => (
   <div className="mt-6">
@@ -215,8 +212,8 @@ const PresetPicker = ({
       {STORAGE_PRESETS.map((preset) => {
         const unavailable =
           preset.minServers !== null &&
-          volumeServers !== null &&
-          volumeServers < preset.minServers;
+          storageServers !== null &&
+          storageServers < preset.minServers;
 
         return (
           <li key={preset.id}>
@@ -239,7 +236,7 @@ const PresetPicker = ({
                 </span>
                 <span className="mt-0.5 block text-[12px] text-muted-foreground">
                   {unavailable
-                    ? `Needs ${preset.minServers} volume servers; this cluster has ${volumeServers}.`
+                    ? `Needs ${preset.minServers} storage servers; this cluster has ${storageServers}.`
                     : `Good for: ${preset.useFor}`}
                 </span>
               </span>
@@ -296,40 +293,29 @@ const StorageClassDialogBody = ({
     mode === 'create' ? 'preset' : 'form',
   );
   const [customDisk, setCustomDisk] = useState(
-    () => choiceValue(DISK_CHOICES, initial.disk_type) === CUSTOM_CHOICE,
-  );
-  const [customExpiry, setCustomExpiry] = useState(
-    () => choiceValue(EXPIRY_CHOICES, initial.ttl) === CUSTOM_CHOICE,
+    () => choiceValue(DISK_CHOICES, initial.disk_selector) === CUSTOM_CHOICE,
   );
 
   const loadForm = (form: StorageClassForm) => {
     reset(form);
-    setCustomDisk(choiceValue(DISK_CHOICES, form.disk_type) === CUSTOM_CHOICE);
-    setCustomExpiry(choiceValue(EXPIRY_CHOICES, form.ttl) === CUSTOM_CHOICE);
+    setCustomDisk(
+      choiceValue(DISK_CHOICES, form.disk_selector) === CUSTOM_CHOICE,
+    );
   };
 
   const form = useWatch({ control }) as StorageClassForm;
-  const replication = form.replication ?? EMPTY_FORM.replication;
+  const replicas = form.number_of_replicas ?? EMPTY_FORM.number_of_replicas;
 
   const readOnly = mode === 'view';
   // Kubernetes cannot change these on an existing StorageClass.
   const locked = mode === 'edit' || mode === 'view';
-  const copies = replicationCopies(replication);
-  const volumeServers = environment?.volume_servers ?? null;
-  const copyChoices: Choice[] = COPY_CHOICES.some(
-    (choice) => choice.value === replication,
-  )
-    ? COPY_CHOICES
-    : [
-        ...COPY_CHOICES,
-        {
-          value: replication,
-          label: `${copies} copies (custom layout)`,
-          hint: 'Set with the replication code under Advanced.',
-        },
-      ];
-  const copyHint = copyChoices.find(
-    (choice) => choice.value === replication,
+  const copies = formCopies({ number_of_replicas: replicas });
+  const storageServers = environment?.storage_nodes ?? null;
+  const copyHint = COPY_CHOICES.find(
+    (choice) => choice.value === replicas,
+  )?.hint;
+  const localityHint = LOCALITY_CHOICES.find(
+    (choice) => choice.value === form.data_locality,
   )?.hint;
   const extraParameters = Object.entries(storageClass?.extra_parameters ?? {});
   const outcomes = describeOutcomes({ ...EMPTY_FORM, ...form });
@@ -346,10 +332,6 @@ const StorageClassDialogBody = ({
   });
 
   const id = (field: string) => `storage-profile-${field}`;
-  const tagRule = (value: string) =>
-    value.trim() === '' ||
-    TAG_PATTERN.test(value.trim()) ||
-    'Use up to 32 lowercase letters, digits, - or _.';
 
   return (
     <>
@@ -361,7 +343,7 @@ const StorageClassDialogBody = ({
       {step === 'preset' ? (
         <>
           <PresetPicker
-            volumeServers={volumeServers}
+            storageServers={storageServers}
             onPick={(preset) => {
               loadForm(presetForm(preset));
               setStep('form');
@@ -412,11 +394,11 @@ const StorageClassDialogBody = ({
               <FieldLabel htmlFor={id('copies')}>Copies of data</FieldLabel>
               <ChoiceSelect
                 id={id('copies')}
-                choices={copyChoices}
-                value={replication}
+                choices={COPY_CHOICES}
+                value={replicas}
                 disabled={locked}
                 onChange={(value) =>
-                  setValue('replication', value, {
+                  setValue('number_of_replicas', value, {
                     shouldDirty: true,
                     shouldValidate: true,
                   })
@@ -425,15 +407,15 @@ const StorageClassDialogBody = ({
               {copyHint ? (
                 <FieldDescription>{copyHint}</FieldDescription>
               ) : null}
-              {!locked && volumeServers !== null && copies > volumeServers ? (
+              {!locked && storageServers !== null && copies > storageServers ? (
                 <Warning>
                   This needs {copies} storage servers and the cluster has{' '}
-                  {volumeServers}. Writes to these volumes will fail.
+                  {storageServers}. The profile cannot be created.
                 </Warning>
               ) : null}
             </Field>
 
-            <Field data-invalid={errors.disk_type ? true : undefined}>
+            <Field data-invalid={errors.disk_selector ? true : undefined}>
               <FieldLabel htmlFor={id('disk')}>Disk</FieldLabel>
               <ChoiceSelect
                 id={id('disk')}
@@ -441,14 +423,14 @@ const StorageClassDialogBody = ({
                 value={
                   customDisk
                     ? CUSTOM_CHOICE
-                    : choiceValue(DISK_CHOICES, form.disk_type ?? '')
+                    : choiceValue(DISK_CHOICES, form.disk_selector ?? '')
                 }
                 disabled={locked}
                 onChange={(value) => {
                   const isCustom = value === CUSTOM_CHOICE;
 
                   setCustomDisk(isCustom);
-                  setValue('disk_type', isCustom ? '' : value, {
+                  setValue('disk_selector', isCustom ? '' : value, {
                     shouldDirty: true,
                     shouldValidate: true,
                   });
@@ -456,24 +438,46 @@ const StorageClassDialogBody = ({
               />
               {customDisk ? (
                 <Input
-                  aria-label="Custom disk tag"
-                  placeholder="nvme"
+                  aria-label="Custom disk tags"
+                  placeholder="nvme, fast"
                   autoComplete="off"
                   disabled={locked}
-                  aria-invalid={!!errors.disk_type}
-                  {...register('disk_type', {
+                  aria-invalid={!!errors.disk_selector}
+                  {...register('disk_selector', {
                     validate: (value) =>
                       value.trim() !== '' || !customDisk
-                        ? tagRule(value)
-                        : 'Enter the disk tag your storage servers use.',
+                        ? validateTags(value)
+                        : 'Enter the disk tags your storage servers use.',
                   })}
                 />
               ) : null}
               <FieldDescription>
-                Which storage server disks hold the data. A disk type the
-                servers do not have makes writes fail.
+                Which server disks hold the copies, by the tags set on the
+                disks. A tag no disk has keeps volumes from being created.
               </FieldDescription>
-              <FieldError errors={[errors.disk_type]} />
+              <FieldError errors={[errors.disk_selector]} />
+            </Field>
+
+            <Field>
+              <FieldLabel htmlFor={id('locality')}>Placement</FieldLabel>
+              <FormChoice
+                control={control}
+                name="data_locality"
+                id={id('locality')}
+                choices={LOCALITY_CHOICES}
+                disabled={locked}
+              />
+              {localityHint ? (
+                <FieldDescription>{localityHint}</FieldDescription>
+              ) : null}
+              {!locked &&
+              form.data_locality === 'strict-local' &&
+              copies > 1 ? (
+                <Warning>
+                  A copy kept strictly on the service’s server allows only one
+                  copy.
+                </Warning>
+              ) : null}
             </Field>
           </Section>
 
@@ -491,54 +495,7 @@ const StorageClassDialogBody = ({
                   disabled={locked}
                 />
               </Field>
-
-              <Field data-invalid={errors.ttl ? true : undefined}>
-                <FieldLabel htmlFor={id('expiry')}>
-                  Delete data automatically
-                </FieldLabel>
-                <ChoiceSelect
-                  id={id('expiry')}
-                  choices={EXPIRY_CHOICES}
-                  value={
-                    customExpiry
-                      ? CUSTOM_CHOICE
-                      : choiceValue(EXPIRY_CHOICES, form.ttl ?? '')
-                  }
-                  disabled={locked}
-                  onChange={(value) => {
-                    const isCustom = value === CUSTOM_CHOICE;
-
-                    setCustomExpiry(isCustom);
-                    setValue('ttl', isCustom ? '' : value, {
-                      shouldDirty: true,
-                      shouldValidate: true,
-                    });
-                  }}
-                />
-                {customExpiry ? (
-                  <Input
-                    aria-label="Custom expiry period"
-                    placeholder="12h, 14d, 6M"
-                    autoComplete="off"
-                    disabled={locked}
-                    aria-invalid={!!errors.ttl}
-                    {...register('ttl', {
-                      validate: (value) =>
-                        TTL_PATTERN.test(value.trim()) ||
-                        'Use a number and a unit: m, h, d, w, M or y (such as 14d).',
-                    })}
-                  />
-                ) : null}
-                <FieldError errors={[errors.ttl]} />
-              </Field>
             </div>
-
-            {!locked && (form.ttl ?? '').trim() !== '' ? (
-              <Warning>
-                Everything written to these volumes is deleted when it expires.
-                Use it only for data you can lose.
-              </Warning>
-            ) : null}
 
             <Field orientation="horizontal">
               <Controller
@@ -582,54 +539,37 @@ const StorageClassDialogBody = ({
               />
               Advanced
               <span className="font-normal text-muted-foreground">
-                SeaweedFS settings for specific tuning
+                Longhorn settings for specific tuning
               </span>
             </summary>
 
             <FieldGroup className="mt-4">
               <div className="grid gap-5 sm:grid-cols-2">
-                <Field data-invalid={errors.replication ? true : undefined}>
-                  <FieldLabel htmlFor={id('replication')}>
-                    Replication code
-                  </FieldLabel>
-                  <Input
-                    id={id('replication')}
-                    autoComplete="off"
-                    inputMode="numeric"
-                    maxLength={3}
+                <Field>
+                  <FieldLabel htmlFor={id('fs')}>File system</FieldLabel>
+                  <FormChoice
+                    control={control}
+                    name="fs_type"
+                    id={id('fs')}
+                    choices={FS_CHOICES}
                     disabled={locked}
-                    aria-invalid={!!errors.replication}
-                    className="font-mono"
-                    {...register('replication', {
-                      validate: (value) =>
-                        REPLICATION_PATTERN.test(value) ||
-                        'Use three digits, such as 001.',
-                    })}
                   />
-                  <FieldDescription>
-                    Extra copies in other data centers, other racks and other
-                    servers (xyz).
-                  </FieldDescription>
-                  <FieldError errors={[errors.replication]} />
                 </Field>
 
-                <Field data-invalid={errors.collection ? true : undefined}>
-                  <FieldLabel htmlFor={id('collection')}>
-                    Shared quota group
-                  </FieldLabel>
+                <Field data-invalid={errors.node_selector ? true : undefined}>
+                  <FieldLabel htmlFor={id('servers')}>Server tags</FieldLabel>
                   <Input
-                    id={id('collection')}
-                    placeholder="One per volume"
+                    id={id('servers')}
+                    placeholder="Any server"
                     autoComplete="off"
                     disabled={locked}
-                    aria-invalid={!!errors.collection}
-                    {...register('collection', { validate: tagRule })}
+                    aria-invalid={!!errors.node_selector}
+                    {...register('node_selector', { validate: validateTags })}
                   />
                   <FieldDescription>
-                    Volumes in the same group share one SeaweedFS collection and
-                    its quota.
+                    Copies go only to servers with these tags.
                   </FieldDescription>
-                  <FieldError errors={[errors.collection]} />
+                  <FieldError errors={[errors.node_selector]} />
                 </Field>
               </div>
 
@@ -645,91 +585,6 @@ const StorageClassDialogBody = ({
                   disabled={locked}
                 />
               </Field>
-
-              <div className="grid gap-5 sm:grid-cols-3">
-                <Field
-                  data-invalid={errors.cache_capacity_mb ? true : undefined}
-                >
-                  <FieldLabel htmlFor={id('cache')}>Read cache (MB)</FieldLabel>
-                  <Input
-                    id={id('cache')}
-                    inputMode="numeric"
-                    placeholder="Default"
-                    disabled={locked}
-                    aria-invalid={!!errors.cache_capacity_mb}
-                    className="tabular-nums"
-                    {...register('cache_capacity_mb', {
-                      validate: validateInteger(
-                        INTEGER_LIMITS.cache_capacity_mb,
-                      ),
-                    })}
-                  />
-                  <FieldError errors={[errors.cache_capacity_mb]} />
-                </Field>
-                <Field
-                  data-invalid={errors.concurrent_writers ? true : undefined}
-                >
-                  <FieldLabel htmlFor={id('writers')}>
-                    Parallel writes
-                  </FieldLabel>
-                  <Input
-                    id={id('writers')}
-                    inputMode="numeric"
-                    placeholder="Default"
-                    disabled={locked}
-                    aria-invalid={!!errors.concurrent_writers}
-                    className="tabular-nums"
-                    {...register('concurrent_writers', {
-                      validate: validateInteger(
-                        INTEGER_LIMITS.concurrent_writers,
-                      ),
-                    })}
-                  />
-                  <FieldError errors={[errors.concurrent_writers]} />
-                </Field>
-                <Field
-                  data-invalid={errors.chunk_size_limit_mb ? true : undefined}
-                >
-                  <FieldLabel htmlFor={id('chunk')}>Chunk size (MB)</FieldLabel>
-                  <Input
-                    id={id('chunk')}
-                    inputMode="numeric"
-                    placeholder="Default"
-                    disabled={locked}
-                    aria-invalid={!!errors.chunk_size_limit_mb}
-                    className="tabular-nums"
-                    {...register('chunk_size_limit_mb', {
-                      validate: validateInteger(
-                        INTEGER_LIMITS.chunk_size_limit_mb,
-                      ),
-                    })}
-                  />
-                  <FieldError errors={[errors.chunk_size_limit_mb]} />
-                </Field>
-              </div>
-
-              <Field orientation="horizontal">
-                <Controller
-                  control={control}
-                  name="writeback_cache"
-                  render={({ field }) => (
-                    <Switch
-                      id={id('writeback')}
-                      checked={field.value}
-                      onCheckedChange={field.onChange}
-                      disabled={locked}
-                    />
-                  )}
-                />
-                <FieldLabel htmlFor={id('writeback')}>
-                  Acknowledge writes before they are stored (write-back cache)
-                </FieldLabel>
-              </Field>
-              {!locked && form.writeback_cache ? (
-                <Warning>
-                  Faster writes, but a node crash can lose the most recent data.
-                </Warning>
-              ) : null}
 
               {extraParameters.length > 0 ? (
                 <div>

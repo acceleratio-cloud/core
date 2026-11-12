@@ -13,11 +13,9 @@ import type {
   PostgresConfig,
 } from '@acceleratio/shared';
 import { eq } from 'drizzle-orm';
-import { StorageClassService } from '@/application/storage-class/storage-class.service';
 import { projectNamespace } from '@/common/naming';
 import { DATABASE } from '@/vendor/db/database.constants';
 import type { Database } from '@/vendor/db/database.constants';
-import { jobOutcome } from '@/vendor/kubernetes/job-outcome';
 import {
   getKubernetesStatusCode,
   toNestException,
@@ -30,20 +28,14 @@ import {
   BUCKET_MESSAGE_ANNOTATION,
   BUCKET_PHASE_ANNOTATION,
   type BucketJobInput,
-  bucketJobName,
-  buildJobSecret,
 } from '../s3-bucket/s3-bucket.manifests';
+import { generateBucketKeys } from '../s3-bucket/s3-bucket.service';
 import {
-  bucketErrorFromLog,
-  generateBucketKeys,
-} from '../s3-bucket/s3-bucket.service';
-import {
-  readBucketJob,
-  readBucketJobLog,
-  seaweedfsS3Endpoint,
-  seaweedfsTarget,
+  runBucketJob,
+  rustfsS3Endpoint,
+  rustfsTarget,
   startBucketJob,
-} from '../s3-bucket/seaweedfs-jobs';
+} from '../s3-bucket/rustfs-jobs';
 import { backupsEnabled } from './postgres.config';
 import { findPostgresRow, readPostgresCluster } from './postgres.lookup';
 import {
@@ -71,7 +63,7 @@ import {
 const POLL_MS = 3000;
 /** CNPG labels the backups a ScheduledBackup starts with its name. */
 const SCHEDULED_BACKUP_LABEL = 'cnpg.io/scheduled-backup';
-/** The bucket Job pulls the SeaweedFS image on its first run. */
+/** The bucket Job pulls the rc image on its first run. */
 const JOB_WAIT_MS = 5 * 60 * 1000;
 /** A new database runs initdb, or replays WAL when it is a restore. */
 const READY_WAIT_MS = 60 * 60 * 1000;
@@ -218,7 +210,7 @@ export const toBackup = (item: CnpgBackupObject): PostgresBackup => ({
 
 /**
  * Continuous backups of PostgreSQL workloads: each database archives its WAL
- * and a daily base backup to its own SeaweedFS bucket, reachable only with
+ * and a daily base backup to its own RustFS bucket, reachable only with
  * its own keys. That makes any moment of the last 7 days restorable.
  */
 @Injectable()
@@ -239,7 +231,6 @@ export class PostgresBackupService implements OnModuleInit {
   constructor(
     @Inject(DATABASE) private readonly db: Database,
     private readonly kubernetes: KubernetesService,
-    private readonly storageClasses: StorageClassService,
   ) {}
 
   /**
@@ -264,7 +255,7 @@ export class PostgresBackupService implements OnModuleInit {
   }
 
   get endpoint(): string {
-    return seaweedfsS3Endpoint();
+    return rustfsS3Endpoint();
   }
 
   /**
@@ -539,11 +530,12 @@ export class PostgresBackupService implements OnModuleInit {
 
     await this.deleteSchedule(row);
 
-    const input = this.jobInput(row, 'delete');
-
-    await startBucketJob(this.kubernetes, input);
-
-    const message = await this.waitForJob(input);
+    const message = await runBucketJob(
+      this.kubernetes,
+      this.jobInput(row, 'delete'),
+      null,
+      JOB_WAIT_MS,
+    );
 
     if (message !== null) {
       throw new ServiceUnavailableException(
@@ -640,29 +632,18 @@ export class PostgresBackupService implements OnModuleInit {
   /** Makes the bucket and an identity limited to it; false when that failed. */
   private async createBucket(row: WorkloadRow): Promise<boolean> {
     const keys = generateBucketKeys();
-    const profile = await this.storageClasses.resolveForBucket(null);
 
     await this.writeSecret(row, 'provisioning', null, {
       [BACKUP_ACCESS_KEY]: keys.accessKeyId,
       [BACKUP_SECRET_KEY]: keys.secretAccessKey,
     });
 
-    const input = {
-      ...this.jobInput(row, 'create'),
-      parameters: profile.parameters,
-      tolerateExisting: true,
-    };
-    const job = await startBucketJob(this.kubernetes, input);
-
-    await this.kubernetes.coreV1.createNamespacedSecret({
-      namespace: input.target.namespace,
-      body: buildJobSecret(input, keys, {
-        name: job.metadata!.name!,
-        uid: job.metadata!.uid!,
-      }),
-    });
-
-    const message = await this.waitForJob(input);
+    const message = await runBucketJob(
+      this.kubernetes,
+      { ...this.jobInput(row, 'create'), tolerateExisting: true },
+      keys,
+      JOB_WAIT_MS,
+    );
 
     await this.annotateSecret(
       row,
@@ -682,35 +663,8 @@ export class PostgresBackupService implements OnModuleInit {
       projectId: row.project_id,
       bucket: backupBucketName(row.id),
       operation,
-      target: seaweedfsTarget(),
+      target: rustfsTarget(),
     };
-  }
-
-  /** Null once the Job succeeded, otherwise why it did not. */
-  private async waitForJob(input: BucketJobInput): Promise<string | null> {
-    const name = bucketJobName(input.workloadId, input.operation);
-    const namespace = input.target.namespace;
-
-    for (const deadline = Date.now() + JOB_WAIT_MS; Date.now() < deadline;) {
-      const job = await readBucketJob(this.kubernetes, name, namespace).catch(
-        () => null,
-      );
-      const outcome = job === null ? 'running' : jobOutcome(job);
-
-      if (outcome === 'succeeded') {
-        return null;
-      }
-
-      if (outcome === 'failed') {
-        return bucketErrorFromLog(
-          await readBucketJobLog(this.kubernetes, name, namespace),
-        );
-      }
-
-      await sleep(POLL_MS);
-    }
-
-    return 'SeaweedFS did not finish in time';
   }
 
   private async scheduleExists(row: WorkloadRow): Promise<boolean> {

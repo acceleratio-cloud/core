@@ -1,13 +1,17 @@
 import { BadRequestException } from '@nestjs/common';
+import type { S3BucketConfig } from '@acceleratio/shared';
 
 export const BUCKET_NAME_MIN_LENGTH = 3;
 export const BUCKET_NAME_MAX_LENGTH = 63;
 
 const BUCKET_NAME = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 const IP_ADDRESS = /^\d{1,3}(\.\d{1,3}){3}$/;
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-const CONFIG_KEYS = new Set(['storage_class_id']);
+/**
+ * Buckets the platform names itself: static site files (`acceleratio-sites`)
+ * and PostgreSQL backups (`pg-backup-<id>`). RustFS has one bucket namespace,
+ * so a user bucket must never take one of these names.
+ */
+const RESERVED_PREFIXES = ['acceleratio-', 'pg-backup-'];
 
 const BUCKET_NAME_RULES =
   'Bucket names use 3–63 lowercase letters, digits and hyphens, and start and end with a letter or digit';
@@ -34,52 +38,39 @@ export const normalizeBucketName = (value: unknown): string => {
     throw new BadRequestException(BUCKET_NAME_RULES);
   }
 
+  if (RESERVED_PREFIXES.some((prefix) => name.startsWith(prefix))) {
+    throw new BadRequestException(
+      `Bucket names starting with ${RESERVED_PREFIXES.join(' or ')} are reserved`,
+    );
+  }
+
   return name;
 };
 
-/**
- * The create config: an optional storage profile. Null or absent means the
- * platform profile, which the service resolves.
- */
-export const normalizeBucketConfig = (
-  value: unknown,
-): { storage_class_id: string | null } => {
+/** A bucket has no settings: the config is absent or empty. */
+export const normalizeBucketConfig = (value: unknown): S3BucketConfig => {
   if (value === undefined || value === null) {
-    return { storage_class_id: null };
+    return {};
   }
 
   if (typeof value !== 'object' || Array.isArray(value)) {
     throw new BadRequestException('config must be an object');
   }
 
-  const record = value as Record<string, unknown>;
+  const [key] = Object.keys(value);
 
-  for (const key of Object.keys(record)) {
-    if (!CONFIG_KEYS.has(key)) {
-      throw new BadRequestException(`Unknown bucket setting: ${key}`);
-    }
+  if (key !== undefined) {
+    throw new BadRequestException(`Unknown bucket setting: ${key}`);
   }
 
-  const id = record.storage_class_id;
-
-  if (id === undefined || id === null || id === '') {
-    return { storage_class_id: null };
-  }
-
-  if (typeof id !== 'string' || !UUID.test(id)) {
-    throw new BadRequestException(
-      'storage_class_id must be a storage profile id',
-    );
-  }
-
-  return { storage_class_id: id.toLowerCase() };
+  return {};
 };
 
-/** S3 allows 1024 bytes per key; one segment is a file name on the filer. */
+/** S3 allows 1024 bytes per key; one segment is limited like a file name. */
 export const OBJECT_KEY_MAX_BYTES = 1024;
 export const SEGMENT_MAX_LENGTH = 255;
 
-// Control characters break the filer's paths and most S3 tools.
+// Control characters break most S3 tools.
 // eslint-disable-next-line no-control-regex
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/;
 

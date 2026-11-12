@@ -1,13 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Database, Eye, EyeOff, KeyRound, PlugZap } from 'lucide-react';
 
-import type { StorageClass, Workload } from '@acceleratio/shared';
+import type { Workload } from '@acceleratio/shared';
 import { getApiErrorMessage } from '@/api';
-import { storageClassesApi } from '@/api/storage-classes';
 import { workloadsApi } from '@/api/workloads';
-import { describeStorageProfile } from '@/modules/workloads/utils/s3-bucket';
 import { Button } from '@/shared/components/ui/button';
 import { CopyButton } from '@/shared/components/copy-button';
 import {
@@ -110,46 +108,9 @@ const SecretKeyProperty = ({ workload }: { workload: Workload }) => {
   );
 };
 
-const useStorageProfile = (id: string | undefined) => {
-  const [profile, setProfile] = useState<StorageClass | null | undefined>();
-
-  useEffect(() => {
-    if (!id) {
-      return;
-    }
-
-    let active = true;
-
-    storageClassesApi
-      .list()
-      .then((profiles) => {
-        if (active) {
-          setProfile(profiles.find((item) => item.id === id) ?? null);
-        }
-      })
-      .catch(() => {
-        if (active) {
-          setProfile(null);
-        }
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [id]);
-
-  return profile;
-};
-
 /** Where the bucket is, the keys to it, and how a service picks them up. */
 export const S3BucketOverview = ({ workload }: { workload: Workload }) => {
   const access = workload.s3 ?? null;
-  const config = workload.active_version?.config;
-  const profileId =
-    config && 'storage_class_id' in config
-      ? (config.storage_class_id ?? undefined)
-      : undefined;
-  const profile = useStorageProfile(profileId);
 
   return (
     <DetailStack>
@@ -209,20 +170,6 @@ export const S3BucketOverview = ({ workload }: { workload: Workload }) => {
 
       <DetailSection title="Storage">
         <PropertyList>
-          <PropertyRow label="Storage profile">
-            {profile === undefined ? (
-              <span className="text-fg-tertiary">…</span>
-            ) : profile === null ? (
-              <span className="text-fg-tertiary">Unknown</span>
-            ) : (
-              profile.name
-            )}
-          </PropertyRow>
-          {profile ? (
-            <PropertyRow label="Settings">
-              {describeStorageProfile(profile)}
-            </PropertyRow>
-          ) : null}
           <TimeProperty label="Created" value={workload.created_at} />
         </PropertyList>
       </DetailSection>

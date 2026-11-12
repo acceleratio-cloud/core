@@ -10,6 +10,7 @@ import {
   toNestException,
 } from '@/vendor/kubernetes/kubernetes-error';
 import { KubernetesService } from '@/vendor/kubernetes/kubernetes.service';
+import { rustfsNamespace } from '@/vendor/s3/rustfs';
 import {
   CILIUM_GROUP,
   CILIUM_POLICY_PLURAL,
@@ -34,16 +35,14 @@ const DNS_PORTS = [
   { port: '53', protocol: 'UDP' },
   { port: '53', protocol: 'TCP' },
 ];
-// The SeaweedFS S3 gateway runs in the filer pods. Only its S3 port is
-// opened, and every request still needs a bucket's own keys.
-const S3_PORTS = [{ port: '8333', protocol: 'TCP' }];
+// RustFS serves S3 on one port. Only that port is opened, and every request
+// still needs a bucket's (or a static site's) own keys.
+const S3_PORTS = [{ port: '9000', protocol: 'TCP' }];
 // k3s's bundled Traefik forwards the domains of Docker services to their pods.
 const traefikNamespace = (): string =>
   process.env.TRAEFIK_NAMESPACE?.trim() || 'kube-system';
 const TRAEFIK_POD_LABEL = 'app.kubernetes.io/name';
 const TRAEFIK_POD_VALUE = 'traefik';
-const s3Namespace = (): string =>
-  process.env.SEAWEEDFS_NAMESPACE?.trim() || 'seaweedfs';
 const CRD_MISSING_MESSAGE =
   'CiliumNetworkPolicy CRD is not installed; project isolation cannot be enforced';
 
@@ -331,9 +330,9 @@ export class ProjectIsolationService {
             toEndpoints: [
               {
                 matchLabels: {
-                  [NAMESPACE_LABEL]: s3Namespace(),
-                  'app.kubernetes.io/name': 'seaweedfs',
-                  'app.kubernetes.io/component': 'filer',
+                  [NAMESPACE_LABEL]: rustfsNamespace(),
+                  // The pod label of deploy/install.sh's RustFS Deployment.
+                  'app.kubernetes.io/name': 'rustfs',
                 },
               },
             ],

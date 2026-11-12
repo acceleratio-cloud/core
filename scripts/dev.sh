@@ -232,8 +232,9 @@ explicit_kubeconfig_set() {
 }
 
 # Create or start the OrbStack cluster. It is idempotent and fast once the
-# cluster is installed; the first run installs k3s, Cilium, SeaweedFS and the
-# observability stack, which takes a few minutes.
+# cluster is installed; the first run installs k3s, Cilium, RustFS (on the
+# local-path provisioner) and the observability stack, which takes a few
+# minutes.
 ensure_cluster() {
   [[ "${CLUSTER:-1}" = "0" ]] && return 0
   explicit_kubeconfig_set && return 0
@@ -257,6 +258,36 @@ export_cluster_env() {
       export "$key=$value"
     fi
   done < <(./scripts/cluster.sh env 2>/dev/null || true)
+}
+
+# The API runs on this Mac: it cannot resolve cluster DNS, and the API
+# server's service proxy rewrites the path, which breaks S3 signatures. A
+# port-forward keeps both, so the API reaches RustFS through it. It restarts
+# when RustFS does, and stops with the servers.
+start_rustfs_forward() {
+  local namespace="${RUSTFS_NAMESPACE:-rustfs}" port=19000
+
+  if [[ -n "${RUSTFS_S3_API_ENDPOINT:-}" ]] ||
+    dotenv_value RUSTFS_S3_API_ENDPOINT apps/api/.env >/dev/null; then
+    return 0
+  fi
+  if ! kubectl -n "$namespace" get service rustfs >/dev/null 2>&1; then
+    warn "No RustFS in the cluster; buckets, backups and static sites will not work."
+    return 0
+  fi
+
+  while port_in_use "$port"; do
+    port=$((port + 1))
+  done
+  (
+    while true; do
+      kubectl -n "$namespace" port-forward svc/rustfs "${port}:9000" >/dev/null 2>&1
+      sleep 1
+    done
+  ) &
+  FORWARD_PID=$!
+  export RUSTFS_S3_API_ENDPOINT="http://127.0.0.1:${port}"
+  printf '    RustFS S3 for the API: %s\n' "$RUSTFS_S3_API_ENDPOINT"
 }
 
 kube_context_guard() {
@@ -410,6 +441,10 @@ printf '    Press Ctrl+C to stop both servers.\n'
 
 cleanup() {
   trap - EXIT INT TERM
+  if [[ -n "${FORWARD_PID:-}" ]]; then
+    pkill -P "$FORWARD_PID" 2>/dev/null || true
+    kill "$FORWARD_PID" 2>/dev/null || true
+  fi
   if [[ -n "${API_PID:-}" ]]; then
     kill "$API_PID" 2>/dev/null || true
   fi
@@ -421,6 +456,8 @@ cleanup() {
   wait 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
+
+start_rustfs_forward
 
 is_running() {
   local state

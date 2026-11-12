@@ -28,7 +28,7 @@ export const storageClassVolumeBindingModeEnum = pgEnum(
 );
 
 /**
- * SeaweedFS-backed Kubernetes StorageClasses. The row is the stable identity
+ * Longhorn-backed Kubernetes StorageClasses. The row is the stable identity
  * that other resources reference (`storage_class_id ... on delete restrict`)
  * and the desired state of a custom class. The platform row only anchors the
  * installer's class: its settings are read from the cluster, so the settings

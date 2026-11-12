@@ -3,14 +3,16 @@ import type {
   StorageBenchmarkResults,
   StorageClass,
   StorageClassClusterStatus,
+  StorageClassDataLocality,
+  StorageClassFsType,
   StorageClassReclaimPolicy,
   StorageClassVolumeBindingMode,
 } from '@acceleratio/shared';
 
 /**
- * The console calls SeaweedFS StorageClasses "storage profiles" and speaks in
- * outcomes (copies, disk, what happens on delete, expiry). Driver terms stay
- * in the Advanced section.
+ * The console calls Longhorn StorageClasses "storage profiles" and speaks in
+ * outcomes (copies, disk, placement, what happens on delete). Driver terms
+ * stay in the Advanced section.
  */
 
 /** create: new profile; duplicate: new profile from another; edit/view: existing. */
@@ -19,14 +21,14 @@ export type StorageClassDialogMode = 'create' | 'duplicate' | 'edit' | 'view';
 export type StorageClassForm = {
   name: string;
   description: string;
-  replication: string;
-  disk_type: string;
-  collection: string;
-  ttl: string;
-  cache_capacity_mb: string;
-  concurrent_writers: string;
-  chunk_size_limit_mb: string;
-  writeback_cache: boolean;
+  /** '1' to '3'. */
+  number_of_replicas: string;
+  data_locality: StorageClassDataLocality;
+  fs_type: StorageClassFsType;
+  /** Comma-separated Longhorn disk tags; empty for any disk. */
+  disk_selector: string;
+  /** Comma-separated Longhorn node tags; empty for any server. */
+  node_selector: string;
   reclaim_policy: StorageClassReclaimPolicy;
   volume_binding_mode: StorageClassVolumeBindingMode;
   allow_volume_expansion: boolean;
@@ -35,35 +37,28 @@ export type StorageClassForm = {
 // Mirrors apps/api storage-class.config.ts; the API stays the authority.
 export const NAME_MAX_LENGTH = 255;
 export const DESCRIPTION_MAX_LENGTH = 1000;
-export const TAG_PATTERN = /^[a-z0-9][a-z0-9_-]{0,31}$/;
-export const TTL_PATTERN = /^[1-9][0-9]{0,4}[mhdwMy]$/;
-export const REPLICATION_PATTERN = /^[0-9]{3}$/;
-export const INTEGER_LIMITS = {
-  cache_capacity_mb: { min: 0, max: 1_048_576 },
-  concurrent_writers: { min: 1, max: 1024 },
-  chunk_size_limit_mb: { min: 1, max: 1024 },
-} as const;
+export const TAG_PATTERN = /^[a-z0-9][a-z0-9._-]{0,62}$/;
 
-/** Select value for "type my own" in the disk and expiry pickers. */
+/** Select value for "type my own" in the disk picker. */
 export const CUSTOM_CHOICE = '__custom';
 
 export type Choice = { value: string; label: string; hint?: string };
 
 export const COPY_CHOICES: Choice[] = [
   {
-    value: '000',
+    value: '1',
     label: '1 copy',
     hint: 'Fastest and uses the least disk. Data is lost if its server fails.',
   },
   {
-    value: '001',
+    value: '2',
     label: '2 copies on different servers',
-    hint: 'Survives one server failure. Writes are slower and use 2× disk.',
+    hint: 'Survives one server failure. Every write waits for the network, so it is slower and uses 2× disk.',
   },
   {
-    value: '002',
+    value: '3',
     label: '3 copies on different servers',
-    hint: 'Survives two server failures. Writes are slowest and use 3× disk.',
+    hint: 'Survives two server failures. Slowest writes and 3× disk.',
   },
 ];
 
@@ -71,15 +66,30 @@ export const DISK_CHOICES: Choice[] = [
   { value: '', label: 'Any disk' },
   { value: 'ssd', label: 'SSD' },
   { value: 'hdd', label: 'HDD' },
-  { value: CUSTOM_CHOICE, label: 'Custom disk tag' },
+  { value: CUSTOM_CHOICE, label: 'Custom disk tags' },
 ];
 
-export const EXPIRY_CHOICES: Choice[] = [
-  { value: '', label: 'Never' },
-  { value: '1d', label: 'After 1 day' },
-  { value: '7d', label: 'After 7 days' },
-  { value: '30d', label: 'After 30 days' },
-  { value: CUSTOM_CHOICE, label: 'Custom period' },
+export const LOCALITY_CHOICES: Choice[] = [
+  {
+    value: 'best-effort',
+    label: 'Keep a copy next to the service when possible',
+    hint: 'Reads stay on the service’s own server while it can.',
+  },
+  {
+    value: 'disabled',
+    label: 'Place copies on any server',
+    hint: 'Copies stay where they are when the service moves.',
+  },
+  {
+    value: 'strict-local',
+    label: 'Always one copy on the service’s server',
+    hint: 'Fastest, but one copy only, and the service cannot move to another server.',
+  },
+];
+
+export const FS_CHOICES: Choice[] = [
+  { value: 'ext4', label: 'ext4' },
+  { value: 'xfs', label: 'XFS' },
 ];
 
 export const RECLAIM_CHOICES: Choice[] = [
@@ -98,14 +108,11 @@ export const BINDING_CHOICES: Choice[] = [
 export const EMPTY_FORM: StorageClassForm = {
   name: '',
   description: '',
-  replication: '000',
-  disk_type: '',
-  collection: '',
-  ttl: '',
-  cache_capacity_mb: '',
-  concurrent_writers: '',
-  chunk_size_limit_mb: '',
-  writeback_cache: false,
+  number_of_replicas: '1',
+  data_locality: 'best-effort',
+  fs_type: 'ext4',
+  disk_selector: '',
+  node_selector: '',
   reclaim_policy: 'Delete',
   volume_binding_mode: 'Immediate',
   allow_volume_expansion: true,
@@ -116,7 +123,7 @@ export type StoragePreset = {
   title: string;
   summary: string;
   useFor: string;
-  /** Volume servers the preset needs; null when any cluster can use it. */
+  /** Storage servers the preset needs; null when any cluster can use it. */
   minServers: number | null;
   form: Partial<StorageClassForm>;
 };
@@ -131,8 +138,7 @@ export const STORAGE_PRESETS: StoragePreset[] = [
     form: {
       name: 'Fast',
       description: 'Fast single-copy storage for data that can be rebuilt.',
-      replication: '000',
-      concurrent_writers: '64',
+      number_of_replicas: '1',
     },
   },
   {
@@ -144,7 +150,7 @@ export const STORAGE_PRESETS: StoragePreset[] = [
     form: {
       name: 'Durable',
       description: 'Two copies on different servers for data that matters.',
-      replication: '001',
+      number_of_replicas: '2',
       reclaim_policy: 'Retain',
     },
   },
@@ -157,21 +163,8 @@ export const STORAGE_PRESETS: StoragePreset[] = [
     form: {
       name: 'Archive',
       description: 'Large, rarely read data on cheaper disks.',
-      disk_type: 'hdd',
+      disk_selector: 'hdd',
       reclaim_policy: 'Retain',
-      chunk_size_limit_mb: '8',
-    },
-  },
-  {
-    id: 'temporary',
-    title: 'Temporary, auto-expiry',
-    summary: 'Data is deleted automatically after 7 days.',
-    useFor: 'Scratch space, build caches, temporary exports',
-    minServers: null,
-    form: {
-      name: 'Temporary',
-      description: 'Scratch storage whose data expires after 7 days.',
-      ttl: '7d',
     },
   },
   {
@@ -189,11 +182,10 @@ export const presetForm = (preset: StoragePreset): StorageClassForm => ({
   ...preset.form,
 });
 
-/** Copies a SeaweedFS replication code `xyz` needs: 1 + x + y + z. */
-export const replicationCopies = (replication: string) =>
-  REPLICATION_PATTERN.test(replication)
-    ? 1 + Array.from(replication).reduce((sum, digit) => sum + Number(digit), 0)
-    : 1;
+/** Copies a form asks for; 1 until it holds a number. */
+export const formCopies = (
+  form: Pick<StorageClassForm, 'number_of_replicas'>,
+) => Number.parseInt(form.number_of_replicas, 10) || 1;
 
 /** Select value for a stored choice, or CUSTOM_CHOICE when it is not listed. */
 export const choiceValue = (choices: Choice[], value: string) =>
@@ -201,32 +193,16 @@ export const choiceValue = (choices: Choice[], value: string) =>
     ? value
     : CUSTOM_CHOICE;
 
-const ttlLabel = (ttl: string) => {
-  const match = /^([0-9]+)([mhdwMy])$/.exec(ttl);
+const tagList = (value: string) =>
+  value
+    .split(',')
+    .map((tag) => tag.trim().toLowerCase())
+    .filter(Boolean);
 
-  if (!match) {
-    return ttl;
-  }
-
-  const units: Record<string, string> = {
-    m: 'minute',
-    h: 'hour',
-    d: 'day',
-    w: 'week',
-    M: 'month',
-    y: 'year',
-  };
-  const count = Number(match[1]);
-
-  return `${count} ${units[match[2]]}${count === 1 ? '' : 's'}`;
-};
-
-export const copiesLabel = (replication: string) => {
-  const copies = replicationCopies(replication);
-  const listed = COPY_CHOICES.find((choice) => choice.value === replication);
-
-  return listed?.label ?? `${copies} copies (code ${replication})`;
-};
+/** react-hook-form `validate` for a comma-separated list of tags. */
+export const validateTags = (value: string) =>
+  tagList(value).every((tag) => TAG_PATTERN.test(tag)) ||
+  'Use tags of lowercase letters, digits, ., - or _, separated by commas.';
 
 /** Short outcome tags for a profile row. */
 export const profileSummary = (storageClass: StorageClass): string[] => {
@@ -236,11 +212,13 @@ export const profileSummary = (storageClass: StorageClass): string[] => {
     return ['Settings unavailable'];
   }
 
-  const copies = replicationCopies(parameters.replication);
+  const copies = parameters.number_of_replicas;
   const items = [copies === 1 ? '1 copy' : `${copies} copies`];
 
   items.push(
-    parameters.disk_type ? parameters.disk_type.toUpperCase() : 'Any disk',
+    parameters.disk_selector
+      ? parameters.disk_selector.join(', ').toUpperCase()
+      : 'Any disk',
   );
 
   if (storageClass.reclaim_policy) {
@@ -251,10 +229,6 @@ export const profileSummary = (storageClass: StorageClass): string[] => {
     );
   }
 
-  if (parameters.ttl) {
-    items.push(`Expires after ${ttlLabel(parameters.ttl)}`);
-  }
-
   return items;
 };
 
@@ -262,8 +236,7 @@ export type Outcome = { label: string; value: string };
 
 /** What a profile means for the data, in plain terms. */
 export const describeOutcomes = (form: StorageClassForm): Outcome[] => {
-  const copies = replicationCopies(form.replication);
-  const ttl = form.ttl.trim();
+  const copies = formCopies(form);
 
   return [
     {
@@ -285,17 +258,13 @@ export const describeOutcomes = (form: StorageClassForm): Outcome[] => {
           : 'Its data is deleted',
     },
     {
-      label: 'Expiry',
+      label: 'Placement',
       value:
-        ttl && TTL_PATTERN.test(ttl)
-          ? `Data is deleted after ${ttlLabel(ttl)}`
-          : 'Data is kept until deleted',
+        LOCALITY_CHOICES.find((choice) => choice.value === form.data_locality)
+          ?.label ?? form.data_locality,
     },
   ];
 };
-
-const toText = (value: number | string | null | undefined) =>
-  value === null || value === undefined ? '' : String(value);
 
 export const toForm = (
   storageClass: StorageClass,
@@ -309,14 +278,13 @@ export const toForm = (
         ? `${storageClass.name} copy`.slice(0, NAME_MAX_LENGTH)
         : storageClass.name,
     description: storageClass.description ?? '',
-    replication: parameters?.replication ?? EMPTY_FORM.replication,
-    disk_type: parameters?.disk_type ?? '',
-    collection: parameters?.collection ?? '',
-    ttl: parameters?.ttl ?? '',
-    cache_capacity_mb: toText(parameters?.cache_capacity_mb),
-    concurrent_writers: toText(parameters?.concurrent_writers),
-    chunk_size_limit_mb: toText(parameters?.chunk_size_limit_mb),
-    writeback_cache: parameters?.writeback_cache ?? false,
+    number_of_replicas: String(
+      parameters?.number_of_replicas ?? EMPTY_FORM.number_of_replicas,
+    ),
+    data_locality: parameters?.data_locality ?? EMPTY_FORM.data_locality,
+    fs_type: parameters?.fs_type ?? EMPTY_FORM.fs_type,
+    disk_selector: parameters?.disk_selector?.join(', ') ?? '',
+    node_selector: parameters?.node_selector?.join(', ') ?? '',
     reclaim_policy: storageClass.reclaim_policy ?? EMPTY_FORM.reclaim_policy,
     volume_binding_mode:
       storageClass.volume_binding_mode ?? EMPTY_FORM.volume_binding_mode,
@@ -324,10 +292,13 @@ export const toForm = (
   };
 };
 
-const toInteger = (value: string) =>
-  value.trim() === '' ? null : Number(value.trim());
-
 const toOptional = (value: string) => value.trim() || null;
+
+const toTags = (value: string) => {
+  const tags = tagList(value);
+
+  return tags.length > 0 ? tags : null;
+};
 
 export const toCreatePayload = (
   form: StorageClassForm,
@@ -335,36 +306,16 @@ export const toCreatePayload = (
   name: form.name.trim(),
   description: toOptional(form.description),
   parameters: {
-    replication: form.replication,
-    disk_type: toOptional(form.disk_type),
-    collection: toOptional(form.collection),
-    ttl: toOptional(form.ttl),
-    cache_capacity_mb: toInteger(form.cache_capacity_mb),
-    concurrent_writers: toInteger(form.concurrent_writers),
-    chunk_size_limit_mb: toInteger(form.chunk_size_limit_mb),
-    writeback_cache: form.writeback_cache,
+    number_of_replicas: formCopies(form),
+    data_locality: form.data_locality,
+    fs_type: form.fs_type,
+    disk_selector: toTags(form.disk_selector),
+    node_selector: toTags(form.node_selector),
   },
   reclaim_policy: form.reclaim_policy,
   volume_binding_mode: form.volume_binding_mode,
   allow_volume_expansion: form.allow_volume_expansion,
 });
-
-/** react-hook-form `validate` for an optional whole number in a range. */
-export const validateInteger =
-  (limits: { min: number; max: number }) => (value: string) => {
-    if (value.trim() === '') {
-      return true;
-    }
-
-    const number = Number(value.trim());
-
-    return (
-      (Number.isInteger(number) &&
-        number >= limits.min &&
-        number <= limits.max) ||
-      `Use a whole number from ${limits.min} to ${limits.max}.`
-    );
-  };
 
 export const CLUSTER_STATUS_LABELS: Record<StorageClassClusterStatus, string> =
   {

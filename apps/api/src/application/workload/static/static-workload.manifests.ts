@@ -1,18 +1,13 @@
-import type {
-  V1PersistentVolume,
-  V1PersistentVolumeClaim,
-  V1Probe,
-} from '@kubernetes/client-node';
+import type { V1Container, V1Probe, V1Secret } from '@kubernetes/client-node';
 import { projectNamespace } from '@/common/naming';
-import { SEAWEEDFS_PROVISIONER } from '@/application/storage-class/storage-class.manifests';
 import {
   MANAGED_BY_LABEL,
   MANAGED_BY_VALUE,
   PROJECT_ID_LABEL,
-  WORKLOAD_ID_LABEL,
   WORKLOAD_NAME_ANNOTATION,
   type WorkloadManifestInput,
 } from '../docker/docker-workload.manifests';
+import type { BucketKeys } from '../s3-bucket/s3-bucket.manifests';
 
 /** Serves files from a folder; `/static-web-server` is its entrypoint. */
 export const STATIC_SERVER_IMAGE = 'joseluisq/static-web-server:2.44.1';
@@ -20,20 +15,21 @@ export const STATIC_SERVER_IMAGE = 'joseluisq/static-web-server:2.44.1';
 export const STATIC_SERVER_PORT = 80;
 export const SITE_MOUNT_PATH = '/site';
 /**
- * The volume is read-only, so the size is nominal: the CSI driver wants one,
- * and nothing is written through the mount.
+ * Not `acceleratio.io/workload-id`: the Docker service prunes Secrets and
+ * claims of its workload by that label.
  */
-const SITE_VOLUME_SIZE = '100Gi';
-const SITE_ACCESS_MODE = 'ReadWriteMany';
+export const SITE_KEY_LABEL = 'acceleratio.io/static-site-id';
 
-/** Filer folder with every release of a site, one subfolder each. */
-export const sitesRoot = (workloadId: string): string => `/sites/${workloadId}`;
+/** Key prefix of a site in the sites bucket: every release, one folder each. */
+export const sitePrefix = (workloadId: string): string => `${workloadId}/`;
 
-export const releasePath = (workloadId: string, releaseId: string): string =>
-  `${sitesRoot(workloadId)}/${releaseId}`;
+export const releaseKeyPrefix = (
+  workloadId: string,
+  releaseId: string,
+): string => `${sitePrefix(workloadId)}${releaseId}/`;
 
-/** Name of both the PersistentVolume and its claim. */
-export const siteVolumeName = (workloadId: string): string =>
+/** The site's read-only key to its own prefix, in the project namespace. */
+export const siteKeySecretName = (workloadId: string): string =>
   `static-site-${workloadId}`;
 
 /**
@@ -51,9 +47,9 @@ export const siteServerArgs = (releaseId: string): string[] => [
 ];
 
 /**
- * A new pod takes traffic only once `/` answers, which needs the server up
- * and the release's `index.html` visible on the node's SeaweedFS mount, so a
- * rollout never sends visitors to a pod that cannot serve the new files.
+ * A new pod takes traffic only once `/` answers. Its files are copied before
+ * the server starts, so a rollout never sends visitors to a pod that cannot
+ * serve the new release.
  */
 export const SITE_READINESS_PROBE: V1Probe = {
   httpGet: { path: '/', port: STATIC_SERVER_PORT },
@@ -61,61 +57,56 @@ export const SITE_READINESS_PROBE: V1Probe = {
   failureThreshold: 3,
 };
 
-type SiteInput = Pick<WorkloadManifestInput, 'id' | 'project_id' | 'name'>;
-
-const siteMetadata = (input: SiteInput) => ({
-  name: siteVolumeName(input.id),
-  labels: {
-    [MANAGED_BY_LABEL]: MANAGED_BY_VALUE,
-    [PROJECT_ID_LABEL]: input.project_id,
-    [WORKLOAD_ID_LABEL]: input.id,
-  },
-  annotations: { [WORKLOAD_NAME_ANNOTATION]: input.name },
-});
-
 /**
- * A statically provisioned SeaweedFS volume over the site's filer folder
- * (the driver mounts `volumeAttributes.path`). It is bound to the site's claim
- * up front, so no other claim can take it, and kept on release: the API
- * deletes the files itself.
+ * Copies one release from the sites bucket into the pod before the server
+ * starts, with the site's own read-only key. The bucket, workload and release
+ * are validated names, and the keys come from the Secret.
  */
-export const buildSiteVolume = (input: SiteInput): V1PersistentVolume => ({
-  apiVersion: 'v1',
-  kind: 'PersistentVolume',
-  metadata: siteMetadata(input),
-  spec: {
-    capacity: { storage: SITE_VOLUME_SIZE },
-    accessModes: [SITE_ACCESS_MODE],
-    persistentVolumeReclaimPolicy: 'Retain',
-    storageClassName: '',
-    claimRef: {
-      namespace: projectNamespace(input.project_id),
-      name: siteVolumeName(input.id),
-    },
-    csi: {
-      driver: SEAWEEDFS_PROVISIONER,
-      volumeHandle: siteVolumeName(input.id),
-      readOnly: true,
-      volumeAttributes: { path: sitesRoot(input.id) },
-    },
+export const buildSiteFilesContainer = (input: {
+  workloadId: string;
+  releaseId: string;
+  bucket: string;
+  endpoint: string;
+  image: string;
+}): V1Container => ({
+  name: 'fetch-files',
+  image: input.image,
+  imagePullPolicy: 'IfNotPresent',
+  command: [
+    'sh',
+    '-ec',
+    [
+      'rc alias set site "$RUSTFS_ENDPOINT" "$AWS_ACCESS_KEY_ID" "$AWS_SECRET_ACCESS_KEY" --bucket-lookup path >/dev/null',
+      `rc mirror --quiet site/${input.bucket}/${releaseKeyPrefix(input.workloadId, input.releaseId)} ${SITE_MOUNT_PATH}/${input.releaseId}/`,
+    ].join('\n'),
+  ],
+  env: [{ name: 'RUSTFS_ENDPOINT', value: input.endpoint }],
+  envFrom: [{ secretRef: { name: siteKeySecretName(input.workloadId) } }],
+  resources: {
+    requests: { cpu: '50m', memory: '64Mi' },
+    limits: { cpu: '500m', memory: '256Mi' },
   },
 });
 
-/**
- * The claim the pods mount. It has no volume id label, so the Docker
- * service's claim prune never takes it for a dropped volume.
- */
-export const buildSiteClaim = (input: SiteInput): V1PersistentVolumeClaim => ({
+export const buildSiteKeySecret = (
+  input: Pick<WorkloadManifestInput, 'id' | 'project_id' | 'name'>,
+  keys: BucketKeys,
+): V1Secret => ({
   apiVersion: 'v1',
-  kind: 'PersistentVolumeClaim',
+  kind: 'Secret',
   metadata: {
-    ...siteMetadata(input),
+    name: siteKeySecretName(input.id),
     namespace: projectNamespace(input.project_id),
+    labels: {
+      [MANAGED_BY_LABEL]: MANAGED_BY_VALUE,
+      [PROJECT_ID_LABEL]: input.project_id,
+      [SITE_KEY_LABEL]: input.id,
+    },
+    annotations: { [WORKLOAD_NAME_ANNOTATION]: input.name },
   },
-  spec: {
-    accessModes: [SITE_ACCESS_MODE],
-    storageClassName: '',
-    volumeName: siteVolumeName(input.id),
-    resources: { requests: { storage: SITE_VOLUME_SIZE } },
+  type: 'Opaque',
+  stringData: {
+    AWS_ACCESS_KEY_ID: keys.accessKeyId,
+    AWS_SECRET_ACCESS_KEY: keys.secretAccessKey,
   },
 });

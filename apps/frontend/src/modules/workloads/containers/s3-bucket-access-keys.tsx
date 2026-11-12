@@ -164,8 +164,8 @@ export const S3BucketAccessKeysSection = ({
                   <code className="font-mono">{access.access_key_id}</code>
                 </>
               ) : null}{' '}
-              and its secret key stop working as soon as SeaweedFS applies the
-              change.
+              and its secret key stop working as soon as the new keys are
+              issued.
             </DialogDescription>
           </DialogHeader>
 

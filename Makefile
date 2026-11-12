@@ -22,7 +22,7 @@ db-down:
 migrate: db-up
 	cd apps/api && bun run db:migrate
 
-# Create the local cluster in an OrbStack machine (k3s, Cilium, SeaweedFS, VictoriaMetrics, VictoriaLogs).
+# Create the local cluster in an OrbStack machine (k3s, Cilium, RustFS on local-path, VictoriaMetrics, VictoriaLogs).
 cluster-up:
 	./scripts/cluster.sh up
 

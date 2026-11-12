@@ -1,5 +1,5 @@
 import type { V1Job, V1Secret } from '@kubernetes/client-node';
-import type { StorageClassParameters } from '@acceleratio/shared';
+import { S3_REGION } from '@/vendor/s3/rustfs';
 import {
   MANAGED_BY_LABEL,
   MANAGED_BY_VALUE,
@@ -22,27 +22,22 @@ export const BUCKET_MESSAGE_ANNOTATION = 'acceleratio.io/bucket-message';
 
 export type BucketPhase = 'provisioning' | 'ready' | 'failed';
 
-export const SHELL_CONTAINER = 'weed-shell';
-/** Matches the SeaweedFS chart in deploy/install.sh (4.51.0 ships 4.51). */
-export const DEFAULT_SEAWEEDFS_SHELL_IMAGE = 'chrislusf/seaweedfs:4.51';
-export const DEFAULT_SEAWEEDFS_NAMESPACE = 'seaweedfs';
-export const DEFAULT_SEAWEEDFS_MASTER = 'seaweedfs-master.seaweedfs:9333';
-export const DEFAULT_SEAWEEDFS_FILER = 'seaweedfs-filer.seaweedfs:8888';
-export const DEFAULT_S3_ENDPOINT =
-  'http://seaweedfs-s3.seaweedfs.svc.cluster.local:8333';
-/** SeaweedFS accepts any region; this is what S3 clients default to. */
-export const S3_REGION = 'us-east-1';
+export const RC_CONTAINER = 'rc';
+/** Matches RC_IMAGE in deploy/install.sh, which passes it as RUSTFS_RC_IMAGE. */
+export const DEFAULT_RUSTFS_RC_IMAGE =
+  'rustfs/rc:v0.1.37@sha256:7e93fd410a8fe51514f89373e093392c92095b98dc6140335fcfe956810c4c80';
 
 /** Prefix of the one log line a failed Job leaves for the API. */
 export const BUCKET_ERROR_PREFIX = 'BUCKET_ERROR';
 export const ACTIVE_DEADLINE_SECONDS = 120;
 export const TTL_AFTER_FINISHED_SECONDS = 600;
 
-/** Bucket actions the per-bucket identity is granted. */
-export const BUCKET_ACTIONS = ['Read', 'Write', 'List', 'Tagging'] as const;
-
 export const ACCESS_KEY_ENV = 'S3_ACCESS_KEY';
 export const SECRET_KEY_ENV = 'S3_SECRET_KEY';
+const ADMIN_ACCESS_KEY_ENV = 'RUSTFS_ACCESS_KEY';
+const ADMIN_SECRET_KEY_ENV = 'RUSTFS_SECRET_KEY';
+const ENDPOINT_ENV = 'RUSTFS_ENDPOINT';
+const POLICY_ENV = 'POLICY_JSON';
 
 export type BucketOperation = 'create' | 'rotate' | 'delete';
 
@@ -50,11 +45,14 @@ export type BucketOperation = 'create' | 'rotate' | 'delete';
 export const operationNeedsKeys = (operation: BucketOperation): boolean =>
   operation !== 'delete';
 
-export interface SeaweedfsTarget {
+/** Where the `rc` Jobs run and what they connect to. */
+export interface RustfsTarget {
   namespace: string;
-  master: string;
-  filer: string;
+  /** S3 endpoint as pods reach it. */
+  endpoint: string;
   image: string;
+  /** Secret with the admin keys, in `namespace`. */
+  adminSecret: string;
 }
 
 export interface BucketJobInput {
@@ -62,20 +60,23 @@ export interface BucketJobInput {
   projectId: string;
   bucket: string;
   operation: BucketOperation;
-  /** Storage rules for `create`. */
-  parameters?: Pick<
-    StorageClassParameters,
-    'replication' | 'disk_type' | 'ttl'
-  >;
-  target: SeaweedfsTarget;
   /**
-   * `create` succeeds when the bucket already exists and replaces the
-   * identity's keys (a retried setup).
+   * Read-only access to the objects under `<bucket>/<prefix>` instead of the
+   * whole bucket (static sites). The bucket is then the platform's: the Job
+   * never creates or removes it.
+   */
+  prefix?: string;
+  target: RustfsTarget;
+  /**
+   * `create` succeeds when the bucket already exists (a retried setup of a
+   * bucket the platform names itself). Without it an existing bucket fails
+   * the create: a user must never get keys to a bucket that is not theirs.
    */
   tolerateExisting?: boolean;
 }
 
-export const bucketIdentity = (workloadId: string): string =>
+/** The IAM policy the workload's keys are attached to. */
+export const bucketPolicyName = (workloadId: string): string =>
   `acc-${workloadId}`;
 
 export const bucketJobName = (
@@ -92,117 +93,160 @@ export const jobSecretName = (
 /** The lasting copy of the keys, next to the project's workloads. */
 export const projectSecretName = (bucket: string): string => `s3-${bucket}`;
 
-const locationPrefix = (bucket: string): string => `/buckets/${bucket}/`;
+/**
+ * Read and write on one bucket, or read-only on one prefix of it. Bucket
+ * names and prefixes are validated before they get here (lowercase letters,
+ * digits, hyphens, and a UUID), so they need no JSON escaping.
+ */
+export const bucketPolicy = (
+  input: Pick<BucketJobInput, 'bucket' | 'prefix'>,
+): string => {
+  const arn = `arn:aws:s3:::${input.bucket}`;
+
+  if (input.prefix !== undefined) {
+    return JSON.stringify({
+      Version: '2012-10-17',
+      Statement: [
+        {
+          Effect: 'Allow',
+          Action: ['s3:ListBucket'],
+          Resource: [arn],
+          Condition: { StringLike: { 's3:prefix': [`${input.prefix}*`] } },
+        },
+        {
+          Effect: 'Allow',
+          Action: ['s3:GetObject'],
+          Resource: [`${arn}/${input.prefix}*`],
+        },
+      ],
+    });
+  }
+
+  return JSON.stringify({
+    Version: '2012-10-17',
+    Statement: [
+      {
+        Effect: 'Allow',
+        Action: [
+          's3:ListBucket',
+          's3:GetBucketLocation',
+          's3:ListBucketMultipartUploads',
+        ],
+        Resource: [arn],
+      },
+      {
+        Effect: 'Allow',
+        Action: [
+          's3:GetObject',
+          's3:PutObject',
+          's3:DeleteObject',
+          's3:AbortMultipartUpload',
+          's3:ListMultipartUploadParts',
+          's3:GetObjectTagging',
+          's3:PutObjectTagging',
+          's3:DeleteObjectTagging',
+        ],
+        Resource: [`${arn}/*`],
+      },
+    ],
+  });
+};
 
 /**
- * One `weed shell` line per step. The bucket name is validated before it
- * gets here (lowercase letters, digits, hyphens), and the storage parameters
- * are validated when the profile is saved, so none of them can break out of
- * the shell quoting. The keys are never part of this text: the script
- * expands them from the container environment.
+ * One `rc` command line per step, each run through `eval`. Names are
+ * validated before they get here, and the keys are never part of this text:
+ * the shell expands them from the container environment. A user is the
+ * access key itself, so replacing keys means adding the new user and
+ * removing every other user attached to the workload's policy.
  */
 export const bucketCommands = (
   input: Pick<
     BucketJobInput,
-    'workloadId' | 'bucket' | 'operation' | 'parameters' | 'tolerateExisting'
+    'workloadId' | 'bucket' | 'operation' | 'prefix' | 'tolerateExisting'
   >,
 ): { command: string; tolerate?: string }[] => {
-  const identity = bucketIdentity(input.workloadId);
-  const prefix = locationPrefix(input.bucket);
-  const registerIdentity = {
+  const policy = bucketPolicyName(input.workloadId);
+  const owned = input.prefix === undefined;
+  const removeOtherUsers = {
     command: [
-      `s3.configure -user=${identity}`,
-      `-access_key=$${ACCESS_KEY_ENV}`,
-      `-secret_key=$${SECRET_KEY_ENV}`,
-      `-buckets=${input.bucket}`,
-      `-actions=${BUCKET_ACTIONS.join(',')}`,
-      '-apply',
+      `users=$(rc admin policy entities admin --policy ${policy} --json) || exit 1;`,
+      'for u in $(printf "%s" "$users" | jq -r ".data.policy_mappings[]?.users[]?");',
+      `do [ "$u" = "\${${ACCESS_KEY_ENV}:-}" ] || rc admin user rm admin "$u" || exit 1; done`,
     ].join(' '),
+    tolerate: 'not found',
   };
-
-  if (input.operation === 'rotate') {
-    // Dropping the identity first removes every old key; registering it
-    // again leaves only the new one.
-    return [
-      {
-        command: `s3.configure -user=${identity} -delete -apply`,
-        tolerate: 'not found',
-      },
-      registerIdentity,
-    ];
-  }
 
   if (input.operation === 'delete') {
     // Each step tolerates "already gone", so a retried delete converges.
     return [
-      {
-        command: `s3.configure -user=${identity} -delete -apply`,
-        tolerate: 'not found',
-      },
-      { command: `fs.configure -locationPrefix=${prefix} -delete -apply` },
-      {
-        command: `s3.bucket.delete -name ${input.bucket}`,
-        tolerate: 'not found',
-      },
+      removeOtherUsers,
+      { command: `rc admin policy rm admin ${policy}`, tolerate: 'not found' },
+      ...(owned
+        ? [
+            {
+              command: `rc bucket remove --force admin/${input.bucket}`,
+              tolerate: 'not found',
+            },
+          ]
+        : []),
     ];
   }
 
-  const parameters = input.parameters ?? {
-    replication: '000',
-    disk_type: null,
-    ttl: null,
-  };
-  const rule = [
-    `fs.configure -locationPrefix=${prefix}`,
-    `-replication=${parameters.replication}`,
-    ...(parameters.disk_type ? [`-disk=${parameters.disk_type}`] : []),
-    ...(parameters.ttl ? [`-ttl=${parameters.ttl}`] : []),
-    '-apply',
-  ].join(' ');
-
   return [
-    {
-      command: `s3.bucket.create -name ${input.bucket}`,
-      ...(input.tolerateExisting ? { tolerate: 'already exist' } : {}),
-    },
-    { command: rule },
-    // A retried setup drops the identity first: s3.configure adds keys, so
-    // keys of an interrupted attempt would otherwise stay valid.
-    ...(input.tolerateExisting
+    ...(owned && input.operation === 'create'
       ? [
-          {
-            command: `s3.configure -user=${identity} -delete -apply`,
-            tolerate: 'not found',
-          },
+          ...(input.tolerateExisting
+            ? []
+            : [
+                {
+                  command: `if rc bucket list admin/${input.bucket} >/dev/null 2>&1; then echo "Bucket name is already taken"; exit 1; fi`,
+                },
+              ]),
+          { command: `rc bucket create admin/${input.bucket}` },
         ]
       : []),
-    registerIdentity,
+    { command: `printf "%s" "$${POLICY_ENV}" > /tmp/policy.json` },
+    { command: `rc admin policy create admin ${policy} /tmp/policy.json` },
+    {
+      command: `rc admin user add admin "$${ACCESS_KEY_ENV}" "$${SECRET_KEY_ENV}"`,
+    },
+    {
+      command: `rc admin policy attach admin ${policy} --user "$${ACCESS_KEY_ENV}"`,
+    },
+    // Keys of an earlier attempt or of the rotation before stop working.
+    removeOtherUsers,
   ];
 };
 
 /**
- * The shell script the Job runs. `weed shell` exits 1 and prints
- * `error: ...` when a command fails; its normal output is discarded because
- * `s3.configure` echoes the secret key. A failure leaves exactly one
- * `BUCKET_ERROR` line in the log.
+ * The shell script the Job runs. `rc` output is discarded: a failure leaves
+ * exactly one `BUCKET_ERROR` line in the log, its last line of output with
+ * any secret key masked.
  */
 export const buildBucketScript = (input: BucketJobInput): string => {
   const lines = bucketCommands(input).map(({ command, tolerate }) =>
-    tolerate ? `run "${command}" "${tolerate}"` : `run "${command}"`,
+    tolerate ? `run '${command}' '${tolerate}'` : `run '${command}'`,
   );
 
   return [
     'set -u',
-    `W="weed shell -master=${input.target.master} -filer=${input.target.filer}"`,
+    'mask() {',
+    '  out=$1',
+    `  for k in "\${${ADMIN_SECRET_KEY_ENV}:-}" "\${${SECRET_KEY_ENV}:-}"; do`,
+    '    [ -n "$k" ] && out=$(printf "%s" "$out" | sed "s|$k|***|g")',
+    '  done',
+    '  printf "%s" "$out"',
+    '}',
     'run() {',
-    '  out=$(printf "%s\\n" "$1" | $W 2>&1)',
+    '  out=$(eval "$1" 2>&1)',
     '  rc=$?',
     '  if [ "$rc" -eq 0 ]; then return 0; fi',
-    '  if [ -n "${2:-}" ] && printf "%s" "$out" | grep -q "$2"; then return 0; fi',
-    '  msg=$(printf "%s\\n" "$out" | grep "^error:" | tail -1 | sed "s/^error: *//")',
-    `  echo "${BUCKET_ERROR_PREFIX} \${msg:-weed shell exited with $rc}"`,
+    '  if [ -n "${2:-}" ] && printf "%s" "$out" | grep -qi "$2"; then return 0; fi',
+    '  msg=$(printf "%s\\n" "$out" | grep -v "^ *$" | tail -1 | sed "s/^✗ *//")',
+    `  echo "${BUCKET_ERROR_PREFIX} $(mask "\${msg:-rc exited with $rc}")"`,
     '  exit 1',
     '}',
+    `run 'rc alias set admin "$${ENDPOINT_ENV}" "$${ADMIN_ACCESS_KEY_ENV}" "$${ADMIN_SECRET_KEY_ENV}" --bucket-lookup path'`,
     ...lines,
     'echo "done"',
   ].join('\n');
@@ -219,17 +263,21 @@ export const buildBucketJob = (input: BucketJobInput): V1Job => {
     ...labels(input),
     [BUCKET_OPERATION_LABEL]: input.operation,
   };
-  const env = operationNeedsKeys(input.operation)
-    ? [ACCESS_KEY_ENV, SECRET_KEY_ENV].map((name) => ({
-        name,
-        valueFrom: {
-          secretKeyRef: {
-            name: jobSecretName(input.workloadId, input.operation),
-            key: name,
-          },
-        },
-      }))
-    : [];
+  const fromSecret = (name: string, secret: string, key = name) => ({
+    name,
+    valueFrom: { secretKeyRef: { name: secret, key } },
+  });
+  const env = [
+    { name: ENDPOINT_ENV, value: input.target.endpoint },
+    { name: POLICY_ENV, value: bucketPolicy(input) },
+    fromSecret(ADMIN_ACCESS_KEY_ENV, input.target.adminSecret),
+    fromSecret(ADMIN_SECRET_KEY_ENV, input.target.adminSecret),
+    ...(operationNeedsKeys(input.operation)
+      ? [ACCESS_KEY_ENV, SECRET_KEY_ENV].map((name) =>
+          fromSecret(name, jobSecretName(input.workloadId, input.operation)),
+        )
+      : []),
+  ];
 
   return {
     apiVersion: 'batch/v1',
@@ -241,7 +289,8 @@ export const buildBucketJob = (input: BucketJobInput): V1Job => {
     },
     spec: {
       // One attempt: a create that half-ran would fail its retry on "bucket
-      // already exists". The user deletes the failed bucket, which cleans up.
+      // name is already taken". The user deletes the failed bucket, which
+      // cleans up.
       backoffLimit: 0,
       activeDeadlineSeconds: ACTIVE_DEADLINE_SECONDS,
       ttlSecondsAfterFinished: TTL_AFTER_FINISHED_SECONDS,
@@ -252,7 +301,7 @@ export const buildBucketJob = (input: BucketJobInput): V1Job => {
           automountServiceAccountToken: false,
           containers: [
             {
-              name: SHELL_CONTAINER,
+              name: RC_CONTAINER,
               image: input.target.image,
               command: ['sh', '-c', buildBucketScript(input)],
               env,

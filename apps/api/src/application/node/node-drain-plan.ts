@@ -10,8 +10,11 @@ import type {
   NodeDrainPod,
   NodeStorageRisk,
 } from '@acceleratio/shared';
+import { longhornNamespace } from '@/vendor/kubernetes/longhorn';
 
-const SEAWEEDFS_NAMESPACE = 'seaweedfs';
+/** The emptyDir a static site's pods fill from RustFS on every start. */
+const REBUILT_VOLUME = 'files';
+const WORKLOAD_ID_LABEL = 'acceleratio.io/workload-id';
 const CONTROL_PLANE_LABELS = [
   'node-role.kubernetes.io/control-plane',
   'node-role.kubernetes.io/master',
@@ -22,10 +25,26 @@ export interface DrainPlanInput {
   nodes: V1Node[];
   /** Pods scheduled on `node`. */
   pods: V1Pod[];
-  /** Pods of every node; used to tell whether SeaweedFS has another copy. */
-  allPods: V1Pod[];
   budgets: V1PodDisruptionBudget[];
   volumes: V1PersistentVolume[];
+  /** `replicas.longhorn.io` of every node; empty without Longhorn. */
+  longhornReplicas: LonghornReplica[];
+  /** `volumes.longhorn.io`, to name a volume by its claim. */
+  longhornVolumes: LonghornVolume[];
+}
+
+export interface LonghornReplica {
+  spec?: {
+    volumeName?: string;
+    nodeID?: string;
+    healthyAt?: string;
+    failedAt?: string;
+  };
+}
+
+export interface LonghornVolume {
+  metadata?: { name?: string };
+  status?: { kubernetesStatus?: { namespace?: string; pvcName?: string } };
 }
 
 export const isControlPlane = (node: V1Node): boolean =>
@@ -83,7 +102,13 @@ const hasController = (pod: V1Pod): boolean =>
 const hasLocalData = (pod: V1Pod): boolean =>
   (pod.spec?.volumes ?? []).some(
     (volume) =>
-      (volume.emptyDir !== undefined && volume.emptyDir.medium !== 'Memory') ||
+      (volume.emptyDir !== undefined &&
+        volume.emptyDir.medium !== 'Memory' &&
+        // A static site copies its files in again wherever it starts.
+        !(
+          volume.name === REBUILT_VOLUME &&
+          pod.metadata?.labels?.[WORKLOAD_ID_LABEL] !== undefined
+        )) ||
       volume.hostPath !== undefined,
   );
 
@@ -118,6 +143,18 @@ const classify = (
 
   if (isMirrorPod(pod)) {
     return { ...base, action: 'skip', reason: 'Static pod' };
+  }
+
+  // Longhorn's own pods (instance managers) hold no data of their own and are
+  // recreated by Longhorn. Their budgets hold the eviction until Longhorn has
+  // moved the replicas they serve, so they are evicted like any other pod.
+  if (pod.metadata?.namespace === longhornNamespace()) {
+    return {
+      ...base,
+      action: 'evict',
+      reason: null,
+      pdb_blocked: isBlockedByBudget(pod, budgets),
+    };
   }
 
   if (!hasController(pod)) {
@@ -173,9 +210,6 @@ const pinsToNode = (volume: V1PersistentVolume, node: string): boolean => {
 
 const storageRisks = (input: DrainPlanInput): NodeStorageRisk[] => {
   const risks: NodeStorageRisk[] = [];
-  const podOnNode = new Set(
-    input.pods.map((pod) => `${pod.metadata?.namespace}/${pod.metadata?.name}`),
-  );
   const claimsOnNode = new Set(
     input.pods.flatMap((pod) =>
       (pod.spec?.volumes ?? [])
@@ -205,26 +239,36 @@ const storageRisks = (input: DrainPlanInput): NodeStorageRisk[] => {
     }
   }
 
-  const isSeaweedVolume = (pod: V1Pod) =>
-    pod.metadata?.namespace === SEAWEEDFS_NAMESPACE &&
-    pod.metadata?.labels?.['app.kubernetes.io/component'] === 'volume';
-  const volumePodsElsewhere = input.allPods.some(
-    (pod) =>
-      isSeaweedVolume(pod) &&
-      pod.spec?.nodeName !== input.node &&
-      !isFinished(pod),
+  const healthy = input.longhornReplicas.filter(
+    (replica) => replica.spec?.healthyAt && !replica.spec?.failedAt,
+  );
+  const claims = new Map(
+    input.longhornVolumes.map((volume) => [
+      volume.metadata?.name ?? '',
+      volume.status?.kubernetesStatus,
+    ]),
   );
 
-  for (const pod of input.pods.filter(isSeaweedVolume)) {
-    if (
-      podOnNode.has(`${pod.metadata?.namespace}/${pod.metadata?.name}`) &&
-      !volumePodsElsewhere
-    ) {
+  for (const volume of new Set(
+    healthy
+      .filter((replica) => replica.spec?.nodeID === input.node)
+      .map((replica) => replica.spec?.volumeName ?? ''),
+  )) {
+    const elsewhere = healthy.some(
+      (replica) =>
+        replica.spec?.volumeName === volume &&
+        replica.spec?.nodeID !== input.node,
+    );
+
+    if (volume && !elsewhere) {
+      const claim = claims.get(volume);
+
       risks.push({
-        kind: 'seaweedfs',
-        namespace: SEAWEEDFS_NAMESPACE,
-        name: pod.metadata?.name ?? '',
-        reason: 'The only SeaweedFS volume server holds its data on this node',
+        kind: 'longhorn_replica',
+        namespace: claim?.namespace ?? null,
+        name: claim?.pvcName ?? volume,
+        reason:
+          'The only healthy copy of this volume is on this server. A drain first copies it to another server with free space and waits until the copy is complete.',
       });
     }
   }
@@ -255,7 +299,15 @@ export const buildDrainPlan = (input: DrainPlanInput): NodeDrainPlan => {
     deleteBlockers.push('This is the last control plane node');
   }
 
-  for (const risk of storage) {
+  // A Longhorn copy moves during the drain that precedes a removal, but
+  // only while the node is up: from a node that is down nothing can copy it.
+  const ready = node?.status?.conditions?.some(
+    (condition) => condition.type === 'Ready' && condition.status === 'True',
+  );
+
+  for (const risk of storage.filter(
+    (item) => item.kind === 'persistent_volume' || !ready,
+  )) {
     deleteBlockers.push(
       `${risk.namespace ? `${risk.namespace}/` : ''}${risk.name}: ${risk.reason}`,
     );

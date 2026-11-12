@@ -2,6 +2,7 @@ import {
   ACCESS_KEY_ENV,
   BUCKET_WORKLOAD_LABEL,
   bucketCommands,
+  bucketPolicy,
   buildBucketJob,
   buildBucketScript,
   buildJobSecret,
@@ -23,75 +24,120 @@ const input = (overrides: Partial<BucketJobInput> = {}): BucketJobInput => ({
   projectId,
   bucket: 'demo-assets',
   operation: 'create',
-  parameters: { replication: '001', disk_type: null, ttl: null },
   target: {
-    namespace: 'seaweedfs',
-    master: 'seaweedfs-master.seaweedfs:9333',
-    filer: 'seaweedfs-filer.seaweedfs:8888',
-    image: 'chrislusf/seaweedfs:4.51',
+    namespace: 'rustfs',
+    endpoint: 'http://rustfs.rustfs.svc.cluster.local:9000',
+    image: 'rustfs/rc:test',
+    adminSecret: 'rustfs-root',
   },
   ...overrides,
 });
 
+const commandsOf = (value: BucketJobInput) =>
+  bucketCommands(value).map(({ command }) => command);
+const removeOthers: unknown = expect.stringContaining(
+  `rc admin policy entities admin --policy acc-${workloadId} --json`,
+);
+
 describe('bucketCommands', () => {
-  it('creates the bucket, its storage rule and its identity in order', () => {
-    expect(bucketCommands(input()).map(({ command }) => command)).toEqual([
-      's3.bucket.create -name demo-assets',
-      'fs.configure -locationPrefix=/buckets/demo-assets/ -replication=001 -apply',
-      `s3.configure -user=acc-${workloadId} -access_key=$S3_ACCESS_KEY -secret_key=$S3_SECRET_KEY -buckets=demo-assets -actions=Read,Write,List,Tagging -apply`,
+  it('refuses an existing bucket, then creates it and a key attached to its policy', () => {
+    expect(commandsOf(input())).toEqual([
+      'if rc bucket list admin/demo-assets >/dev/null 2>&1; then echo "Bucket name is already taken"; exit 1; fi',
+      'rc bucket create admin/demo-assets',
+      'printf "%s" "$POLICY_JSON" > /tmp/policy.json',
+      `rc admin policy create admin acc-${workloadId} /tmp/policy.json`,
+      'rc admin user add admin "$S3_ACCESS_KEY" "$S3_SECRET_KEY"',
+      `rc admin policy attach admin acc-${workloadId} --user "$S3_ACCESS_KEY"`,
+      removeOthers,
     ]);
   });
 
-  it('on a retried setup, keeps the bucket and replaces the identity keys', () => {
-    const commands = bucketCommands(input({ tolerateExisting: true }));
+  it('on a retried setup, keeps the bucket and replaces the keys', () => {
+    const commands = commandsOf(input({ tolerateExisting: true }));
 
-    expect(commands[0]).toEqual({
-      command: 's3.bucket.create -name demo-assets',
-      tolerate: 'already exist',
-    });
-    expect(commands.map(({ command }) => command).slice(2)).toEqual([
-      `s3.configure -user=acc-${workloadId} -delete -apply`,
-      `s3.configure -user=acc-${workloadId} -access_key=$S3_ACCESS_KEY -secret_key=$S3_SECRET_KEY -buckets=demo-assets -actions=Read,Write,List,Tagging -apply`,
-    ]);
+    expect(commands[0]).toBe('rc bucket create admin/demo-assets');
+    expect(commands.at(-1)).toEqual(removeOthers);
   });
 
-  it('adds disk type and TTL only when the profile sets them', () => {
-    const [, rule] = bucketCommands(
-      input({
-        parameters: { replication: '000', disk_type: 'ssd', ttl: '7d' },
-      }),
-    );
+  it('removes every key but the new one', () => {
+    const [last] = bucketCommands(input()).slice(-1);
 
-    expect(rule.command).toBe(
-      'fs.configure -locationPrefix=/buckets/demo-assets/ -replication=000 -disk=ssd -ttl=7d -apply',
+    expect(last.command).toContain(
+      '[ "$u" = "${S3_ACCESS_KEY:-}" ] || rc admin user rm admin "$u" || exit 1',
     );
+    expect(last.tolerate).toBe('not found');
   });
 
-  it('deletes identity, rule and bucket, tolerating parts already gone', () => {
+  it('deletes keys, policy and bucket, tolerating parts already gone', () => {
     expect(bucketCommands(input({ operation: 'delete' }))).toEqual([
+      { command: removeOthers, tolerate: 'not found' },
       {
-        command: `s3.configure -user=acc-${workloadId} -delete -apply`,
+        command: `rc admin policy rm admin acc-${workloadId}`,
         tolerate: 'not found',
       },
       {
-        command:
-          'fs.configure -locationPrefix=/buckets/demo-assets/ -delete -apply',
+        command: 'rc bucket remove --force admin/demo-assets',
+        tolerate: 'not found',
       },
-      { command: 's3.bucket.delete -name demo-assets', tolerate: 'not found' },
     ]);
+  });
+
+  it('never creates or removes the bucket of a prefix key', () => {
+    const create = commandsOf(input({ prefix: `${workloadId}/` }));
+    const remove = commandsOf(
+      input({ prefix: `${workloadId}/`, operation: 'delete' }),
+    );
+
+    expect(create.join('\n')).not.toContain('rc bucket');
+    expect(remove.join('\n')).not.toContain('rc bucket');
+  });
+});
+
+describe('bucketPolicy', () => {
+  it('grants read and write on the bucket only', () => {
+    const policy = JSON.parse(bucketPolicy(input())) as {
+      Statement: { Action: string[]; Resource: string[] }[];
+    };
+
+    expect(policy.Statement.map((item) => item.Resource)).toEqual([
+      ['arn:aws:s3:::demo-assets'],
+      ['arn:aws:s3:::demo-assets/*'],
+    ]);
+    expect(policy.Statement[1].Action).toContain('s3:PutObject');
+  });
+
+  it('grants read-only access under a prefix', () => {
+    expect(
+      JSON.parse(
+        bucketPolicy(input({ bucket: 'acceleratio-sites', prefix: 'w1/' })),
+      ),
+    ).toEqual({
+      Version: '2012-10-17',
+      Statement: [
+        {
+          Effect: 'Allow',
+          Action: ['s3:ListBucket'],
+          Resource: ['arn:aws:s3:::acceleratio-sites'],
+          Condition: { StringLike: { 's3:prefix': ['w1/*'] } },
+        },
+        {
+          Effect: 'Allow',
+          Action: ['s3:GetObject'],
+          Resource: ['arn:aws:s3:::acceleratio-sites/w1/*'],
+        },
+      ],
+    });
   });
 });
 
 describe('key rotation', () => {
-  it('drops the identity with every old key, then registers the new pair', () => {
-    expect(bucketCommands(input({ operation: 'rotate' }))).toEqual([
-      {
-        command: `s3.configure -user=acc-${workloadId} -delete -apply`,
-        tolerate: 'not found',
-      },
-      {
-        command: `s3.configure -user=acc-${workloadId} -access_key=$S3_ACCESS_KEY -secret_key=$S3_SECRET_KEY -buckets=demo-assets -actions=Read,Write,List,Tagging -apply`,
-      },
+  it('adds the new key and removes the others, without touching the bucket', () => {
+    expect(commandsOf(input({ operation: 'rotate' }))).toEqual([
+      'printf "%s" "$POLICY_JSON" > /tmp/policy.json',
+      `rc admin policy create admin acc-${workloadId} /tmp/policy.json`,
+      'rc admin user add admin "$S3_ACCESS_KEY" "$S3_SECRET_KEY"',
+      `rc admin policy attach admin acc-${workloadId} --user "$S3_ACCESS_KEY"`,
+      removeOthers,
     ]);
   });
 
@@ -103,52 +149,56 @@ describe('key rotation', () => {
     });
 
     expect(job.metadata!.name).toBe(`s3-rotate-${workloadId}`);
-    expect(job.spec!.template.spec!.containers[0].env).toEqual([
-      expect.objectContaining({
-        valueFrom: {
-          secretKeyRef: {
-            name: `s3-rotate-${workloadId}`,
-            key: ACCESS_KEY_ENV,
+    expect(job.spec!.template.spec!.containers[0].env).toEqual(
+      expect.arrayContaining([
+        {
+          name: ACCESS_KEY_ENV,
+          valueFrom: {
+            secretKeyRef: {
+              name: `s3-rotate-${workloadId}`,
+              key: ACCESS_KEY_ENV,
+            },
           },
         },
-      }),
-      expect.objectContaining({
-        valueFrom: {
-          secretKeyRef: {
-            name: `s3-rotate-${workloadId}`,
-            key: SECRET_KEY_ENV,
+        {
+          name: SECRET_KEY_ENV,
+          valueFrom: {
+            secretKeyRef: {
+              name: `s3-rotate-${workloadId}`,
+              key: SECRET_KEY_ENV,
+            },
           },
         },
-      }),
-    ]);
+      ]),
+    );
     expect(secret.metadata!.name).toBe(`s3-rotate-${workloadId}`);
   });
 });
 
 describe('buildBucketScript', () => {
-  it('discards weed shell output and reports one error line', () => {
+  it('discards rc output, masks secrets and reports one error line', () => {
     const script = buildBucketScript(input());
 
-    expect(script).toContain('out=$(printf "%s\\n" "$1" | $W 2>&1)');
+    expect(script).toContain('out=$(eval "$1" 2>&1)');
     expect(script).toContain(
-      'echo "BUCKET_ERROR ${msg:-weed shell exited with $rc}"',
+      'echo "BUCKET_ERROR $(mask "${msg:-rc exited with $rc}")"',
     );
     expect(script).toContain(
-      'W="weed shell -master=seaweedfs-master.seaweedfs:9333 -filer=seaweedfs-filer.seaweedfs:8888"',
+      `run 'rc alias set admin "$RUSTFS_ENDPOINT" "$RUSTFS_ACCESS_KEY" "$RUSTFS_SECRET_KEY" --bucket-lookup path'`,
     );
-    expect(script).toContain('run "s3.bucket.create -name demo-assets"');
+    expect(script).toContain(`run 'rc bucket create admin/demo-assets'`);
     expect(script).not.toContain(keys.secretAccessKey);
   });
 });
 
 describe('buildBucketJob', () => {
-  it('runs once, in the SeaweedFS namespace, without the observer label', () => {
+  it('runs once, in the RustFS namespace, without the observer label', () => {
     const job = buildBucketJob(input());
     const pod = job.spec!.template.spec!;
 
     expect(job.metadata).toMatchObject({
       name: `s3-create-${workloadId}`,
-      namespace: 'seaweedfs',
+      namespace: 'rustfs',
     });
     expect(job.spec).toMatchObject({ backoffLimit: 0 });
     expect(job.spec!.template.metadata!.labels).toMatchObject({
@@ -158,41 +208,37 @@ describe('buildBucketJob', () => {
       WORKLOAD_ID_LABEL,
     );
     expect(pod.automountServiceAccountToken).toBe(false);
-    expect(pod.containers[0].image).toBe('chrislusf/seaweedfs:4.51');
+    expect(pod.containers[0].image).toBe('rustfs/rc:test');
   });
 
   it('passes the keys only through Secret references', () => {
     const job = buildBucketJob(input());
-    const container = job.spec!.template.spec!.containers[0];
+    const env = job.spec!.template.spec!.containers[0].env!;
 
-    expect(container.env).toEqual([
-      {
-        name: ACCESS_KEY_ENV,
-        valueFrom: {
-          secretKeyRef: {
-            name: `s3-create-${workloadId}`,
-            key: ACCESS_KEY_ENV,
-          },
-        },
-      },
-      {
-        name: SECRET_KEY_ENV,
-        valueFrom: {
-          secretKeyRef: {
-            name: `s3-create-${workloadId}`,
-            key: SECRET_KEY_ENV,
-          },
-        },
-      },
+    expect(env.map((item) => item.name)).toEqual([
+      'RUSTFS_ENDPOINT',
+      'POLICY_JSON',
+      'RUSTFS_ACCESS_KEY',
+      'RUSTFS_SECRET_KEY',
+      ACCESS_KEY_ENV,
+      SECRET_KEY_ENV,
     ]);
+    expect(env[2].valueFrom).toEqual({
+      secretKeyRef: { name: 'rustfs-root', key: 'RUSTFS_ACCESS_KEY' },
+    });
+    expect(env[5].valueFrom).toEqual({
+      secretKeyRef: { name: `s3-create-${workloadId}`, key: SECRET_KEY_ENV },
+    });
     expect(JSON.stringify(job)).not.toContain(keys.secretAccessKey);
   });
 
-  it('needs no keys to delete', () => {
+  it('needs no bucket keys to delete', () => {
     const job = buildBucketJob(input({ operation: 'delete' }));
 
     expect(job.metadata!.name).toBe(`s3-delete-${workloadId}`);
-    expect(job.spec!.template.spec!.containers[0].env).toEqual([]);
+    expect(
+      job.spec!.template.spec!.containers[0].env!.map((item) => item.name),
+    ).not.toContain(ACCESS_KEY_ENV);
   });
 });
 
@@ -202,7 +248,7 @@ describe('Secrets', () => {
 
     expect(secret.metadata).toMatchObject({
       name: `s3-create-${workloadId}`,
-      namespace: 'seaweedfs',
+      namespace: 'rustfs',
       ownerReferences: [
         { apiVersion: 'batch/v1', kind: 'Job', name: 'job', uid: 'uid-1' },
       ],
@@ -219,7 +265,7 @@ describe('Secrets', () => {
       projectId,
       namespace: `project-${projectId}`,
       bucket: 'demo-assets',
-      endpoint: 'http://s3:8333',
+      endpoint: 'http://s3:9000',
       keys,
       phase: 'provisioning',
     });
@@ -232,7 +278,7 @@ describe('Secrets', () => {
     expect(secret.stringData).toEqual({
       AWS_ACCESS_KEY_ID: keys.accessKeyId,
       AWS_SECRET_ACCESS_KEY: keys.secretAccessKey,
-      AWS_ENDPOINT_URL: 'http://s3:8333',
+      AWS_ENDPOINT_URL: 'http://s3:9000',
       AWS_REGION: 'us-east-1',
       S3_BUCKET: 'demo-assets',
     });

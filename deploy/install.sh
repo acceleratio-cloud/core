@@ -3,8 +3,8 @@
 # Acceleratio installer.
 #
 # Installs a single-node k3s cluster with embedded etcd, Cilium as the CNI
-# (replacing both flannel and kube-proxy), SeaweedFS and the SeaweedFS CSI
-# driver. The CSI driver creates the default StorageClass `seaweedfs-storage`.
+# (replacing both flannel and kube-proxy), Longhorn block storage with the
+# default StorageClass `longhorn`, and RustFS as the S3 object store.
 #
 # It then deploys Acceleratio itself into the `acceleratio` namespace:
 # PostgreSQL, the API and the console, and prints the dashboard URL.
@@ -44,14 +44,26 @@ CILIUM_CNI_CONF_PATH="${CILIUM_CNI_CONF_PATH:-/etc/cni/net.d}"
 CILIUM_CNI_BIN_PATH="${CILIUM_CNI_BIN_PATH:-/opt/cni/bin}"
 HELM_VERSION="${HELM_VERSION:-3.18.0}"
 
-SEAWEEDFS_CHART_VERSION="${SEAWEEDFS_CHART_VERSION:-4.51.0}"
-SEAWEEDFS_CSI_CHART_VERSION="${SEAWEEDFS_CSI_CHART_VERSION:-0.2.43}"
-SEAWEEDFS_NAMESPACE="${SEAWEEDFS_NAMESPACE:-seaweedfs}"
-SEAWEEDFS_RELEASE="${SEAWEEDFS_RELEASE:-seaweedfs}"
-SEAWEEDFS_CSI_RELEASE="${SEAWEEDFS_CSI_RELEASE:-seaweedfs-csi}"
-SEAWEEDFS_DATA_DIR="${SEAWEEDFS_DATA_DIR:-/var/lib/seaweedfs}"
-SEAWEEDFS_S3_ENABLED="${SEAWEEDFS_S3_ENABLED:-true}"
-STORAGE_CLASS_NAME="${STORAGE_CLASS_NAME:-seaweedfs-storage}"
+# longhorn: Longhorn volumes (servers). local-path: the k3s local-path
+# provisioner, for development machines that cannot run Longhorn (OrbStack and
+# other LXC/OpenVZ containers have no working iSCSI).
+STORAGE_BACKEND="${STORAGE_BACKEND:-longhorn}"
+LONGHORN_CHART_VERSION="${LONGHORN_CHART_VERSION:-1.13.0}"
+LONGHORN_NAMESPACE="${LONGHORN_NAMESPACE:-longhorn-system}"
+LONGHORN_RELEASE="${LONGHORN_RELEASE:-longhorn}"
+LONGHORN_DATA_DIR="${LONGHORN_DATA_DIR:-/var/lib/longhorn}"
+LONGHORN_REPLICAS="${LONGHORN_REPLICAS:-1}"
+# Empty means "longhorn" (or "local-path" with STORAGE_BACKEND=local-path).
+STORAGE_CLASS_NAME="${STORAGE_CLASS_NAME:-}"
+
+# RustFS: the single S3 object store (buckets, PostgreSQL backups, static
+# sites). One pod on a volume of the platform StorageClass.
+RUSTFS_IMAGE="${RUSTFS_IMAGE:-rustfs/rustfs:1.0.5@sha256:b81d16a90ee25bd9511280127ca1471788c6e874cf0f0da759645f46b2dc1d74}"
+# The rc client for admin Jobs; keep in step with RUSTFS_RC_IMAGE in the API.
+RC_IMAGE="${RC_IMAGE:-rustfs/rc:v0.1.37@sha256:7e93fd410a8fe51514f89373e093392c92095b98dc6140335fcfe956810c4c80}"
+RUSTFS_NAMESPACE="${RUSTFS_NAMESPACE:-rustfs}"
+RUSTFS_SIZE="${RUSTFS_SIZE:-50Gi}"
+SITES_BUCKET="${SITES_BUCKET:-acceleratio-sites}"
 
 # scripts/cluster.sh reads this default; keep the KEY="${KEY:-default}" form.
 VICTORIAMETRICS_CHART_VERSION="${VICTORIAMETRICS_CHART_VERSION:-0.50.0}"
@@ -113,8 +125,6 @@ RESET=0
 ASSUME_YES=0
 CONFIG_FILE=""
 K3S_CONFIG_CHANGED=0
-SW_FULLNAME=""
-CSI_FULLNAME=""
 HELM_BIN=""
 LOG_FILE=""
 SMOKE_NAMESPACE="acceleratio-smoke"
@@ -260,7 +270,7 @@ prepull_images() {
     return 0
   fi
   for image in "$ACCELERATIO_API_IMAGE" "$ACCELERATIO_CONSOLE_IMAGE" \
-    "$POSTGRES_IMAGE" "$REGISTRY_IMAGE" busybox:1.36; do
+    "$POSTGRES_IMAGE" "$REGISTRY_IMAGE" "$RUSTFS_IMAGE" "$RC_IMAGE" busybox:1.36; do
     k3s crictl pull "$image" >/dev/null 2>&1 &
   done
 }
@@ -330,9 +340,9 @@ Acceleratio installer
 Installs on any Ubuntu/Debian server (bare metal, private server, any hardware):
   - k3s with embedded etcd (single node, server + worker)
   - Cilium as CNI with kube-proxy replacement
-  - SeaweedFS (master, volume, filer, S3)
-  - SeaweedFS CSI driver and the configured default StorageClass
-    (default seaweedfs-storage)
+  - Longhorn block storage and the default StorageClass longhorn
+    (STORAGE_BACKEND=local-path uses the k3s local-path provisioner instead)
+  - RustFS, the S3 object store, in namespace "rustfs"
   - VictoriaMetrics (single node) scraping kubelet and cAdvisor metrics
     for the console's Observability tab
   - VictoriaLogs (single node) with Vector collecting project container logs
@@ -347,9 +357,9 @@ Usage:
 Options:
   --dry-run          Check prerequisites and print planned actions only.
   --config FILE      Load variables from FILE (shell syntax).
-  --reset            Remove an existing k3s/SeaweedFS installation first.
-                     Destructive: deletes etcd, Cilium networking,
-                     SeaweedFS data, VictoriaMetrics and VictoriaLogs history. Requires --yes when stdin is not a TTY.
+  --reset            Remove an existing k3s/Longhorn installation first.
+                     Destructive: deletes etcd, Cilium networking, every
+                     volume, RustFS data, VictoriaMetrics and VictoriaLogs history. Requires --yes when stdin is not a TTY.
   --yes, -y          Do not ask for confirmation.
   --help, -h         Show this help.
 
@@ -366,14 +376,18 @@ Common variables (environment or --config):
   CILIUM_CNI_CONF_PATH        default /etc/cni/net.d
   CILIUM_CNI_BIN_PATH         default /opt/cni/bin
   HELM_VERSION                default 3.18.0
-  SEAWEEDFS_CHART_VERSION     default 4.51.0
-  SEAWEEDFS_CSI_CHART_VERSION default 0.2.43
-  SEAWEEDFS_NAMESPACE         default seaweedfs
-  SEAWEEDFS_RELEASE           default seaweedfs
-  SEAWEEDFS_CSI_RELEASE       default seaweedfs-csi
-  SEAWEEDFS_DATA_DIR          default /var/lib/seaweedfs
-  SEAWEEDFS_S3_ENABLED        default true
-  STORAGE_CLASS_NAME          default seaweedfs-storage
+  STORAGE_BACKEND             default longhorn (local-path for development)
+  LONGHORN_CHART_VERSION      default 1.13.0
+  LONGHORN_NAMESPACE          default longhorn-system
+  LONGHORN_RELEASE            default longhorn
+  LONGHORN_DATA_DIR           default /var/lib/longhorn
+  LONGHORN_REPLICAS           default 1 (copies of each platform volume)
+  STORAGE_CLASS_NAME          default longhorn (local-path with local-path)
+  RUSTFS_IMAGE                default rustfs/rustfs:1.0.5 (pinned by digest)
+  RC_IMAGE                    default rustfs/rc:v0.1.37 (pinned by digest)
+  RUSTFS_NAMESPACE            default rustfs
+  RUSTFS_SIZE                 default 50Gi (volume for all S3 data)
+  SITES_BUCKET                default acceleratio-sites
   VICTORIAMETRICS_CHART_VERSION default 0.50.0
   VICTORIAMETRICS_NAMESPACE   default victoria-metrics
   VICTORIAMETRICS_RELEASE     default victoria-metrics
@@ -523,7 +537,7 @@ check_memory() {
     die "At least 2 GiB RAM is required (found ${mem_gb} GiB). 4 GiB recommended."
   fi
   if ((mem_gb < 4)); then
-    log_warn "Only ${mem_gb} GiB RAM. 4 GiB or more is recommended for k3s + Cilium + SeaweedFS."
+    log_warn "Only ${mem_gb} GiB RAM. 4 GiB or more is recommended for k3s + Cilium + Longhorn."
   else
     log_info "Memory: ${mem_gb} GiB"
   fi
@@ -531,7 +545,7 @@ check_memory() {
 
 check_disk() {
   local check_path avail_kb avail_gb
-  check_path="$SEAWEEDFS_DATA_DIR"
+  check_path="$LONGHORN_DATA_DIR"
   if [ ! -d "$check_path" ]; then
     check_path="$(dirname "$check_path")"
   fi
@@ -563,20 +577,51 @@ check_swap() {
   fi
 }
 
-check_fuse() {
-  if [ ! -e /dev/fuse ]; then
-    if (( DRY_RUN )); then
-      log_warn "DRY-RUN: /dev/fuse is missing; the real install would fail."
-      return 0
-    fi
-    if command -v modprobe >/dev/null 2>&1; then
-      modprobe fuse >/dev/null 2>&1 || true
-    fi
+# resolve_storage: fills STORAGE_CLASS_NAME after --config is loaded.
+resolve_storage() {
+  case "$STORAGE_BACKEND" in
+    longhorn) STORAGE_CLASS_NAME="${STORAGE_CLASS_NAME:-longhorn}" ;;
+    local-path) STORAGE_CLASS_NAME="${STORAGE_CLASS_NAME:-local-path}" ;;
+    *) die "STORAGE_BACKEND must be longhorn or local-path (got '${STORAGE_BACKEND}')" ;;
+  esac
+  if ! [[ $LONGHORN_REPLICAS =~ ^[1-3]$ ]]; then
+    die "LONGHORN_REPLICAS must be 1, 2 or 3 (got '${LONGHORN_REPLICAS}')"
   fi
-  if [ ! -e /dev/fuse ]; then
-    die "/dev/fuse is missing. The SeaweedFS CSI driver requires FUSE. Some virtualised or containerised hosts (OpenVZ, LXC) do not expose it."
+}
+
+# check_iscsi: Longhorn attaches volumes over iSCSI, which needs iscsid on the
+# host. In LXC/OpenVZ containers iscsid starts but cannot talk to the kernel
+# ("sendmsg: bug? ctrl_fd"), so test it for real instead of trusting the unit.
+check_iscsi() {
+  [ "$STORAGE_BACKEND" = "longhorn" ] || return 0
+  if (( DRY_RUN )); then
+    if ! command -v iscsiadm >/dev/null 2>&1; then
+      log_info "DRY-RUN: open-iscsi is not installed; the real install would install it."
+    fi
+    return 0
   fi
-  log_info "FUSE: available"
+  if [ -r /proc/1/environ ] && tr '\0' '\n' </proc/1/environ 2>/dev/null | grep -qx 'container=lxc'; then
+    die "Longhorn requires a VM or bare metal; LXC/OpenVZ containers are not supported. For a development machine set STORAGE_BACKEND=local-path."
+  fi
+  if [ -d /proc/vz ] && [ ! -d /proc/bc ]; then
+    die "Longhorn requires a VM or bare metal; LXC/OpenVZ containers are not supported. For a development machine set STORAGE_BACKEND=local-path."
+  fi
+  log_info "Storage: Longhorn (iSCSI is checked after the host packages are installed)"
+}
+
+# verify_iscsi: runs after open-iscsi is installed. `iscsiadm -m session`
+# exits 21 when there are simply no sessions; anything else that mentions the
+# control socket means iscsid cannot reach the kernel.
+verify_iscsi() {
+  local out rc=0
+  [ "$STORAGE_BACKEND" = "longhorn" ] || return 0
+  (( DRY_RUN )) && return 0
+  systemctl enable --now iscsid >/dev/null 2>&1 || systemctl enable --now iscsid.socket >/dev/null 2>&1 || true
+  out="$(iscsiadm -m session 2>&1)" || rc=$?
+  if (( rc != 0 && rc != 21 )) || printf '%s' "$out" | grep -qi 'ctrl_fd\|can not connect to iscsid\|iscsid is not running'; then
+    die "iscsid does not work on this host (${out:-exit ${rc}}). Longhorn requires a VM or bare metal; LXC/OpenVZ containers are not supported. For a development machine set STORAGE_BACKEND=local-path."
+  fi
+  log_info "iSCSI: available"
 }
 
 check_existing_k3s() {
@@ -663,8 +708,7 @@ check_connectivity() {
     "https://get.k3s.io" \
     "https://get.helm.sh/helm-v${HELM_VERSION}-linux-${ARCH}.tar.gz" \
     "https://quay.io/" \
-    "https://seaweedfs.github.io/seaweedfs/helm/index.yaml" \
-    "https://seaweedfs.github.io/seaweedfs-csi-driver/helm/index.yaml"; do
+    "https://charts.longhorn.io/index.yaml"; do
     if ! curl -fsSI --retry 2 --retry-delay 2 --max-time 20 -o /dev/null "$url"; then
       die "Cannot reach ${url}. Check DNS, outbound HTTPS and the requested versions."
     fi
@@ -689,12 +733,16 @@ check_ports() {
   fi
 }
 
+ufw_active() {
+  command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep "Status: active" >/dev/null
+}
+
 check_warnings() {
   if systemctl is-active --quiet docker 2>/dev/null; then
     log_warn "Docker is active. It can coexist with k3s/Cilium, but its iptables rules are not managed by this installer."
   fi
-  if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep "Status: active" >/dev/null 2>&1; then
-    log_warn "UFW is active. Open ${ACCELERATIO_CONSOLE_NODE_PORT}/tcp and ${ACCELERATIO_API_NODE_PORT}/tcp for the dashboard, and 6443/tcp, 80/tcp, 443/tcp and 8472/udp between cluster nodes if needed."
+  if ufw_active; then
+    log_warn "UFW is active. The installer allows traffic from ${K3S_CLUSTER_CIDR} and ${K3S_SERVICE_CIDR} and keeps your other rules. Open ${ACCELERATIO_CONSOLE_NODE_PORT}/tcp and ${ACCELERATIO_API_NODE_PORT}/tcp for the dashboard, and 6443/tcp, 80/tcp, 443/tcp and 8472/udp between cluster nodes if needed."
   fi
   if systemctl is-active --quiet firewalld 2>/dev/null; then
     log_warn "firewalld is active. Cilium requires careful firewall configuration; review its rules."
@@ -711,7 +759,7 @@ preflight() {
   check_memory
   check_disk
   check_swap
-  check_fuse
+  check_iscsi
   check_existing_k3s
   detect_network
   check_connectivity
@@ -749,25 +797,46 @@ detach_cilium_bpf() {
   done < <(ip -o link show 2>/dev/null | awk -F': ' '{print $2}' | cut -d@ -f1)
 }
 
+# uninstall_longhorn_release HELM: the pods using volumes go first (projects,
+# RustFS, the registry), so Longhorn can detach them. Longhorn refuses to
+# uninstall until deleting-confirmation-flag is set.
+uninstall_longhorn_release() {
+  local helm_cmd=$1
+  k3s kubectl -n "$LONGHORN_NAMESPACE" get settings.longhorn.io deleting-confirmation-flag >/dev/null 2>&1 || return 0
+  k3s kubectl delete namespace -l app.kubernetes.io/managed-by=acceleratio --wait=true --timeout=180s >/dev/null 2>&1 || true
+  k3s kubectl delete namespace "$RUSTFS_NAMESPACE" "$ACCELERATIO_NAMESPACE" --ignore-not-found --wait=true --timeout=180s >/dev/null 2>&1 || true
+  k3s kubectl -n "$LONGHORN_NAMESPACE" patch settings.longhorn.io deleting-confirmation-flag \
+    --type merge -p '{"value":"true"}' >/dev/null 2>&1 || true
+  "$helm_cmd" uninstall "$LONGHORN_RELEASE" -n "$LONGHORN_NAMESPACE" --ignore-not-found --wait --timeout 10m >/dev/null 2>&1 ||
+    log_warn "Longhorn did not uninstall cleanly; k3s removal below clears what is left."
+}
+
+# logout_iscsi: Longhorn volumes are iSCSI sessions on the host; k3s-uninstall
+# does not end them, and a stale session keeps the device busy.
+logout_iscsi() {
+  command -v iscsiadm >/dev/null 2>&1 || return 0
+  iscsiadm -m node --logoutall=all >/dev/null 2>&1 || true
+}
+
 reset_installation() {
   if (( DRY_RUN )); then
-    log_info "DRY-RUN: would remove the existing k3s/Cilium/SeaweedFS/Acceleratio installation"
+    log_info "DRY-RUN: would remove the existing k3s/Cilium/Longhorn/RustFS/Acceleratio installation"
     return 0
   fi
   if (( ! ASSUME_YES )); then
     if [ ! -t 0 ]; then
       die "--reset requires --yes when stdin is not a terminal."
     fi
-    printf 'This deletes k3s, etcd, Cilium, SeaweedFS and database data. Type "reset" to continue: '
+    printf 'This deletes k3s, etcd, Cilium, every volume (Longhorn, RustFS) and database data. Type "reset" to continue: '
     read -r answer
     if [ "$answer" != "reset" ]; then
       die "Reset aborted."
     fi
   fi
 
-  case "$SEAWEEDFS_DATA_DIR" in
+  case "$LONGHORN_DATA_DIR" in
     ""|"/"|"/var"|"/var/lib"|"/etc")
-      die "Refusing to remove unsafe data directory: '${SEAWEEDFS_DATA_DIR}'"
+      die "Refusing to remove unsafe data directory: '${LONGHORN_DATA_DIR}'"
       ;;
   esac
   case "$POSTGRES_DATA_DIR" in
@@ -793,12 +862,13 @@ reset_installation() {
     export KUBECONFIG="$K3S_KUBECONFIG"
     "$helm_cmd" uninstall "$VICTORIALOGS_RELEASE" -n "$VICTORIALOGS_NAMESPACE" --ignore-not-found >/dev/null 2>&1 || true
     "$helm_cmd" uninstall "$VICTORIAMETRICS_RELEASE" -n "$VICTORIAMETRICS_NAMESPACE" --ignore-not-found >/dev/null 2>&1 || true
-    "$helm_cmd" uninstall "$SEAWEEDFS_CSI_RELEASE" -n "$SEAWEEDFS_NAMESPACE" --ignore-not-found >/dev/null 2>&1 || true
-    "$helm_cmd" uninstall "$SEAWEEDFS_RELEASE" -n "$SEAWEEDFS_NAMESPACE" --ignore-not-found >/dev/null 2>&1 || true
+    uninstall_longhorn_release "$helm_cmd"
     "$helm_cmd" uninstall cilium -n kube-system --ignore-not-found >/dev/null 2>&1 || true
   fi
 
   detach_cilium_bpf
+  logout_iscsi
+  remove_multipath
 
   rm -f "${CILIUM_CNI_CONF_PATH%/}"/*cilium* 2>/dev/null || true
   rm -f "${CILIUM_CNI_BIN_PATH%/}/cilium-cni" 2>/dev/null || true
@@ -832,7 +902,7 @@ reset_installation() {
       umount -l "$cilium_mount" 2>/dev/null || true
     fi
   done
-  rm -rf "$SEAWEEDFS_DATA_DIR"
+  rm -rf "$LONGHORN_DATA_DIR"
   rm -rf "$VICTORIAMETRICS_DATA_DIR"
   rm -rf "$VICTORIALOGS_DATA_DIR"
   rm -rf /var/lib/vector
@@ -847,6 +917,56 @@ reset_installation() {
 # ---------------------------------------------------------------------------
 # Host packages.
 # ---------------------------------------------------------------------------
+
+# UFW's default deny drops pod traffic to the host (CoreDNS cannot reach the
+# API server through 10.43.0.1 -> node:6443), so allow the pod and service
+# CIDRs in and through the host. The comment lets uninstall.sh find the rules;
+# ufw skips rules that already exist.
+UFW_RULE_COMMENT="acceleratio-cluster"
+
+configure_ufw() {
+  ufw_active || return 0
+  log_info "UFW is active: allowing ${K3S_CLUSTER_CIDR} and ${K3S_SERVICE_CIDR}"
+  local cidr
+  for cidr in "$K3S_CLUSTER_CIDR" "$K3S_SERVICE_CIDR"; do
+    run ufw allow from "$cidr" comment "$UFW_RULE_COMMENT"
+    run ufw route allow from "$cidr" comment "$UFW_RULE_COMMENT"
+    run ufw route allow to "$cidr" comment "$UFW_RULE_COMMENT"
+  done
+}
+
+# Ubuntu Server runs multipathd, which claims Longhorn's iSCSI disks and breaks
+# their mounts. Blacklist only Longhorn's devices (vendor IET, product
+# VIRTUAL-DISK), as the Longhorn documentation recommends, so a host's own
+# multipath setup keeps working.
+# The block sits between markers so uninstall.sh and --reset can remove it.
+readonly MULTIPATH_BEGIN="# BEGIN acceleratio longhorn"
+readonly MULTIPATH_END="# END acceleratio longhorn"
+
+configure_multipath() {
+  local conf=/etc/multipath.conf
+  if [ -f "$conf" ] && grep -qxF "$MULTIPATH_BEGIN" "$conf"; then
+    return 0
+  fi
+  if ! command -v multipathd >/dev/null 2>&1 && [ ! -f "$conf" ]; then
+    return 0
+  fi
+  log_info "Blacklisting Longhorn devices in ${conf}"
+  printf '%s\n# Longhorn volumes are not multipath.\nblacklist {\n    device {\n        vendor "IET"\n        product "VIRTUAL-DISK"\n    }\n}\n%s\n' \
+    "$MULTIPATH_BEGIN" "$MULTIPATH_END" >>"$conf"
+  if systemctl is-active --quiet multipathd 2>/dev/null; then
+    systemctl restart multipathd
+  fi
+}
+
+remove_multipath() {
+  local conf=/etc/multipath.conf
+  [ -f "$conf" ] && grep -qxF "$MULTIPATH_BEGIN" "$conf" || return 0
+  sed -i "/^${MULTIPATH_BEGIN}\$/,/^${MULTIPATH_END}\$/d" "$conf"
+  if systemctl is-active --quiet multipathd 2>/dev/null; then
+    systemctl restart multipathd || true
+  fi
+}
 
 wait_for_apt_lock() {
   local deadline=$((SECONDS + 600))
@@ -871,16 +991,27 @@ wait_for_apt_lock() {
 
 install_packages() {
   if (( DRY_RUN )); then
-    log_info "DRY-RUN: would install curl, ca-certificates, tar, gzip, fuse3, iptables, iproute2, conntrack, socat, kmod, procps"
+    log_info "DRY-RUN: would install curl, ca-certificates, tar, gzip, iptables, iproute2, conntrack, socat, kmod, procps (and open-iscsi, nfs-common for Longhorn)"
     return 0
+  fi
+  local storage_packages=()
+  if [ "$STORAGE_BACKEND" = "longhorn" ]; then
+    # Longhorn's manager checks for the NFS client at start, even without RWX.
+    storage_packages=(open-iscsi nfs-common)
   fi
   log_info "Installing host packages"
   export DEBIAN_FRONTEND=noninteractive
   wait_for_apt_lock
   apt-get -o DPkg::Lock::Timeout=600 update -qq
   apt-get -o DPkg::Lock::Timeout=600 install -y -qq --no-install-recommends \
-    curl ca-certificates tar gzip fuse3 iptables iproute2 conntrack socat kmod procps util-linux
-  modprobe fuse >/dev/null 2>&1 || true
+    curl ca-certificates tar gzip iptables iproute2 conntrack socat kmod procps util-linux \
+    "${storage_packages[@]}"
+  if [ "$STORAGE_BACKEND" = "longhorn" ]; then
+    modprobe iscsi_tcp >/dev/null 2>&1 || true
+    printf '# %s\niscsi_tcp\n' "$MANAGED_BY" >/etc/modules-load.d/acceleratio.conf
+    configure_multipath
+    verify_iscsi
+  fi
 
   cat >/etc/sysctl.d/99-acceleratio.conf <<'EOF'
 # Managed by Acceleratio deploy/install.sh
@@ -912,8 +1043,11 @@ build_k3s_config() {
     echo "flannel-backend: none"
     echo "disable-network-policy: true"
     echo "disable-kube-proxy: true"
-    echo "disable:"
-    echo "  - local-storage"
+    # local-path is the development storage; servers use Longhorn only.
+    if [ "$STORAGE_BACKEND" = "longhorn" ]; then
+      echo "disable:"
+      echo "  - local-storage"
+    fi
     # kubelet pulls one image at a time by default, which serialises a fresh
     # install behind every chart's images.
     echo "kubelet-arg:"
@@ -1127,15 +1261,15 @@ prepare_helm_environment() {
 
 prepare_helm_repos() {
   if (( DRY_RUN )); then
-    log_info "DRY-RUN: would add SeaweedFS, VictoriaMetrics (VictoriaMetrics and VictoriaLogs charts) and CloudNativePG Helm repositories"
+    log_info "DRY-RUN: would add Longhorn, VictoriaMetrics (VictoriaMetrics and VictoriaLogs charts) and CloudNativePG Helm repositories"
     return 0
   fi
   log_info "Adding Helm repositories"
-  "$HELM_BIN" repo add --force-update seaweedfs https://seaweedfs.github.io/seaweedfs/helm >/dev/null
-  "$HELM_BIN" repo add --force-update seaweedfs-csi-driver https://seaweedfs.github.io/seaweedfs-csi-driver/helm >/dev/null
-  "$HELM_BIN" repo update seaweedfs >/dev/null
+  if [ "$STORAGE_BACKEND" = "longhorn" ]; then
+    "$HELM_BIN" repo add --force-update longhorn https://charts.longhorn.io >/dev/null
+    "$HELM_BIN" repo update longhorn >/dev/null
+  fi
   "$HELM_BIN" repo add --force-update victoria-metrics https://victoriametrics.github.io/helm-charts/ >/dev/null
-  "$HELM_BIN" repo update seaweedfs-csi-driver >/dev/null
   "$HELM_BIN" repo update victoria-metrics >/dev/null
   "$HELM_BIN" repo add --force-update cnpg https://cloudnative-pg.github.io/charts >/dev/null
   "$HELM_BIN" repo update cnpg >/dev/null
@@ -1175,7 +1309,7 @@ not_ready_nodes() {
     awk -v skip="${1:-}" '$1 != skip && $2 != "True" { print $1 }'
 }
 
-# check_other_nodes_ready: Cilium and the SeaweedFS CSI driver are DaemonSets,
+# check_other_nodes_ready: Cilium and the Longhorn manager are DaemonSets,
 # and the installer waits until every node runs them. Another node that is
 # down would only surface as a rollout timeout many minutes later, so stop
 # before touching anything. This node is left out: on a fresh install it
@@ -1244,70 +1378,9 @@ install_cilium() {
 }
 
 # ---------------------------------------------------------------------------
-# SeaweedFS.
+# Storage: Longhorn (servers) or local-path (development), and the platform
+# StorageClass.
 # ---------------------------------------------------------------------------
-
-compute_seaweedfs_fullname() {
-  case "$SEAWEEDFS_RELEASE" in
-    *seaweedfs*)
-      SW_FULLNAME="$SEAWEEDFS_RELEASE"
-      ;;
-    *)
-      SW_FULLNAME="${SEAWEEDFS_RELEASE}-seaweedfs"
-      ;;
-  esac
-}
-
-write_seaweedfs_values() {
-  local s3_enabled="false"
-  local s3_auth="false"
-  if [ "$SEAWEEDFS_S3_ENABLED" = "true" ]; then
-    s3_enabled="true"
-    s3_auth="true"
-  fi
-
-  write_file "${CONFIG_DIR}/seaweedfs-values.yaml" 0644 <<EOF
-# ${MANAGED_BY} - manual edits will be overwritten.
-# SeaweedFS keeps its own state on hostPath: the CSI driver cannot be used
-# before it exists.
-master:
-  replicas: 1
-  # The chart probes every 45s and needs two successes, which kept a fresh
-  # master unready for ~90s after it was up.
-  readinessProbe:
-    periodSeconds: 5
-  data:
-    type: hostPath
-    hostPathPrefix: "${SEAWEEDFS_DATA_DIR}"
-  logs:
-    type: hostPath
-    hostPathPrefix: "${SEAWEEDFS_DATA_DIR}"
-volume:
-  replicas: 1
-  dataDirs:
-    - name: data1
-      type: hostPath
-      hostPathPrefix: "${SEAWEEDFS_DATA_DIR}"
-      maxVolumes: 0
-  logs:
-    type: hostPath
-    hostPathPrefix: "${SEAWEEDFS_DATA_DIR}"
-filer:
-  replicas: 1
-  data:
-    type: hostPath
-    hostPathPrefix: "${SEAWEEDFS_DATA_DIR}"
-  logs:
-    type: hostPath
-    hostPathPrefix: "${SEAWEEDFS_DATA_DIR}"
-  s3:
-    enabled: ${s3_enabled}
-    enableAuth: ${s3_auth}
-    # The chart leaves httpsPort as a truthy "0" and then renders an invalid
-    # service port. An explicit integer 0 makes the chart omit the TLS port.
-    httpsPort: 0
-EOF
-}
 
 ensure_namespace() {
   local namespace=$1
@@ -1317,131 +1390,147 @@ ensure_namespace() {
   k3s kubectl create namespace "$namespace"
 }
 
-install_seaweedfs() {
-  compute_seaweedfs_fullname
-  write_seaweedfs_values
-
-  if (( DRY_RUN )); then
-    log_info "DRY-RUN: would install SeaweedFS ${SEAWEEDFS_CHART_VERSION} in namespace ${SEAWEEDFS_NAMESPACE}"
-    return 0
-  fi
-
-  log_info "Installing SeaweedFS ${SEAWEEDFS_CHART_VERSION}"
-  install -d -m 0755 "$SEAWEEDFS_DATA_DIR"
-  ensure_namespace "$SEAWEEDFS_NAMESPACE"
-
-  helm_install "$SEAWEEDFS_RELEASE" seaweedfs/seaweedfs \
-    --version "$SEAWEEDFS_CHART_VERSION" \
-    --namespace "$SEAWEEDFS_NAMESPACE" \
-    --values "${CONFIG_DIR}/seaweedfs-values.yaml" \
-    --wait --timeout 20m
-
-  local component
-  for component in master volume filer; do
-    k3s kubectl -n "$SEAWEEDFS_NAMESPACE" rollout status \
-      "statefulset/${SW_FULLNAME}-${component}" --timeout=10m
-  done
-
-  if [ "$SEAWEEDFS_S3_ENABLED" = "true" ]; then
-    save_seaweedfs_s3_credentials
-  fi
-
-  log_ok "SeaweedFS is ready"
-}
-
-save_seaweedfs_s3_credentials() {
-  local secret_name="${SW_FULLNAME}-s3-secret"
-  local access_key
-  local secret_key
-  local endpoint
-  local deadline=$((SECONDS + 120))
-
-  while (( SECONDS < deadline )); do
-    if k3s kubectl -n "$SEAWEEDFS_NAMESPACE" get secret "$secret_name" >/dev/null 2>&1; then
-      break
-    fi
-    sleep 2
-  done
-
-  access_key="$(k3s kubectl -n "$SEAWEEDFS_NAMESPACE" get secret "$secret_name" \
-    -o jsonpath='{.data.admin_access_key_id}' 2>/dev/null | base64 -d 2>/dev/null || true)"
-  secret_key="$(k3s kubectl -n "$SEAWEEDFS_NAMESPACE" get secret "$secret_name" \
-    -o jsonpath='{.data.admin_secret_access_key}' 2>/dev/null | base64 -d 2>/dev/null || true)"
-  if [ -z "$access_key" ] || [ -z "$secret_key" ]; then
-    log_warn "Cannot read the SeaweedFS S3 credentials from secret ${secret_name}."
-    return 0
-  fi
-
-  endpoint="http://${SW_FULLNAME}-s3.${SEAWEEDFS_NAMESPACE}.svc.cluster.local:8333"
-  write_file "${CONFIG_DIR}/seaweedfs-s3.env" 0600 <<EOF
-# ${MANAGED_BY} - contains credentials, do not commit.
-SEAWEEDFS_S3_ENDPOINT=${endpoint}
-SEAWEEDFS_S3_ACCESS_KEY=${access_key}
-SEAWEEDFS_S3_SECRET_KEY=${secret_key}
-EOF
-  log_ok "SeaweedFS S3 credentials saved to ${CONFIG_DIR}/seaweedfs-s3.env"
-}
-
-# ---------------------------------------------------------------------------
-# SeaweedFS CSI and the default StorageClass.
-# ---------------------------------------------------------------------------
-
-write_csi_values() {
-  write_file "${CONFIG_DIR}/seaweedfs-csi-values.yaml" 0644 <<EOF
+write_longhorn_values() {
+  write_file "${CONFIG_DIR}/longhorn-values.yaml" 0644 <<EOF
 # ${MANAGED_BY} - manual edits will be overwritten.
-seaweedfsFiler: "${SW_FULLNAME}-filer.${SEAWEEDFS_NAMESPACE}.svc.cluster.local:8888"
-storageClassName: "${STORAGE_CLASS_NAME}"
-storageClassVolumeBindingMode: Immediate
-isDefaultStorageClass: true
+# The platform StorageClass is written by the installer (install_storage),
+# so the chart creates none.
+persistence:
+  createStorageClass: false
+  defaultClass: false
+# The console manages storage; Longhorn's own UI is not exposed.
+longhornUI:
+  replicas: 0
+# One controller of each kind is enough for a small cluster; they are
+# leader-elected and Kubernetes reschedules them.
+longhornGlobalManager:
+  replicas: 1
+csi:
+  attacherReplicaCount: 1
+  provisionerReplicaCount: 1
+  resizerReplicaCount: 1
+  snapshotterReplicaCount: 1
+defaultSettings:
+  defaultDataPath: "${LONGHORN_DATA_DIR}"
+  defaultReplicaCount: '{"v1":"${LONGHORN_REPLICAS}","v2":"${LONGHORN_REPLICAS}"}'
+  # Volumes are thin. At the default 100% the registry and RustFS volumes
+  # (50Gi each) do not fit an 80 GB disk with 25% kept free.
+  storageOverProvisioningPercentage: 300
+  # A drain moves the last healthy replica of a volume to another node before
+  # the node goes, instead of refusing or losing it.
+  nodeDrainPolicy: block-for-eviction-if-contains-last-replica
+  upgradeChecker: false
 EOF
 }
 
-compute_csi_fullname() {
-  # The CSI chart names resources after the release, not after the chart.
-  CSI_FULLNAME="${SEAWEEDFS_CSI_RELEASE:0:52}"
-  CSI_FULLNAME="${CSI_FULLNAME%-}"
+# longhorn_nodes_ready: true when every Kubernetes node has a Longhorn node
+# that reports Ready.
+longhorn_nodes_ready() {
+  local want have
+  want="$(k3s kubectl get nodes --no-headers 2>/dev/null | wc -l)"
+  have="$(k3s kubectl -n "$LONGHORN_NAMESPACE" get nodes.longhorn.io \
+    -o jsonpath='{range .items[*]}{range .status.conditions[?(@.type=="Ready")]}{.status}{"\n"}{end}{end}' 2>/dev/null |
+    grep -c '^True$' || true)"
+  [ "$want" -gt 0 ] && [ "$have" -ge "$want" ]
 }
 
-install_csi() {
-  compute_seaweedfs_fullname
-  compute_csi_fullname
-  write_csi_values
-
+install_longhorn() {
+  [ "$STORAGE_BACKEND" = "longhorn" ] || return 0
+  write_longhorn_values
   if (( DRY_RUN )); then
-    log_info "DRY-RUN: would install SeaweedFS CSI ${SEAWEEDFS_CSI_CHART_VERSION} and default StorageClass ${STORAGE_CLASS_NAME}"
+    log_info "DRY-RUN: would install Longhorn ${LONGHORN_CHART_VERSION} in namespace ${LONGHORN_NAMESPACE} (data in ${LONGHORN_DATA_DIR}, ${LONGHORN_REPLICAS} replica(s))"
     return 0
   fi
 
-  log_info "Installing SeaweedFS CSI ${SEAWEEDFS_CSI_CHART_VERSION}"
-  helm_install "$SEAWEEDFS_CSI_RELEASE" seaweedfs-csi-driver/seaweedfs-csi-driver \
-    --version "$SEAWEEDFS_CSI_CHART_VERSION" \
-    --namespace "$SEAWEEDFS_NAMESPACE" \
-    --values "${CONFIG_DIR}/seaweedfs-csi-values.yaml" \
-    --wait --timeout 10m
+  log_info "Installing Longhorn ${LONGHORN_CHART_VERSION}"
+  install -d -m 0755 "$LONGHORN_DATA_DIR"
+  ensure_namespace "$LONGHORN_NAMESPACE"
+  helm_install "$LONGHORN_RELEASE" longhorn/longhorn \
+    --version "$LONGHORN_CHART_VERSION" \
+    --namespace "$LONGHORN_NAMESPACE" \
+    --values "${CONFIG_DIR}/longhorn-values.yaml" \
+    --wait --timeout 15m
 
-  k3s kubectl -n "$SEAWEEDFS_NAMESPACE" rollout status \
-    "deployment/${CSI_FULLNAME}-controller" --timeout=10m
-  k3s kubectl -n "$SEAWEEDFS_NAMESPACE" rollout status \
-    "daemonset/${CSI_FULLNAME}-node" --timeout=10m
-  # The mount DaemonSet uses OnDelete, so rollout status is not supported.
-  # The chart labels the pod after the release, not with a fixed name.
-  k3s kubectl -n "$SEAWEEDFS_NAMESPACE" wait --for=condition=Ready \
-    pod -l "app=${CSI_FULLNAME}-mount" --timeout=10m
+  k3s kubectl -n "$LONGHORN_NAMESPACE" rollout status daemonset/longhorn-manager --timeout=10m
+  k3s kubectl -n "$LONGHORN_NAMESPACE" rollout status deployment/longhorn-driver-deployer --timeout=10m
+
+  # The driver deployer creates the CSI plugin after it starts.
+  local deadline=$((SECONDS + 600))
+  until k3s kubectl get csidriver driver.longhorn.io >/dev/null 2>&1 &&
+    k3s kubectl -n "$LONGHORN_NAMESPACE" get daemonset longhorn-csi-plugin >/dev/null 2>&1 &&
+    longhorn_nodes_ready; do
+    if (( SECONDS >= deadline )); then
+      k3s kubectl -n "$LONGHORN_NAMESPACE" get pods -o wide || true
+      k3s kubectl -n "$LONGHORN_NAMESPACE" get nodes.longhorn.io -o yaml 2>/dev/null | grep -A3 'type: Ready' || true
+      die "Longhorn did not become ready within 10 minutes. Check: k3s kubectl -n ${LONGHORN_NAMESPACE} get pods"
+    fi
+    sleep 5
+  done
+  k3s kubectl -n "$LONGHORN_NAMESPACE" rollout status daemonset/longhorn-csi-plugin --timeout=10m
+  log_ok "Longhorn is ready"
+}
+
+write_storage_class() {
+  write_file "${CONFIG_DIR}/manifests/storage-class.yaml" 0644 <<EOF
+# ${MANAGED_BY} - manual edits will be overwritten.
+# The platform StorageClass: every platform volume (registry, RustFS) and the
+# services' volumes when no storage profile is chosen.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: ${STORAGE_CLASS_NAME}
+  labels:
+    app.kubernetes.io/part-of: acceleratio
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"
+provisioner: driver.longhorn.io
+reclaimPolicy: Delete
+allowVolumeExpansion: true
+volumeBindingMode: Immediate
+parameters:
+  numberOfReplicas: "${LONGHORN_REPLICAS}"
+  dataLocality: best-effort
+  staleReplicaTimeout: "30"
+  fsType: ext4
+EOF
+}
+
+install_storage() {
+  if (( DRY_RUN )); then
+    log_info "DRY-RUN: would make ${STORAGE_CLASS_NAME} (${STORAGE_BACKEND}) the default StorageClass"
+    return 0
+  fi
+
+  if [ "$STORAGE_BACKEND" = "longhorn" ]; then
+    write_storage_class
+    # StorageClass parameters cannot change in place. Recreating the class
+    # leaves existing volumes as they are; new ones use the new settings.
+    if ! k3s kubectl apply -f "${CONFIG_DIR}/manifests/storage-class.yaml" >/dev/null 2>&1; then
+      log_warn "Recreating StorageClass ${STORAGE_CLASS_NAME} with the new settings"
+      k3s kubectl replace --force -f "${CONFIG_DIR}/manifests/storage-class.yaml" >/dev/null
+    fi
+  else
+    # k3s writes local-path from its bundled manifest shortly after start.
+    local deadline=$((SECONDS + 180))
+    until k3s kubectl get storageclass "$STORAGE_CLASS_NAME" >/dev/null 2>&1; do
+      (( SECONDS < deadline )) || die "StorageClass ${STORAGE_CLASS_NAME} did not appear. k3s creates it unless local-storage is disabled in /etc/rancher/k3s/config.yaml."
+      sleep 2
+    done
+  fi
 
   ensure_default_storage_class
-  log_ok "SeaweedFS CSI is ready; ${STORAGE_CLASS_NAME} is the default StorageClass"
+  log_ok "${STORAGE_CLASS_NAME} is the default StorageClass"
 }
 
 ensure_default_storage_class() {
-  local provisioner
-  local default_value
-  local default_classes
-  local sc
+  local provisioner expected default_value default_classes sc
 
+  expected="driver.longhorn.io"
+  [ "$STORAGE_BACKEND" = "local-path" ] && expected="rancher.io/local-path"
   provisioner="$(k3s kubectl get storageclass "$STORAGE_CLASS_NAME" \
     -o jsonpath='{.provisioner}' 2>/dev/null || true)"
-  if [ "$provisioner" != "seaweedfs-csi-driver" ]; then
-    die "StorageClass ${STORAGE_CLASS_NAME} has unexpected provisioner '${provisioner}'"
+  if [ "$provisioner" != "$expected" ]; then
+    die "StorageClass ${STORAGE_CLASS_NAME} has unexpected provisioner '${provisioner}' (expected ${expected})"
   fi
 
   default_value="$(k3s kubectl get storageclass "$STORAGE_CLASS_NAME" \
@@ -1463,6 +1552,255 @@ ensure_default_storage_class() {
 }
 
 # ---------------------------------------------------------------------------
+# RustFS: the S3 object store.
+# ---------------------------------------------------------------------------
+
+readonly RUSTFS_ADMIN_SECRET="rustfs-root"
+readonly RUSTFS_UID=10001
+
+rustfs_endpoint() {
+  printf 'http://rustfs.%s.svc.cluster.local:9000' "$RUSTFS_NAMESPACE"
+}
+
+write_rustfs_manifest() {
+  write_file "${CONFIG_DIR}/manifests/rustfs.yaml" 0644 <<EOF
+# ${MANAGED_BY} - manual edits will be overwritten.
+# Single-node, single-drive RustFS on a volume of the platform StorageClass.
+# The admin keys live in Secret ${RUSTFS_ADMIN_SECRET}, created once.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: rustfs-data
+  namespace: ${RUSTFS_NAMESPACE}
+  labels:
+    app.kubernetes.io/name: rustfs
+    app.kubernetes.io/part-of: acceleratio
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: ${STORAGE_CLASS_NAME}
+  resources:
+    requests:
+      storage: ${RUSTFS_SIZE}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rustfs
+  namespace: ${RUSTFS_NAMESPACE}
+  labels:
+    app.kubernetes.io/name: rustfs
+    app.kubernetes.io/part-of: acceleratio
+spec:
+  replicas: 1
+  # One writer on a ReadWriteOnce volume.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: rustfs
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: rustfs
+        app.kubernetes.io/part-of: acceleratio
+    spec:
+      automountServiceAccountToken: false
+      initContainers:
+        # The image runs as ${RUSTFS_UID}; a fresh volume belongs to root.
+        - name: chown
+          image: busybox:1.36
+          imagePullPolicy: IfNotPresent
+          command: ["chown", "${RUSTFS_UID}:${RUSTFS_UID}", "/data"]
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      containers:
+        - name: rustfs
+          image: ${RUSTFS_IMAGE}
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: RUSTFS_VOLUMES
+              value: /data
+            - name: RUSTFS_ADDRESS
+              value: ":9000"
+            - name: RUSTFS_CONSOLE_ENABLE
+              value: "false"
+            # fdatasync before a write is acknowledged.
+            - name: RUSTFS_DURABILITY_MODE
+              value: strict
+            - name: RUSTFS_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ${RUSTFS_ADMIN_SECRET}
+                  key: RUSTFS_ACCESS_KEY
+            - name: RUSTFS_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ${RUSTFS_ADMIN_SECRET}
+                  key: RUSTFS_SECRET_KEY
+          ports:
+            - name: s3
+              containerPort: 9000
+          readinessProbe:
+            tcpSocket:
+              port: s3
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: s3
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: rustfs-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rustfs
+  namespace: ${RUSTFS_NAMESPACE}
+  labels:
+    app.kubernetes.io/name: rustfs
+spec:
+  selector:
+    app.kubernetes.io/name: rustfs
+  ports:
+    - name: s3
+      port: 9000
+      targetPort: s3
+EOF
+}
+
+# ensure_rustfs_secret: random admin keys, generated once and kept across
+# re-runs (a new key would lock the API out of the existing data).
+ensure_rustfs_secret() {
+  if k3s kubectl -n "$RUSTFS_NAMESPACE" get secret "$RUSTFS_ADMIN_SECRET" >/dev/null 2>&1; then
+    return 0
+  fi
+  local access_key secret_key
+  access_key="acc$(od -An -N9 -tx1 /dev/urandom | tr -d ' \n')"
+  secret_key="$(od -An -N20 -tx1 /dev/urandom | tr -d ' \n')"
+  k3s kubectl apply -f - >/dev/null <<EOF
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ${RUSTFS_ADMIN_SECRET}
+  namespace: ${RUSTFS_NAMESPACE}
+  labels:
+    app.kubernetes.io/part-of: acceleratio
+type: Opaque
+stringData:
+  RUSTFS_ACCESS_KEY: "${access_key}"
+  RUSTFS_SECRET_KEY: "${secret_key}"
+EOF
+}
+
+# run_rc_job NAME SCRIPT: runs SCRIPT with the rc client in the RustFS
+# namespace, with the alias "admin" set up, and waits for it. The admin keys
+# come from the Secret as environment variables, never from the script text.
+run_rc_job() {
+  local name=$1 script=$2 phase="" deadline
+  k3s kubectl -n "$RUSTFS_NAMESPACE" delete job "$name" --ignore-not-found --wait=true >/dev/null 2>&1 || true
+  k3s kubectl apply -f - >/dev/null <<EOF
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ${name}
+  namespace: ${RUSTFS_NAMESPACE}
+  labels:
+    app.kubernetes.io/part-of: acceleratio
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 300
+  template:
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      containers:
+        - name: rc
+          image: ${RC_IMAGE}
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - secretRef:
+                name: ${RUSTFS_ADMIN_SECRET}
+          command:
+            - sh
+            - -ec
+            - |
+              rc alias set admin $(rustfs_endpoint) "\$RUSTFS_ACCESS_KEY" "\$RUSTFS_SECRET_KEY" --bucket-lookup path >/dev/null
+$(printf '%s\n' "$script" | sed 's/^/              /')
+EOF
+  deadline=$((SECONDS + 330))
+  while (( SECONDS < deadline )); do
+    phase="$(k3s kubectl -n "$RUSTFS_NAMESPACE" get job "$name" \
+      -o jsonpath='{range .status.conditions[?(@.status=="True")]}{.type}{"\n"}{end}' 2>/dev/null || true)"
+    case "$phase" in
+      *Complete*) break ;;
+      *Failed*) break ;;
+    esac
+    sleep 2
+  done
+  if [[ $phase != *Complete* ]]; then
+    k3s kubectl -n "$RUSTFS_NAMESPACE" logs "job/${name}" 2>/dev/null | tail -n 20 || true
+    k3s kubectl -n "$RUSTFS_NAMESPACE" describe "job/${name}" 2>/dev/null | tail -n 20 || true
+    return 1
+  fi
+  k3s kubectl -n "$RUSTFS_NAMESPACE" logs "job/${name}" 2>/dev/null || true
+  k3s kubectl -n "$RUSTFS_NAMESPACE" delete job "$name" --ignore-not-found >/dev/null 2>&1 || true
+}
+
+install_rustfs() {
+  if (( DRY_RUN )); then
+    write_rustfs_manifest
+    log_info "DRY-RUN: would install RustFS (${RUSTFS_IMAGE%%@*}, ${RUSTFS_SIZE} volume) in namespace ${RUSTFS_NAMESPACE} and create bucket ${SITES_BUCKET}"
+    return 0
+  fi
+
+  log_info "Installing RustFS ${RUSTFS_IMAGE%%@*}"
+  ensure_namespace "$RUSTFS_NAMESPACE"
+  ensure_rustfs_secret
+  local before
+  before="$(cat "${CONFIG_DIR}/manifests/rustfs.yaml" 2>/dev/null || true)"
+  write_rustfs_manifest
+  # A new RustFS image or setting gets the S3 smoke test, as charts do.
+  if [ "$before" != "$(cat "${CONFIG_DIR}/manifests/rustfs.yaml")" ]; then
+    SMOKE_NEEDED=1
+  fi
+  k3s kubectl apply -f "${CONFIG_DIR}/manifests/rustfs.yaml" >/dev/null
+  if ! k3s kubectl -n "$RUSTFS_NAMESPACE" rollout status deployment/rustfs --timeout=10m; then
+    k3s kubectl -n "$RUSTFS_NAMESPACE" describe pod -l app.kubernetes.io/name=rustfs | tail -n 30 || true
+    k3s kubectl -n "$RUSTFS_NAMESPACE" logs deployment/rustfs --all-containers --tail=30 || true
+    die "RustFS did not become ready."
+  fi
+
+  # The platform bucket for static site files; creating it again is a no-op.
+  run_rc_job rustfs-setup "rc bucket create admin/${SITES_BUCKET} >/dev/null" ||
+    die "Could not create the bucket ${SITES_BUCKET} in RustFS."
+
+  local access_key secret_key
+  access_key="$(k3s kubectl -n "$RUSTFS_NAMESPACE" get secret "$RUSTFS_ADMIN_SECRET" \
+    -o jsonpath='{.data.RUSTFS_ACCESS_KEY}' | base64 -d)"
+  secret_key="$(k3s kubectl -n "$RUSTFS_NAMESPACE" get secret "$RUSTFS_ADMIN_SECRET" \
+    -o jsonpath='{.data.RUSTFS_SECRET_KEY}' | base64 -d)"
+  write_file "${CONFIG_DIR}/rustfs-s3.env" 0600 <<EOF
+# ${MANAGED_BY} - contains credentials, do not commit.
+RUSTFS_S3_ENDPOINT=$(rustfs_endpoint)
+RUSTFS_ACCESS_KEY=${access_key}
+RUSTFS_SECRET_KEY=${secret_key}
+EOF
+  log_ok "RustFS is ready; admin keys saved to ${CONFIG_DIR}/rustfs-s3.env"
+}
+
+# ---------------------------------------------------------------------------
 # Verification.
 # ---------------------------------------------------------------------------
 
@@ -1476,8 +1814,8 @@ write_victoriametrics_values() {
 # Single-node VictoriaMetrics with the chart's built-in Kubernetes scrape
 # config (kubelet and cAdvisor through the API server). The API reads it
 # through the API server's service proxy for the Observability tab.
-# The TSDB lives on hostPath: it must not sit on the FUSE-backed SeaweedFS
-# StorageClass.
+# The TSDB lives on hostPath, so metrics keep working while the storage layer
+# is down.
 server:
   fullnameOverride: "${VICTORIAMETRICS_RELEASE}"
   retentionPeriod: "${VICTORIAMETRICS_RETENTION}"
@@ -1559,8 +1897,8 @@ victorialogs_values() {
   cat <<EOF
 # ${MANAGED_BY:-Acceleratio} - manual edits will be overwritten.
 # Single-node VictoriaLogs for the project Logs tab, fed by Vector. The API
-# reads it through the API server's service proxy. Data lives on hostPath:
-# it must not sit on the FUSE-backed SeaweedFS StorageClass.
+# reads it through the API server's service proxy. Data lives on hostPath, so
+# logs keep working while the storage layer is down.
 server:
   fullnameOverride: "${VICTORIALOGS_RELEASE}"
   retentionPeriod: "${VICTORIALOGS_RETENTION}"
@@ -1724,7 +2062,7 @@ install_victorialogs() {
 
 verify_installation() {
   if (( DRY_RUN )); then
-    log_info "DRY-RUN: would verify the cluster and run a PVC smoke test"
+    log_info "DRY-RUN: would verify the cluster and run a PVC and S3 smoke test"
     return 0
   fi
 
@@ -1732,8 +2070,12 @@ verify_installation() {
   k3s kubectl get nodes -o wide
   log_info "StorageClasses:"
   k3s kubectl get storageclass
-  log_info "SeaweedFS pods:"
-  k3s kubectl -n "$SEAWEEDFS_NAMESPACE" get pods -o wide
+  if [ "$STORAGE_BACKEND" = "longhorn" ]; then
+    log_info "Longhorn pods:"
+    k3s kubectl -n "$LONGHORN_NAMESPACE" get pods -o wide
+  fi
+  log_info "RustFS pods:"
+  k3s kubectl -n "$RUSTFS_NAMESPACE" get pods -o wide
   log_info "VictoriaMetrics pods:"
   k3s kubectl -n "$VICTORIAMETRICS_NAMESPACE" get pods -o wide
   log_info "VictoriaLogs pods:"
@@ -1745,6 +2087,7 @@ verify_installation() {
 
   if (( SMOKE_NEEDED )); then
     smoke_test
+    s3_smoke_test
   else
     log_info "k3s, Cilium and the storage are unchanged; skipping the storage and DNS smoke test"
   fi
@@ -1790,8 +2133,8 @@ spec:
       args:
         - |
           nslookup kubernetes.default.svc.cluster.local >/dev/null
-          echo "hello-seaweedfs" > /data/probe.txt
-          test "\$(cat /data/probe.txt)" = "hello-seaweedfs"
+          echo "hello-storage" > /data/probe.txt
+          test "\$(cat /data/probe.txt)" = "hello-storage"
           cat /data/probe.txt
       volumeMounts:
         - name: data
@@ -1833,13 +2176,27 @@ EOF
   fi
 
   logs="$(k3s kubectl -n "$SMOKE_NAMESPACE" logs smoke)"
-  if [ "$logs" != "hello-seaweedfs" ]; then
+  if [ "$logs" != "hello-storage" ]; then
     die "Smoke-test read back unexpected data: '${logs}'"
   fi
   log_ok "PVC bound, data written and DNS resolved"
 
   k3s kubectl delete namespace "$SMOKE_NAMESPACE" --wait=true --timeout=120s >/dev/null 2>&1 || \
     log_warn "Could not delete smoke-test namespace ${SMOKE_NAMESPACE}; remove it manually."
+}
+
+# s3_smoke_test: writes, reads and deletes an object in a temporary bucket.
+s3_smoke_test() {
+  local bucket out
+  bucket="acceleratio-smoke-$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')"
+  log_info "Running the S3 smoke test"
+  out="$(run_rc_job rustfs-smoke "rc bucket create admin/${bucket} >/dev/null
+echo hello-s3 | rc pipe admin/${bucket}/probe.txt >/dev/null
+test \"\$(rc cat admin/${bucket}/probe.txt)\" = hello-s3
+rc bucket remove --force admin/${bucket} >/dev/null
+echo S3_SMOKE_OK")" || die "S3 smoke test failed: RustFS did not store and return an object. ${out}"
+  [[ $out == *S3_SMOKE_OK* ]] || die "S3 smoke test failed: ${out}"
+  log_ok "S3 object written, read back and deleted"
 }
 
 # ---------------------------------------------------------------------------
@@ -2012,7 +2369,7 @@ spec:
               mountPath: /var/lib/postgresql/data
       volumes:
         # The database lives on the node's own disk: it must not depend on
-        # SeaweedFS, which in turn is managed through this API.
+        # the storage layer, which in turn is managed through this API.
         - name: data
           hostPath:
             path: ${POSTGRES_DATA_DIR}
@@ -2088,8 +2445,14 @@ spec:
               value: "${ACCELERATIO_API_URL}"
             - name: CORS_ORIGINS
               value: "${ACCELERATIO_CORS_ORIGINS}"
-            - name: SEAWEEDFS_NAMESPACE
-              value: "${SEAWEEDFS_NAMESPACE}"
+            - name: RUSTFS_NAMESPACE
+              value: "${RUSTFS_NAMESPACE}"
+            - name: RUSTFS_S3_ENDPOINT
+              value: "$(rustfs_endpoint)"
+            - name: RUSTFS_RC_IMAGE
+              value: "${RC_IMAGE}"
+            - name: SITES_BUCKET
+              value: "${SITES_BUCKET}"
             - name: VICTORIAMETRICS_ADDRESS
               value: "${VICTORIAMETRICS_RELEASE}.${VICTORIAMETRICS_NAMESPACE}:8428"
             - name: VICTORIALOGS_ADDRESS
@@ -2215,7 +2578,6 @@ metadata:
   name: registry
   namespace: ${ns}
 data:
-  # dedupe hardlinks blobs, which the SeaweedFS FUSE mount does not support.
   # Retention keeps the build cache and the 20 newest images per service.
   config.json: |
     {
@@ -2565,7 +2927,10 @@ print_summary() {
   printf '    Namespace     %s (PostgreSQL, API, console)\n' "$ACCELERATIO_NAMESPACE"
   printf '    k3s           %s (embedded etcd)\n' "$k3s_version"
   printf '    Cilium        %s (CNI, kube-proxy replacement)\n' "$CILIUM_VERSION"
-  printf '    SeaweedFS     %s (namespace %s)\n' "$SEAWEEDFS_CHART_VERSION" "$SEAWEEDFS_NAMESPACE"
+  if [ "$STORAGE_BACKEND" = "longhorn" ]; then
+    printf '    Longhorn      %s (namespace %s)\n' "$LONGHORN_CHART_VERSION" "$LONGHORN_NAMESPACE"
+  fi
+  printf '    RustFS        %s (namespace %s)\n' "${RUSTFS_IMAGE%%@*}" "$RUSTFS_NAMESPACE"
   printf '    VictoriaMetrics %s (namespace %s)\n' "$VICTORIAMETRICS_CHART_VERSION" "$VICTORIAMETRICS_NAMESPACE"
   printf '    VictoriaLogs  %s with Vector (namespace %s)\n' "$VICTORIALOGS_CHART_VERSION" "$VICTORIALOGS_NAMESPACE"
   printf '    CloudNativePG %s (namespace %s)\n' "$CNPG_CHART_VERSION" "$CNPG_NAMESPACE"
@@ -2576,9 +2941,7 @@ print_summary() {
   printf '    Kubeconfig    /root/.kube/config\n'
   printf '    Remote access %s/kubeconfig.yaml\n' "$CONFIG_DIR"
   printf '    Secrets       %s/acceleratio.env\n' "$CONFIG_DIR"
-  if [ "$SEAWEEDFS_S3_ENABLED" = "true" ]; then
-    printf '    S3 keys       %s/seaweedfs-s3.env\n' "$CONFIG_DIR"
-  fi
+  printf '    S3 keys       %s/rustfs-s3.env\n' "$CONFIG_DIR"
   printf '    Database      %s\n' "$POSTGRES_DATA_DIR"
   printf '    Install log   %s\n' "$LOG_FILE"
   printf '\n'
@@ -2600,6 +2963,7 @@ print_summary() {
 main() {
   parse_args "$@"
   load_config
+  resolve_storage
   check_root
   setup_logging
   log_info "Acceleratio installer ${SCRIPT_NAME} starting"
@@ -2612,6 +2976,7 @@ main() {
   fi
 
   step "Installing host packages" install_packages
+  configure_ufw
   step "Installing k3s" install_k3s
   prepull_images
   step "Installing the kubeconfig" configure_kubeconfig
@@ -2622,10 +2987,10 @@ main() {
   resolve_acceleratio_urls
   step "Configuring Traefik" configure_traefik
   # Independent of each other once the network is up: metrics and logs keep
-  # their data on hostPath, not on SeaweedFS.
+  # their data on hostPath, not on the storage layer.
   report_step "Installing storage, metrics, logs and the PostgreSQL operator"
   run_parallel \
-    "storage:install_seaweedfs install_csi verify_installation" \
+    "storage:install_longhorn install_storage install_rustfs verify_installation" \
     "metrics:install_victoriametrics" \
     "logs:install_victorialogs" \
     "cnpg:install_cnpg"

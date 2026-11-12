@@ -30,7 +30,7 @@ const platformRow: StorageClassRow = {
   kind: 'platform',
   name: 'Platform default',
   description: null,
-  external_name: 'seaweedfs-storage',
+  external_name: 'longhorn',
   parameters: null,
   reclaim_policy: null,
   volume_binding_mode: null,
@@ -46,14 +46,11 @@ const customRow: StorageClassRow = {
   description: 'SSD tier',
   external_name: 'sc-fast-7c1d2e3f',
   parameters: {
-    replication: '000',
-    disk_type: 'ssd',
-    collection: null,
-    ttl: null,
-    cache_capacity_mb: null,
-    concurrent_writers: null,
-    chunk_size_limit_mb: null,
-    writeback_cache: false,
+    number_of_replicas: 1,
+    data_locality: 'best-effort',
+    fs_type: 'ext4',
+    disk_selector: ['ssd'],
+    node_selector: null,
   },
   reclaim_policy: 'Delete',
   volume_binding_mode: 'Immediate',
@@ -74,11 +71,11 @@ const managedObject = (): V1StorageClass =>
 
 const platformObject: V1StorageClass = {
   metadata: {
-    name: 'seaweedfs-storage',
+    name: 'longhorn',
     annotations: { 'storageclass.kubernetes.io/is-default-class': 'true' },
   },
-  provisioner: 'seaweedfs-csi-driver',
-  parameters: { dataLocality: 'none' },
+  provisioner: 'driver.longhorn.io',
+  parameters: { numberOfReplicas: '1', staleReplicaTimeout: '30' },
   reclaimPolicy: 'Delete',
   volumeBindingMode: 'Immediate',
 };
@@ -97,12 +94,8 @@ const createDatabase = (rows: StorageClassRow[]) => {
     void count;
     return Promise.resolve(rows.slice(0, 1));
   });
-  // S3 buckets on a profile: `select({ value: count() }).from().where()`
-  // is awaited directly, while row lookups chain `.limit()`.
-  const bucketCount = { value: 0 };
-  const where = jest.fn(() =>
-    Object.assign(Promise.resolve([bucketCount]), { limit }),
-  );
+  // Row lookups chain `.limit()`.
+  const where = jest.fn(() => ({ limit }));
   // Docker services with volumes on a profile:
   // `select({ value: count() }).from().leftJoin().where()`.
   const volumeServiceCount = { value: 0 };
@@ -155,10 +148,16 @@ const createDatabase = (rows: StorageClassRow[]) => {
     txDelete,
     transaction,
     benchmarkOrderBy,
-    bucketCount,
     volumeServiceCount,
   };
 };
+
+const longhornNode = (ready: boolean, schedulable: boolean) => ({
+  spec: { allowScheduling: schedulable },
+  status: {
+    conditions: [{ type: 'Ready', status: ready ? 'True' : 'False' }],
+  },
+});
 
 const createService = (rows: StorageClassRow[]) => {
   const database = createDatabase(rows);
@@ -176,11 +175,16 @@ const createService = (rows: StorageClassRow[]) => {
       .fn()
       .mockResolvedValue({ items: [] }),
   };
-  const appsV1 = { readNamespacedStatefulSet: jest.fn() };
+  // Longhorn nodes; without Longhorn (development) the list fails.
+  const customObjects = {
+    listNamespacedCustomObject: jest
+      .fn()
+      .mockRejectedValue(new Error('the server could not find the resource')),
+  };
   const kubernetes = {
     storageV1,
     coreV1,
-    appsV1,
+    customObjects,
   } as unknown as KubernetesService;
 
   return {
@@ -188,7 +192,7 @@ const createService = (rows: StorageClassRow[]) => {
     ...database,
     storageV1,
     coreV1,
-    appsV1,
+    customObjects,
   };
 };
 
@@ -202,8 +206,8 @@ describe('StorageClassService.list', () => {
     });
     coreV1.listPersistentVolume.mockResolvedValue({
       items: [
-        { spec: { storageClassName: 'seaweedfs-storage' } },
-        { spec: { storageClassName: 'seaweedfs-storage' } },
+        { spec: { storageClassName: 'longhorn' } },
+        { spec: { storageClassName: 'longhorn' } },
         { spec: { storageClassName: 'local-path' } },
       ],
     });
@@ -213,7 +217,7 @@ describe('StorageClassService.list', () => {
     expect(insertValues).toHaveBeenCalledWith(
       expect.objectContaining({
         kind: 'platform',
-        external_name: 'seaweedfs-storage',
+        external_name: 'longhorn',
       }),
     );
     expect(onConflictDoNothing).toHaveBeenCalled();
@@ -223,8 +227,14 @@ describe('StorageClassService.list', () => {
       is_default: true,
       cluster_status: 'ready',
       volume_count: 2,
-      parameters: { replication: '000' },
-      extra_parameters: { dataLocality: 'none' },
+      parameters: {
+        number_of_replicas: 1,
+        data_locality: 'disabled',
+        fs_type: 'ext4',
+        disk_selector: null,
+        node_selector: null,
+      },
+      extra_parameters: { staleReplicaTimeout: '30' },
       reclaim_policy: 'Delete',
     });
     expect(custom).toMatchObject({
@@ -233,7 +243,7 @@ describe('StorageClassService.list', () => {
       is_default: false,
       cluster_status: 'ready',
       volume_count: 0,
-      parameters: { disk_type: 'ssd' },
+      parameters: { disk_selector: ['ssd'] },
     });
   });
 
@@ -325,7 +335,7 @@ describe('StorageClassService.create', () => {
 
     const created = await service.create({
       name: 'Fast',
-      parameters: { disk_type: 'ssd' },
+      parameters: { disk_selector: ['ssd'] },
     });
 
     const values = (insertValues.mock.calls[0] as [StorageClassRow])[0];
@@ -339,7 +349,12 @@ describe('StorageClassService.create', () => {
     expect(body.metadata?.labels?.['acceleratio.io/storage-class-id']).toBe(
       values.id,
     );
-    expect(body.parameters).toEqual({ replication: '000', diskType: 'ssd' });
+    expect(body.parameters).toEqual({
+      numberOfReplicas: '1',
+      dataLocality: 'best-effort',
+      fsType: 'ext4',
+      diskSelector: 'ssd',
+    });
     expect(created.cluster_status).toBe('ready');
   });
 
@@ -399,8 +414,23 @@ describe('StorageClassService.create', () => {
     const { service, insertValues } = createService([]);
 
     await expect(
-      service.create({ name: 'Fast', parameters: { replication: 'x' } }),
-    ).rejects.toThrow('Replication');
+      service.create({ name: 'Fast', parameters: { number_of_replicas: 9 } }),
+    ).rejects.toThrow('Copies');
+    expect(insertValues).not.toHaveBeenCalled();
+  });
+
+  it('refuses more copies than storage servers', async () => {
+    const { service, insertValues, customObjects } = createService([]);
+
+    customObjects.listNamespacedCustomObject.mockResolvedValue({
+      items: [longhornNode(true, true)],
+    });
+
+    await expect(
+      service.create({ name: 'Fast', parameters: { number_of_replicas: 2 } }),
+    ).rejects.toThrow(
+      '2 copies on different servers need 2 storage servers; the cluster has 1',
+    );
     expect(insertValues).not.toHaveBeenCalled();
   });
 });
@@ -501,20 +531,6 @@ describe('StorageClassService.remove', () => {
     expect(transaction).not.toHaveBeenCalled();
   });
 
-  it('is blocked while S3 buckets use the class', async () => {
-    const { service, storageV1, transaction, bucketCount } = createService([
-      customRow,
-    ]);
-
-    bucketCount.value = 1;
-
-    await expect(service.remove(customId)).rejects.toThrow(
-      'Storage class is used by 1 S3 bucket. Delete them first.',
-    );
-    expect(storageV1.deleteStorageClass).not.toHaveBeenCalled();
-    expect(transaction).not.toHaveBeenCalled();
-  });
-
   it('is blocked while a Docker service config has a volume on the class', async () => {
     const { service, storageV1, transaction, volumeServiceCount } =
       createService([customRow]);
@@ -591,33 +607,42 @@ describe('StorageClassService.remove', () => {
 });
 
 describe('StorageClassService.environment', () => {
-  it('reports the CSI driver and volume servers', async () => {
-    const { service, storageV1, appsV1 } = createService([]);
+  it('reports the CSI driver and the Longhorn nodes that take copies', async () => {
+    const { service, storageV1, customObjects } = createService([]);
 
     storageV1.readCSIDriver.mockResolvedValue({});
-    appsV1.readNamespacedStatefulSet.mockResolvedValue({
-      spec: { replicas: 3 },
+    customObjects.listNamespacedCustomObject.mockResolvedValue({
+      items: [
+        longhornNode(true, true),
+        longhornNode(true, true),
+        longhornNode(false, true),
+        longhornNode(true, false),
+      ],
     });
 
     await expect(service.environment()).resolves.toEqual({
       csi_driver_installed: true,
-      volume_servers: 3,
+      storage_nodes: 2,
     });
-    expect(appsV1.readNamespacedStatefulSet).toHaveBeenCalledWith({
-      name: 'seaweedfs-volume',
-      namespace: 'seaweedfs',
+    expect(storageV1.readCSIDriver).toHaveBeenCalledWith({
+      name: 'driver.longhorn.io',
+    });
+    expect(customObjects.listNamespacedCustomObject).toHaveBeenCalledWith({
+      group: 'longhorn.io',
+      version: 'v1beta2',
+      namespace: 'longhorn-system',
+      plural: 'nodes',
     });
   });
 
   it('distinguishes a missing driver from an unreachable cluster', async () => {
-    const { service, storageV1, appsV1 } = createService([]);
+    const { service, storageV1 } = createService([]);
 
     storageV1.readCSIDriver.mockRejectedValueOnce(clusterError(404));
-    appsV1.readNamespacedStatefulSet.mockRejectedValue(clusterError(404));
 
     await expect(service.environment()).resolves.toEqual({
       csi_driver_installed: false,
-      volume_servers: null,
+      storage_nodes: null,
     });
 
     storageV1.readCSIDriver.mockRejectedValueOnce(new Error('ECONNREFUSED'));
@@ -625,33 +650,5 @@ describe('StorageClassService.environment', () => {
     await expect(service.environment()).resolves.toMatchObject({
       csi_driver_installed: null,
     });
-  });
-});
-
-describe('StorageClassService.assertVolumeProfile', () => {
-  it('accepts the platform profile without a lookup', async () => {
-    const { service } = createService([]);
-
-    await expect(service.assertVolumeProfile(null)).resolves.toBeUndefined();
-  });
-
-  it('accepts a profile that deletes data with its volume', async () => {
-    const { service } = createService([
-      { ...customRow, reclaim_policy: 'Delete' },
-    ]);
-
-    await expect(
-      service.assertVolumeProfile(customId),
-    ).resolves.toBeUndefined();
-  });
-
-  it('rejects a profile that retains data', async () => {
-    const { service } = createService([
-      { ...customRow, reclaim_policy: 'Retain' },
-    ]);
-
-    await expect(service.assertVolumeProfile(customId)).rejects.toThrow(
-      'keeps data after a volume is deleted',
-    );
   });
 });

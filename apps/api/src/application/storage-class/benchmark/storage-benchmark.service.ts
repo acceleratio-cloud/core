@@ -500,7 +500,7 @@ export class StorageBenchmarkService
 
       return {
         nodes: nodes.items.length,
-        volume_servers: environment.volume_servers,
+        storage_nodes: environment.storage_nodes,
         kubernetes_version:
           nodes.items[0]?.status?.nodeInfo?.kubeletVersion ?? null,
       };

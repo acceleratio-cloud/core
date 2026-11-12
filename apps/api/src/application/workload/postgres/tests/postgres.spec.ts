@@ -68,7 +68,7 @@ const row = (): WorkloadRow => ({
   draft_config: null,
   position: { x: 0, y: 0 },
   internal_hostname: null,
-  storage_class_id: null,
+  bucket_name: null,
   last_deployed_at: new Date('2026-11-09T10:00:00.000Z'),
   icon: null,
   created_at: new Date('2026-11-09T10:00:00.000Z'),
@@ -79,7 +79,7 @@ const cluster = (
   status: CnpgCluster['status'],
   annotations: Record<string, string> = {},
 ): CnpgCluster => ({
-  ...buildCluster(input, normalizePostgresConfig({}), 'seaweedfs-storage'),
+  ...buildCluster(input, normalizePostgresConfig({}), 'longhorn'),
   metadata: {
     name: input.external_name,
     namespace,
@@ -379,7 +379,7 @@ const createService = (selects: unknown[][]) => {
     { publish: jest.fn() } as unknown as WorkloadEventsService,
     versions as unknown as WorkloadVersionService,
     {
-      kubernetesName: jest.fn().mockResolvedValue('seaweedfs-storage'),
+      kubernetesName: jest.fn().mockResolvedValue('longhorn'),
     } as unknown as StorageClassService,
     backups as unknown as PostgresBackupService,
   );

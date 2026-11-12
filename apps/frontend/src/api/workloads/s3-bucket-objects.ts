@@ -28,7 +28,7 @@ export const s3BucketObjectsApi = {
     return data;
   },
   /**
-   * Sends the file as the raw body: the API streams it to SeaweedFS without
+   * Sends the file as the raw body: the API streams it to object storage without
    * holding it in memory. The file's own type rides in a header because the
    * body type must stay `application/octet-stream`.
    */

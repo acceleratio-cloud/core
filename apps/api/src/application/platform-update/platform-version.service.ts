@@ -8,6 +8,7 @@ import {
   type HelmReleaseInfo,
 } from './platform-version.helm';
 import { imageTag, normalizeVersion } from './platform-version.semver';
+import { rustfsNamespace } from '@/vendor/s3/rustfs';
 
 const SERVICE_ACCOUNT_DIR = '/var/run/secrets/kubernetes.io/serviceaccount';
 const DEFAULT_NAMESPACE = 'acceleratio';
@@ -31,8 +32,7 @@ const readNamespace = (): string => {
 
 const HELM_NAMES: Record<string, string> = {
   cilium: 'Cilium',
-  seaweedfs: 'SeaweedFS',
-  'seaweedfs-csi-driver': 'SeaweedFS CSI',
+  longhorn: 'Longhorn',
   'victoria-metrics-single': 'VictoriaMetrics',
 };
 
@@ -106,15 +106,23 @@ export class PlatformVersionService {
       return this.cache.components;
     }
 
-    const [version, apiImage, consoleImage, postgresImage, kubernetes, helm] =
-      await Promise.all([
-        this.currentVersion(),
-        this.readApiImage(),
-        this.deploymentImage('deployment', 'console'),
-        this.deploymentImage('statefulset', 'postgres'),
-        this.kubernetesVersion(),
-        this.helmReleases(),
-      ]);
+    const [
+      version,
+      apiImage,
+      consoleImage,
+      postgresImage,
+      rustfsImage,
+      kubernetes,
+      helm,
+    ] = await Promise.all([
+      this.currentVersion(),
+      this.readApiImage(),
+      this.deploymentImage('deployment', 'console'),
+      this.deploymentImage('statefulset', 'postgres'),
+      this.deploymentImage('deployment', 'rustfs', rustfsNamespace()),
+      this.kubernetesVersion(),
+      this.helmReleases(),
+    ]);
 
     const components: PlatformComponent[] = [
       {
@@ -154,6 +162,16 @@ export class PlatformVersionService {
         version: imageTag(postgresImage),
         detail: postgresImage,
       },
+      ...(rustfsImage
+        ? [
+            {
+              id: 'rustfs',
+              name: 'RustFS',
+              version: imageTag(rustfsImage),
+              detail: rustfsImage,
+            },
+          ]
+        : []),
     ];
 
     this.cache = { at: Date.now(), components };
@@ -169,17 +187,18 @@ export class PlatformVersionService {
   private async deploymentImage(
     kind: 'deployment' | 'statefulset',
     name: string,
+    namespace = this.namespace,
   ): Promise<string | null> {
     try {
       const resource =
         kind === 'deployment'
           ? await this.kubernetes.appsV1.readNamespacedDeployment({
               name,
-              namespace: this.namespace,
+              namespace,
             })
           : await this.kubernetes.appsV1.readNamespacedStatefulSet({
               name,
-              namespace: this.namespace,
+              namespace,
             });
       const containers = resource.spec?.template.spec?.containers ?? [];
       return (

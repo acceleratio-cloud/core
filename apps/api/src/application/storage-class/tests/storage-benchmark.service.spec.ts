@@ -138,7 +138,7 @@ const createService = (rows: StorageBenchmarkRow[] = []) => {
     get: jest.fn().mockResolvedValue(profile()),
     environment: jest
       .fn()
-      .mockResolvedValue({ csi_driver_installed: true, volume_servers: 1 }),
+      .mockResolvedValue({ csi_driver_installed: true, storage_nodes: 1 }),
   };
   const service = new StorageBenchmarkService(
     { select, insert, update, execute } as unknown as Database,
@@ -200,7 +200,7 @@ describe('StorageBenchmarkService.start', () => {
         }) as unknown,
         environment: {
           nodes: 1,
-          volume_servers: 1,
+          storage_nodes: 1,
           kubernetes_version: 'v1.34.1+k3s1',
         },
       }),

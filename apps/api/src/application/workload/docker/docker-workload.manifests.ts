@@ -49,8 +49,12 @@ export const VOLUME_DEPLOYMENT_STRATEGY = 'Recreate';
 export const ENV_SECRET_INFIX = '-env-';
 export const VOLUME_ID_LABEL = 'acceleratio.io/volume-id';
 export const VOLUME_CLAIM_INFIX = '-vol-';
-/** SeaweedFS mounts can be shared, so every replica and rollout can attach. */
-export const VOLUME_ACCESS_MODE = 'ReadWriteMany';
+/**
+ * A Longhorn volume is a block device on one server at a time, so a service
+ * with a volume runs one pod (see `normalizeDockerConfig`) and redeploys with
+ * `Recreate`.
+ */
+export const VOLUME_ACCESS_MODE = 'ReadWriteOnce';
 
 /**
  * The whole id as 32 hex characters. A shorter prefix could repeat between
@@ -121,14 +125,17 @@ export interface WorkloadManifestInput {
    * another version always rolls the pods, even to an identical config.
    */
   version_id?: string;
-  /** A claim mounted read-only into the container: a static site's files. */
-  read_only_claim?: { name: string; mount_path: string };
+  /**
+   * Files a container copies into the pod before the main one starts (a
+   * static site's release), mounted read-only at `mount_path`.
+   */
+  files?: { mount_path: string; init: V1Container };
   /** When a new pod may take traffic; without one, as soon as it starts. */
   readiness_probe?: V1Probe;
 }
 
-/** Pod volume name of `WorkloadManifestInput.read_only_claim`. */
-export const READ_ONLY_VOLUME_NAME = 'files';
+/** Pod volume name of `WorkloadManifestInput.files`. */
+export const FILES_VOLUME_NAME = 'files';
 
 export interface DeploymentOptions {
   /** Overrides the config's pod count. */
@@ -263,16 +270,12 @@ export const buildDeployment = (
     container.readinessProbe = input.readiness_probe;
   }
 
-  const readOnly = input.read_only_claim;
+  const files = input.files;
 
-  if (readOnly) {
+  if (files) {
     container.volumeMounts = [
       ...(container.volumeMounts ?? []),
-      {
-        name: READ_ONLY_VOLUME_NAME,
-        mountPath: readOnly.mount_path,
-        readOnly: true,
-      },
+      { name: FILES_VOLUME_NAME, mountPath: files.mount_path, readOnly: true },
     ];
   }
 
@@ -283,14 +286,7 @@ export const buildDeployment = (
         claimName: volumeClaimName(input.external_name, volumeIdOf(volume)),
       },
     })),
-    ...(readOnly
-      ? [
-          {
-            name: READ_ONLY_VOLUME_NAME,
-            persistentVolumeClaim: { claimName: readOnly.name, readOnly: true },
-          },
-        ]
-      : []),
+    ...(files ? [{ name: FILES_VOLUME_NAME, emptyDir: {} }] : []),
   ];
 
   const annotations: Record<string, string> = {
@@ -340,6 +336,18 @@ export const buildDeployment = (
           // project: names users pick would otherwise override app settings
           // such as N8N_PORT or REDIS_PORT. Services are reached by DNS.
           enableServiceLinks: false,
+          ...(files
+            ? {
+                initContainers: [
+                  {
+                    ...files.init,
+                    volumeMounts: [
+                      { name: FILES_VOLUME_NAME, mountPath: files.mount_path },
+                    ],
+                  },
+                ],
+              }
+            : {}),
           containers: [container],
           ...(podVolumes.length > 0 ? { volumes: podVolumes } : {}),
           ...(input.config.node_selector

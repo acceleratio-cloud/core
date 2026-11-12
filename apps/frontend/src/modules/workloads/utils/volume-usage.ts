@@ -7,7 +7,7 @@ import { effectiveConfig, removedVolumes } from './workload-config';
 
 /** From here a volume is flagged on the canvas and in its settings. */
 export const VOLUME_WARNING_RATIO = 0.85;
-/** SeaweedFS fails every write once full, so this close it is critical. */
+/** ext4 on a Longhorn volume fails writes with ENOSPC once full, so this close it is critical. */
 export const VOLUME_CRITICAL_RATIO = 0.95;
 
 export type VolumeFillLevel = 'ok' | 'warning' | 'critical';

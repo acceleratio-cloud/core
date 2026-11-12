@@ -77,7 +77,7 @@ export const tlsOutsidePodNetwork = (
 export const credentialsSecretName = (externalName: string): string =>
   `${externalName}-credentials`;
 
-/** One SeaweedFS bucket per database holds its base backups and WAL. */
+/** One RustFS bucket per database holds its base backups and WAL. */
 export const backupBucketName = (workloadId: string): string =>
   `pg-backup-${workloadId}`;
 
