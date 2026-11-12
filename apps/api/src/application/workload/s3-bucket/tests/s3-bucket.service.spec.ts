@@ -456,7 +456,7 @@ describe('S3BucketWorkloadService status', () => {
   it.each([
     ['provisioning', undefined, 'deploying', null],
     ['ready', undefined, 'running', null],
-    ['failed', 'filer down', 'failed', 'filer down'],
+    ['failed', 'rustfs down', 'failed', 'rustfs down'],
     [undefined, undefined, 'running', null],
   ])(
     'reads the %s phase from the Secret',
@@ -627,11 +627,11 @@ describe('S3BucketWorkloadService.rotateCredentials', () => {
     batchV1.readNamespacedJob
       .mockRejectedValueOnce(notFound())
       .mockResolvedValue(rotateJob({ failed: 1 }));
-    coreV1.readNamespacedPodLog.mockResolvedValue('BUCKET_ERROR filer down');
+    coreV1.readNamespacedPodLog.mockResolvedValue('BUCKET_ERROR rustfs down');
 
     await expect(
       service.rotateCredentials(projectId, workloadId),
-    ).rejects.toThrow('Could not regenerate the keys: filer down');
+    ).rejects.toThrow('Could not regenerate the keys: rustfs down');
     // Only the Job's own Secret was written.
     expect(coreV1.createNamespacedSecret).toHaveBeenCalledTimes(1);
     expect(coreV1.replaceNamespacedSecret).not.toHaveBeenCalled();

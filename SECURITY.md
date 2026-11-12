@@ -37,7 +37,7 @@ In scope: the API, the console, the shared package, and the installer, updater
 and uninstaller in `deploy/`.
 
 Out of scope: vulnerabilities in third-party components (k3s, Cilium,
-SeaweedFS, Traefik, VictoriaMetrics, PostgreSQL) unless Acceleratio configures
+Longhorn, RustFS, Traefik, VictoriaMetrics, PostgreSQL) unless Acceleratio configures
 them insecurely; report those to the upstream project. Findings that need a
 cluster administrator's credentials to begin with, denial of service through
 resource exhaustion on a single-node install, and missing hardening headers

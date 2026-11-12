@@ -221,6 +221,9 @@ apps/api/src/
     kubernetes/ - lazily built API clients and the cluster-wide watch service
     traefik/ - TraefikClient (availability check, IngressRoute/Middleware upsert and delete, HTTPS
       probe) and pure Traefik object builders, shared by the control plane URL and service domains
+    s3/ - S3StorageClient (`s3.client.ts`): S3 to RustFS with the admin key from the Secret
+      `rustfs/rustfs-root` (list, head, get, streamed put, delete, delete by prefix), and
+      `rustfs.ts` with the RustFS environment (namespace, endpoints, sites bucket)
 
 apps/api/tests/ - end-to-end tests: jest-e2e.json and *.e2e-spec.ts
 
@@ -315,7 +318,7 @@ Adding a workload type:
    The exception is a type that runs as a Docker service: `github/` and `static/` extend
    `DockerWorkloadService` and reuse the Docker deriver. They change it only through its protected hooks
    (`normalizeConfig`, `prepareManifest` to add what the pods need before an apply, `diffSections`), and
-   `static/` mounts its files through `WorkloadManifestInput.read_only_claim`
+   `static/` copies its files in through `WorkloadManifestInput.files` (an init container and an emptyDir)
 3) add the type to the shared contract and the Drizzle enum in `schemas/workload.schema.ts`, then
    generate the migration
 4) add the service and deriver to `application.module.ts` providers
@@ -532,8 +535,8 @@ calls.
   namespaces, and `get` on `services` and `helmchartconfigs` (`helm.cattle.io`) in `kube-system`.
 - Storage classes need `get`, `list`, `create`, `patch` and `delete` on `storageclasses` and `get` on
   `csidrivers` (`storage.k8s.io`), `list` on `persistentvolumes` and `persistentvolumeclaims` (core,
-  cluster-wide) for the delete guard and volume counts, and `get` on `statefulsets` (`apps`) in the
-  SeaweedFS namespace for the volume server count.
+  cluster-wide) for the delete guard and volume counts, and `list` on `nodes.longhorn.io` in the
+  Longhorn namespace for the storage server count.
 - Benchmarks add `get` and `create` on `namespaces`, `create`, `get` and `delete` on
   `persistentvolumeclaims`, `create`, `get` and `delete` on `jobs` (`batch`), `list` on `pods`, `get` on
   `pods/log` in the benchmark namespace, and `patch` on `persistentvolumes`.
@@ -574,13 +577,14 @@ SSH, with the scripts and requirement checks in `node-join-script.ts`. SSH goes 
 
 ## Storage classes
 
-`storage-class/` manages SeaweedFS-backed StorageClasses (`GET/POST /storage-classes`,
+`storage-class/` manages Longhorn-backed StorageClasses (`GET/POST /storage-classes`,
 `GET/PATCH/DELETE /storage-classes/:id`, `GET /storage-classes/environment`).
 
 - `storage-class.config.ts` normalizes payloads. Only an allowlist of driver parameters exists, and a
   PATCH that names a locked setting (`parameters`, `reclaim_policy`, `volume_binding_mode`) is a 400,
   because Kubernetes cannot change them in place.
-- `storage-class.manifests.ts` builds the StorageClass: provisioner `seaweedfs-csi-driver`, labels
+- `storage-class.manifests.ts` builds the StorageClass: provisioner `driver.longhorn.io`
+  (`numberOfReplicas`, `dataLocality`, `fsType`, `diskSelector`, `nodeSelector`), labels
   `app.kubernetes.io/managed-by=acceleratio` and `acceleratio.io/storage-class-id`, and never the
   default-class annotation. The service only patches or deletes objects that carry both labels.
 - `storage-class.status.ts` compares the row with the live object: `ready`, `missing`, `drifted`, or
@@ -605,11 +609,26 @@ SSH, with the scripts and requirement checks in `node-join-script.ts`. SSH goes 
   series, one axis, crosshair, keyboard and a per-second table); `/settings?tab=storage` opens
   the Storage tab. The API polls the Job every 5 s, resumes active runs on bootstrap,
   parses fio's JSON from the pod log and then deletes the Job and claim, switching the volume to
-  `Delete` first so `Retain` profiles leave no data. Write tests are bounded by bytes because
-  SeaweedFS is append-only and overwrites would exhaust the claim's quota.
-- `SEAWEEDFS_NAMESPACE` (default `seaweedfs`) and `SEAWEEDFS_VOLUME_STATEFULSET` (default
-  `seaweedfs-volume`) locate the volume servers; `PLATFORM_STORAGE_CLASS_NAME` names the platform
-  class.
+  `Delete` first so `Retain` profiles leave no data. Write tests are bounded by bytes so a run
+  fits its 2 GiB claim on any driver.
+- `LONGHORN_NAMESPACE` (default `longhorn-system`) locates the Longhorn nodes;
+  `PLATFORM_STORAGE_CLASS_NAME` names the platform class (`longhorn`, `local-path` in
+  development). A profile with more copies than Ready, schedulable Longhorn nodes is refused.
+
+## Object storage (RustFS)
+
+- RustFS is the only S3 store: project buckets, PostgreSQL backup buckets and the platform bucket
+  `acceleratio-sites` (`SITES_BUCKET`) with every static site's files. `RUSTFS_NAMESPACE`,
+  `RUSTFS_ADMIN_SECRET`, `RUSTFS_S3_ENDPOINT` (pods) and `RUSTFS_S3_API_ENDPOINT` (the API; a
+  port-forward in development) locate it.
+- Admin work (buckets, keys, policies) runs as Jobs of the `rc` client (`RUSTFS_RC_IMAGE`) in the
+  RustFS namespace: `workload/s3-bucket/rustfs-jobs.ts` starts and follows them,
+  `s3-bucket.manifests.ts` builds the script. Each workload's keys belong to the IAM policy
+  `acc-<workload id>` (read-write on its bucket, or read-only on a prefix for a static site); a
+  rotation adds the new key and removes every other user of the policy. Keys reach the Job only
+  through Secrets, and a failure leaves one `BUCKET_ERROR` line with secrets masked.
+- Object data (the bucket explorer, static site uploads, index checks and deletes) goes over S3
+  from the API through `vendor/s3/s3.client.ts`.
 
 ## Metrics
 
@@ -618,7 +637,7 @@ SSH, with the scripts and requirement checks in `node-join-script.ts`. SSH goes 
   `deploy/install.sh` and `scripts/cluster.sh` install it in the `victoria-metrics` namespace with
   its TSDB on hostPath.
 - `vendor/victoriametrics/victoriametrics.client.ts` queries the Prometheus API through the API
-  server's service proxy (`KubernetesService.proxyServiceRequest`, shared with the SeaweedFS filer
+  server's service proxy (`KubernetesService.proxyServiceRequest`, shared with the VictoriaLogs
   client), so it works with the API inside or outside the cluster. `VICTORIAMETRICS_ADDRESS`
   (default `victoria-metrics.victoria-metrics:8428`) names the Service.
 - `metrics-query.ts` holds the pure parts: range → step and `rate()` window, the PromQL (summed
