@@ -70,6 +70,7 @@ const row = (): WorkloadRow => ({
   internal_hostname: null,
   storage_class_id: null,
   last_deployed_at: new Date('2026-11-09T10:00:00.000Z'),
+  icon: null,
   created_at: new Date('2026-11-09T10:00:00.000Z'),
   updated_at: new Date('2026-11-09T10:00:00.000Z'),
 });

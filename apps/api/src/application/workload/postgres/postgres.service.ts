@@ -955,6 +955,7 @@ export class PostgresWorkloadService
       external_name: row.external_name,
       namespace: projectNamespace(row.project_id),
       last_deployed_at: row.last_deployed_at?.toISOString() ?? null,
+      icon: row.icon,
       postgres: {
         host: readWriteHost(row.external_name, row.project_id),
         port: POSTGRES_PORT,

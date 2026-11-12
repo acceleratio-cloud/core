@@ -2,6 +2,7 @@ import type {
   CreateWorkloadPayload,
   S3BucketCredentials,
   UpdateInternalHostnamePayload,
+  UpdateWorkloadIconPayload,
   UpdateWorkloadPayload,
   Workload,
   WorkloadBuild,
@@ -177,6 +178,18 @@ export const workloadsApi = {
   getCredentials: async (projectId: string, id: string) => {
     const { data } = await api.get<S3BucketCredentials>(
       `/projects/${projectId}/workloads/${id}/credentials`,
+    );
+    return data;
+  },
+  /** Sets the console icon; metadata only, never deploys. */
+  updateIcon: async (
+    projectId: string,
+    id: string,
+    payload: UpdateWorkloadIconPayload,
+  ) => {
+    const { data } = await api.patch<Workload>(
+      `/projects/${projectId}/workloads/${id}/icon`,
+      payload,
     );
     return data;
   },

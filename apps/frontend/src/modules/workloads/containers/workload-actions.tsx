@@ -60,6 +60,8 @@ type WorkloadActionsContextValue = {
   renameWorkload: (name: string) => Promise<void>;
   /** Changes the private hostname. Rejects with the API message. */
   updateInternalHostname: (hostname: string) => Promise<void>;
+  /** Sets the console icon (null for the default). Rejects with the API message. */
+  updateIcon: (icon: string | null) => Promise<void>;
   clearDeleteError: () => void;
   deleteWorkload: () => Promise<void>;
 };
@@ -188,6 +190,16 @@ export const WorkloadActionsProvider = ({
       }
     };
 
+    const updateIcon = async (icon: string | null) => {
+      try {
+        replaceWorkload(
+          await workloadsApi.updateIcon(project.id, workload.id, { icon }),
+        );
+      } catch (actionError) {
+        throw new Error(getApiErrorMessage(actionError));
+      }
+    };
+
     const deleteWorkload = async () => {
       setPendingAction('delete');
       setDeleteError(null);
@@ -215,6 +227,7 @@ export const WorkloadActionsProvider = ({
       saveConfig,
       renameWorkload,
       updateInternalHostname,
+      updateIcon,
       clearDeleteError: () => setDeleteError(null),
       deleteWorkload,
     };

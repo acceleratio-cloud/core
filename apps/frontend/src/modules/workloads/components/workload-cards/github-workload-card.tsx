@@ -7,6 +7,7 @@ import type { GithubWorkloadConfig, Workload } from '@acceleratio/shared';
 import { GithubIcon } from '@/shared/icons/github-icon';
 import { WorkloadStatus } from '@/modules/workloads/components/workload-status';
 import { internalAddress } from '@/modules/workloads/utils/internal-hostname';
+import { WorkloadIcon } from '@/modules/workloads/components/workload-icon';
 import {
   NodeCard,
   NodeHeader,
@@ -32,7 +33,13 @@ export const GithubWorkloadCard = ({
   return (
     <NodeCard selected={selected}>
       <NodeHeader
-        icon={<GithubIcon className="size-4" />}
+        icon={
+          <WorkloadIcon
+            icon={data.icon}
+            className="size-4"
+            fallback={<GithubIcon className="size-4" />}
+          />
+        }
         title={data.name}
         subtitle={internalAddress(data)}
         status={data.status}

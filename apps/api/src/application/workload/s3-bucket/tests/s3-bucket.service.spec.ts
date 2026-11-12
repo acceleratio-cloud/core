@@ -55,6 +55,7 @@ const row = (overrides: Partial<WorkloadRow> = {}): WorkloadRow => ({
   internal_hostname: null,
   storage_class_id: profileId,
   last_deployed_at: new Date('2026-11-04T10:00:00.000Z'),
+  icon: null,
   created_at: new Date('2026-11-04T10:00:00.000Z'),
   updated_at: new Date('2026-11-04T10:00:00.000Z'),
   ...overrides,

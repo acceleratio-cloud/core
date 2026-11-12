@@ -539,6 +539,11 @@ export interface Workload {
   internal_domain?: string | null;
   last_deployed_at: string | null;
   /**
+   * Icon shown in the console: a `WORKLOAD_ICON_IDS` id or an `https://` URL
+   * of an image. Null shows the default icon of the type. Not deployed.
+   */
+  icon: string | null;
+  /**
    * GitHub services only: a push to the followed branch deploys a service
    * that was deployed before. Applies at once, outside versions.
    */
@@ -569,7 +574,18 @@ export interface WorkloadPositionEvent {
   updated_at: string;
 }
 
-export type WorkloadEvent = WorkloadStatusEvent | WorkloadPositionEvent;
+export interface WorkloadIconEvent {
+  type: 'icon';
+  workload_id: string;
+  project_id: string;
+  icon: string | null;
+  updated_at: string;
+}
+
+export type WorkloadEvent =
+  | WorkloadStatusEvent
+  | WorkloadPositionEvent
+  | WorkloadIconEvent;
 
 /** Lifecycle of one running copy (a Kubernetes Pod) of a Docker service. */
 export type WorkloadInstanceStatus =
@@ -623,6 +639,55 @@ export interface CreateWorkloadPayload {
 export interface UpdateInternalHostnamePayload {
   /** A DNS label (`postgres`); a trailing `.internal` is accepted. */
   internal_hostname: string;
+}
+
+/** Built-in workload icons; the console maps each id to a logo. */
+export const WORKLOAD_ICON_IDS = [
+  'python',
+  'javascript',
+  'typescript',
+  'nodejs',
+  'deno',
+  'bun',
+  'react',
+  'nextjs',
+  'vue',
+  'nuxt',
+  'angular',
+  'svelte',
+  'astro',
+  'go',
+  'rust',
+  'java',
+  'spring',
+  'kotlin',
+  'csharp',
+  'dotnet',
+  'php',
+  'laravel',
+  'ruby',
+  'django',
+  'flask',
+  'fastapi',
+  'nestjs',
+  'elixir',
+  'swift',
+  'docker',
+  'postgresql',
+  'mysql',
+  'mongodb',
+  'redis',
+  'nginx',
+] as const;
+
+export type WorkloadIconId = (typeof WORKLOAD_ICON_IDS)[number];
+
+/** Longest accepted icon URL. */
+export const WORKLOAD_ICON_URL_MAX_LENGTH = 2048;
+
+export interface UpdateWorkloadIconPayload {
+  /** A `WORKLOAD_ICON_IDS` id, an `https://` URL, or null for the default. */
+  icon: string | null;
 }
 
 export interface UpdateWorkloadPayload {

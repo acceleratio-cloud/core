@@ -9,6 +9,7 @@ import { parseDockerImage } from '@/modules/workloads/utils/parse-docker-image';
 import { effectiveConfig } from '@/modules/workloads/utils/workload-config';
 import { DockerIcon } from '@/shared/icons/docker-icon';
 import { internalAddress } from '@/modules/workloads/utils/internal-hostname';
+import { WorkloadIcon } from '@/modules/workloads/components/workload-icon';
 import {
   NodeCard,
   NodeHeader,
@@ -36,7 +37,13 @@ export const DockerWorkloadCard = ({
   return (
     <NodeCard selected={selected}>
       <NodeHeader
-        icon={<DockerIcon className="size-4" />}
+        icon={
+          <WorkloadIcon
+            icon={data.icon}
+            className="size-4"
+            fallback={<DockerIcon className="size-4" />}
+          />
+        }
         title={data.name}
         subtitle={internalAddress(data)}
         status={data.status}

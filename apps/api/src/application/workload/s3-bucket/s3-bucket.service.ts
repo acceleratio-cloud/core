@@ -1112,6 +1112,7 @@ export class S3BucketWorkloadService
       external_name: row.external_name,
       namespace: projectNamespace(row.project_id),
       last_deployed_at: row.last_deployed_at?.toISOString() ?? null,
+      icon: row.icon,
       s3: secret ? this.toAccess(row, secret) : null,
       created_at: row.created_at.toISOString(),
       updated_at: row.updated_at.toISOString(),

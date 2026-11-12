@@ -1,4 +1,8 @@
-import type { WorkloadConfig, WorkloadPosition } from '@acceleratio/shared';
+import {
+  WORKLOAD_ICON_URL_MAX_LENGTH,
+  type WorkloadConfig,
+  type WorkloadPosition,
+} from '@acceleratio/shared';
 import { sql } from 'drizzle-orm';
 import {
   type AnyPgColumn,
@@ -53,6 +57,9 @@ export const workload = pgTable(
     // project. Defaults to the slug of the name on create, does not follow a
     // rename and can be changed on its own. Null for other types.
     internal_hostname: varchar('internal_hostname', { length: 63 }),
+    // Icon shown in the console: a built-in pack id or an `https://` SVG URL.
+    // Null shows the default icon of the type. Metadata only, never deployed.
+    icon: varchar('icon', { length: WORKLOAD_ICON_URL_MAX_LENGTH }),
     // Storage profile of an `s3_bucket` workload; null for other types. A
     // profile cannot be deleted while a bucket uses it.
     // `github` workloads: a push to the followed branch deploys it. Applies at

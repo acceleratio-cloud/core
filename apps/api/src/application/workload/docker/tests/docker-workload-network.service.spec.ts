@@ -60,6 +60,7 @@ const workloadRow = (overrides: Partial<WorkloadRow> = {}): WorkloadRow => ({
   internal_hostname: 'my-api',
   storage_class_id: null,
   last_deployed_at: null,
+  icon: null,
   created_at: new Date('2026-11-01T09:00:00.000Z'),
   updated_at: new Date('2026-11-01T09:00:00.000Z'),
   ...overrides,

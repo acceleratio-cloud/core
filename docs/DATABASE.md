@@ -91,6 +91,7 @@ erDiagram
         jsonb position
         varchar external_name
         varchar internal_hostname
+        varchar icon
         timestamp last_deployed_at
         timestamp created_at
         timestamp updated_at
@@ -197,13 +198,17 @@ Columns: `id`, `name`, `created_at`, `updated_at`.
 One row per deployable node on the project canvas. `project_id` scopes every read and write.
 
 Columns: `id`, `project_id`, `name`, `type`, `active_version_id`, `draft_config`, `position`,
-`external_name`, `internal_hostname`, `storage_class_id`, `last_deployed_at`, `created_at`,
+`external_name`, `internal_hostname`, `icon`, `storage_class_id`, `last_deployed_at`, `created_at`,
 `updated_at`.
 
 Invariants:
 
 - `(project_id, external_name)` is unique. `external_name` becomes the Kubernetes Deployment name,
   is generated once on create, and never changes.
+- `icon` (migration `0030`, nullable) is the console icon: a built-in pack id from
+  `WORKLOAD_ICON_IDS` or an `https://` image URL of at most 2048 characters. Null shows the type's
+  default. It is metadata only: `PATCH .../icon` writes it alone, outside drafts and versions, and
+  never touches the cluster.
 - `auto_deploy` (migration `0025`, default true) lets a push to the followed branch deploy a `github`
   workload that was deployed before. It applies at once and is not part of versions; other types
   ignore it.

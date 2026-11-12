@@ -25,6 +25,7 @@ import type {
   WorkloadDomains,
   S3BucketCredentials,
   UpdateInternalHostnamePayload,
+  UpdateWorkloadIconPayload,
   UpdateWorkloadPayload,
   Workload,
   WorkloadBuild,
@@ -134,6 +135,19 @@ export class WorkloadController {
     @Body() body: UpdateInternalHostnamePayload,
   ): Promise<Workload> {
     return this.workloadService.updateInternalHostname(projectId, id, body);
+  }
+
+  /**
+   * Sets the console icon. Metadata only: it writes the row and never
+   * touches versions, drafts or the cluster.
+   */
+  @Patch(':id/icon')
+  updateIcon(
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: UpdateWorkloadIconPayload,
+  ): Promise<Workload> {
+    return this.workloadService.updateIcon(projectId, id, body);
   }
 
   @Post(':id/domains/generate')

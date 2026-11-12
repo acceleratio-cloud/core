@@ -1,0 +1,1 @@
+ALTER TABLE "workload" ADD COLUMN "icon" varchar(2048);

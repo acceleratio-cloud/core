@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
@@ -8,6 +9,7 @@ import type {
   CreateWorkloadPayload,
   S3BucketCredentials,
   UpdateInternalHostnamePayload,
+  UpdateWorkloadIconPayload,
   UpdateWorkloadPayload,
   Workload,
   WorkloadBuild,
@@ -16,10 +18,16 @@ import type {
   WorkloadVersion,
   WorkloadVersionDiff,
 } from '@acceleratio/shared';
+import { and, eq } from 'drizzle-orm';
 import { ProjectService } from '@/application/project/project.service';
+import { DATABASE } from '@/vendor/db/database.constants';
+import type { Database } from '@/vendor/db/database.constants';
 import { DockerWorkloadService } from './docker/docker-workload.service';
 import { GithubWorkloadService } from './github/github-workload.service';
+import { WorkloadEventsService } from './observer/workload-events.service';
 import { S3BucketWorkloadService } from './s3-bucket/s3-bucket.service';
+import { workload } from './schemas/workload.schema';
+import { normalizeWorkloadIcon } from './workload-icon';
 import type { WorkloadTypeService } from './workload-type-service';
 import type { VersionAuthorInput } from './workload-version.service';
 import { WorkloadTypeRegistry } from './workload-type.registry';
@@ -34,10 +42,10 @@ const compareWorkloads = (left: Workload, right: Workload): number =>
   left.id.localeCompare(right.id);
 
 /**
- * Thin dispatcher over the type services. It owns no table access and no
- * Kubernetes calls: create confirms the project and selects by the payload
- * type, every other operation resolves the type of the existing row first,
- * then delegates.
+ * Thin dispatcher over the type services. It makes no Kubernetes calls and
+ * owns no table access beyond the icon, which every type shares: create
+ * confirms the project and selects by the payload type, every other
+ * operation resolves the type of the existing row first, then delegates.
  */
 @Injectable()
 export class WorkloadService {
@@ -48,7 +56,43 @@ export class WorkloadService {
     private readonly resolver: WorkloadTypeResolver,
     private readonly projectService: ProjectService,
     private readonly s3Buckets: S3BucketWorkloadService,
+    @Inject(DATABASE) private readonly db: Database,
+    private readonly events: WorkloadEventsService,
   ) {}
+
+  /**
+   * Console icon of any workload type. Writes only the `icon` column, so it
+   * never creates a draft, a version or a rollout.
+   */
+  async updateIcon(
+    projectId: string,
+    id: string,
+    payload: UpdateWorkloadIconPayload,
+  ): Promise<Workload> {
+    const icon = normalizeWorkloadIcon(payload?.icon);
+    const [row] = await this.db
+      .update(workload)
+      .set({ icon })
+      .where(and(eq(workload.id, id), eq(workload.project_id, projectId)))
+      .returning({ id: workload.id });
+
+    if (!row) {
+      throw new NotFoundException('Workload not found');
+    }
+
+    const updated = await this.get(projectId, id);
+
+    // Other consoles on the project canvas pick the icon up without a reload.
+    this.events.publish({
+      type: 'icon',
+      workload_id: updated.id,
+      project_id: updated.project_id,
+      icon: updated.icon,
+      updated_at: updated.updated_at,
+    });
+
+    return updated;
+  }
 
   /** Environment variables of a Docker service, values included. */
   async env(projectId: string, id: string): Promise<WorkloadEnv> {

@@ -9,6 +9,7 @@ import { workloadsApi } from '@/api/workloads';
 import { WorkloadStatus } from '@/modules/workloads/components/workload-status';
 import { Skeleton } from '@/shared/components/ui/skeleton';
 import { bucketStatusLabel } from '@/modules/workloads/utils/s3-bucket';
+import { WorkloadIcon } from '@/modules/workloads/components/workload-icon';
 import { BucketIcon } from '@/shared/icons/bucket-icon';
 import { DockerIcon } from '@/shared/icons/docker-icon';
 import { GithubIcon } from '@/shared/icons/github-icon';
@@ -79,21 +80,27 @@ const PreviewGrid = ({ children }: { children: ReactNode }) => (
 const WorkloadTile = ({ workload }: { workload: Workload }) => (
   <div className="flex min-w-0 flex-col justify-between rounded-md border border-border bg-surface-raised px-2 py-1.5 shadow-xs transition-colors group-hover:border-edge-strong">
     <div className="flex min-w-0 items-center gap-1.5">
-      {workload.type === 's3_bucket' ? (
-        <BucketIcon className="size-3.5 shrink-0" />
-      ) : workload.type === 'github' ? (
-        <GithubIcon className="size-3.5 shrink-0" />
-      ) : workload.type === 'postgres' ? (
-        <PostgresIcon className="size-3.5 shrink-0" />
-      ) : workload.type === 'static' ? (
-        <PanelsTopLeft
-          aria-hidden="true"
-          strokeWidth={1.75}
-          className="size-3.5 shrink-0"
-        />
-      ) : (
-        <DockerIcon className="size-3.5 shrink-0" />
-      )}
+      <WorkloadIcon
+        icon={workload.icon}
+        className="size-3.5 shrink-0"
+        fallback={
+          workload.type === 's3_bucket' ? (
+            <BucketIcon className="size-3.5 shrink-0" />
+          ) : workload.type === 'github' ? (
+            <GithubIcon className="size-3.5 shrink-0" />
+          ) : workload.type === 'postgres' ? (
+            <PostgresIcon className="size-3.5 shrink-0" />
+          ) : workload.type === 'static' ? (
+            <PanelsTopLeft
+              aria-hidden="true"
+              strokeWidth={1.75}
+              className="size-3.5 shrink-0"
+            />
+          ) : (
+            <DockerIcon className="size-3.5 shrink-0" />
+          )
+        }
+      />
       <span className="min-w-0 truncate text-xs leading-tight font-medium text-foreground">
         {workload.name}
       </span>

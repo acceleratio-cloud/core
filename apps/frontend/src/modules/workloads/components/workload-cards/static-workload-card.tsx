@@ -6,6 +6,7 @@ import { Activity, FileUp, PanelsTopLeft } from 'lucide-react';
 import type { StaticWorkloadConfig, Workload } from '@acceleratio/shared';
 import { WorkloadStatus } from '@/modules/workloads/components/workload-status';
 import { internalAddress } from '@/modules/workloads/utils/internal-hostname';
+import { WorkloadIcon } from '@/modules/workloads/components/workload-icon';
 import {
   NodeCard,
   NodeHeader,
@@ -31,10 +32,16 @@ export const StaticWorkloadCard = ({
     <NodeCard selected={selected}>
       <NodeHeader
         icon={
-          <PanelsTopLeft
-            aria-hidden="true"
-            strokeWidth={1.75}
+          <WorkloadIcon
+            icon={data.icon}
             className="size-4"
+            fallback={
+              <PanelsTopLeft
+                aria-hidden="true"
+                strokeWidth={1.75}
+                className="size-4"
+              />
+            }
           />
         }
         title={data.name}

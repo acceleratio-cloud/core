@@ -8,6 +8,7 @@ import { WorkloadStatus } from '@/modules/workloads/components/workload-status';
 import { bucketStatusLabel } from '@/modules/workloads/utils/s3-bucket';
 import { BucketIcon } from '@/shared/icons/bucket-icon';
 import { internalAddress } from '@/modules/workloads/utils/internal-hostname';
+import { WorkloadIcon } from '@/modules/workloads/components/workload-icon';
 import {
   NodeCard,
   NodeHeader,
@@ -30,7 +31,13 @@ export const S3BucketWorkloadCard = ({
 }: NodeProps<S3BucketWorkloadNode>) => (
   <NodeCard selected={selected}>
     <NodeHeader
-      icon={<BucketIcon className="size-4" />}
+      icon={
+        <WorkloadIcon
+          icon={data.icon}
+          className="size-4"
+          fallback={<BucketIcon className="size-4" />}
+        />
+      }
       title={data.name}
       subtitle={internalAddress(data)}
       status={data.status}

@@ -29,6 +29,7 @@ export const WorkloadHeader = ({
   onClose,
 }: {
   workload: Workload;
+  /** The icon tile, e.g. the button that changes the icon. */
   icon: ReactNode;
   kindLabel: string;
   /** Lifecycle controls, at the top right beside the title. */
@@ -40,12 +41,7 @@ export const WorkloadHeader = ({
   return (
     <header className="shrink-0 bg-surface-raised px-4 pt-4 pb-3.5">
       <div className="flex items-start gap-3">
-        <span
-          aria-hidden="true"
-          className="flex size-11 shrink-0 items-center justify-center rounded-lg border border-edge-default bg-surface-sunken [&_svg]:size-5.5"
-        >
-          {icon}
-        </span>
+        {icon}
         <div className="min-w-0 flex-1 pt-0.5">
           <Dialog.Title
             render={<h2 />}

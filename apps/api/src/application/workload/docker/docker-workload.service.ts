@@ -1652,6 +1652,7 @@ export class DockerWorkloadService
           ? null
           : internalDomain(row.internal_hostname),
       last_deployed_at: row.last_deployed_at?.toISOString() ?? null,
+      icon: row.icon,
       ...(row.type === 'github' ? { auto_deploy: row.auto_deploy } : {}),
       created_at: row.created_at.toISOString(),
       updated_at: row.updated_at.toISOString(),

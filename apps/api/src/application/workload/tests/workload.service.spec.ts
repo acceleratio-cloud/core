@@ -6,7 +6,9 @@ import type {
   WorkloadType,
 } from '@acceleratio/shared';
 import type { ProjectService } from '@/application/project/project.service';
+import type { Database } from '@/vendor/db/database.constants';
 import { DockerWorkloadService } from '../docker/docker-workload.service';
+import type { WorkloadEventsService } from '../observer/workload-events.service';
 import type { S3BucketWorkloadService } from '../s3-bucket/s3-bucket.service';
 import type { WorkloadTypeRegistry } from '../workload-type.registry';
 import type { WorkloadTypeResolver } from '../workload-type.resolver';
@@ -55,6 +57,7 @@ const createWorkload = (overrides: Partial<Workload> = {}): Workload => ({
   external_name: 'my-api-3f9a1b2c',
   namespace: `project-${projectId}`,
   last_deployed_at: null,
+  icon: null,
   created_at: '2026-11-01T09:00:00.000Z',
   updated_at: '2026-11-01T09:30:00.000Z',
   ...overrides,
@@ -113,12 +116,16 @@ const createService = (
     type: 's3_bucket',
     credentials: jest.fn(),
   },
+  database: unknown = {},
+  events: { publish: jest.Mock } = { publish: jest.fn() },
 ): WorkloadService =>
   new WorkloadService(
     registry as unknown as WorkloadTypeRegistry,
     resolver as unknown as WorkloadTypeResolver,
     projectService as unknown as ProjectService,
     s3Buckets as unknown as S3BucketWorkloadService,
+    database as Database,
+    events as unknown as WorkloadEventsService,
   );
 
 // A Docker-like service the facade recognises by class.
@@ -476,5 +483,74 @@ describe('WorkloadService.env', () => {
       BadRequestException,
     );
     expect(docker.getEnv).not.toHaveBeenCalled();
+  });
+});
+
+describe('WorkloadService.updateIcon', () => {
+  const createDatabase = (rows: { id: string }[]) => {
+    const returning = jest.fn().mockResolvedValue(rows);
+    const where = jest.fn(() => ({ returning }));
+    const set = jest.fn(() => ({ where }));
+
+    return { update: jest.fn(() => ({ set })), set };
+  };
+
+  it('writes only the icon column and never deploys or drafts', async () => {
+    const docker = createTypeService('docker');
+    const database = createDatabase([{ id: workloadId }]);
+    const events = { publish: jest.fn() };
+    const service = createService(
+      createRegistry([docker]),
+      createResolver('docker'),
+      undefined,
+      undefined,
+      database,
+      events,
+    );
+
+    docker.get.mockResolvedValue(createWorkload({ icon: 'python' }));
+
+    await expect(
+      service.updateIcon(projectId, workloadId, { icon: 'python' }),
+    ).resolves.toMatchObject({ icon: 'python' });
+    expect(database.set).toHaveBeenCalledWith({ icon: 'python' });
+    expect(events.publish).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'icon', icon: 'python' }),
+    );
+    expect(docker.update).not.toHaveBeenCalled();
+    expect(docker.deploy).not.toHaveBeenCalled();
+    expect(docker.restart).not.toHaveBeenCalled();
+  });
+
+  it('rejects an invalid icon before touching the database', async () => {
+    const database = createDatabase([]);
+    const service = createService(
+      createRegistry([createTypeService('docker')]),
+      createResolver('docker'),
+      undefined,
+      undefined,
+      database,
+    );
+
+    await expect(
+      service.updateIcon(projectId, workloadId, {
+        icon: 'http://x.test/a.svg',
+      }),
+    ).rejects.toThrow(BadRequestException);
+    expect(database.update).not.toHaveBeenCalled();
+  });
+
+  it('answers 404 for a workload outside the project', async () => {
+    const service = createService(
+      createRegistry([createTypeService('docker')]),
+      createResolver('docker'),
+      undefined,
+      undefined,
+      createDatabase([]),
+    );
+
+    await expect(
+      service.updateIcon(projectId, workloadId, { icon: null }),
+    ).rejects.toThrow(NotFoundException);
   });
 });

@@ -97,6 +97,10 @@ const isWorkloadEvent = (value: unknown): value is WorkloadEvent => {
     return isWorkloadPosition(event.position);
   }
 
+  if (event.type === 'icon') {
+    return isNullableString(event.icon);
+  }
+
   if (event.type !== 'status') {
     return false;
   }
@@ -141,6 +145,10 @@ const applyWorkloadEvent = (
         position: event.position,
         updated_at: event.updated_at,
       };
+    }
+
+    if (event.type === 'icon') {
+      return { ...workload, icon: event.icon, updated_at: event.updated_at };
     }
 
     return {

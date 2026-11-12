@@ -9,6 +9,7 @@ import { WorkloadStatus } from '@/modules/workloads/components/workload-status';
 import { volumeFill } from '@/modules/workloads/utils/volume-usage';
 import { PostgresIcon } from '@/shared/icons/postgres-icon';
 import { internalAddress } from '@/modules/workloads/utils/internal-hostname';
+import { WorkloadIcon } from '@/modules/workloads/components/workload-icon';
 import {
   NodeCard,
   NodeHeader,
@@ -36,7 +37,13 @@ export const PostgresWorkloadCard = ({
   return (
     <NodeCard selected={selected}>
       <NodeHeader
-        icon={<PostgresIcon className="size-4" />}
+        icon={
+          <WorkloadIcon
+            icon={data.icon}
+            className="size-4"
+            fallback={<PostgresIcon className="size-4" />}
+          />
+        }
         title={data.name}
         subtitle={internalAddress(data)}
         status={data.status}
