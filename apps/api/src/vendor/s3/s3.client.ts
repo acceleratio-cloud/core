@@ -1,5 +1,10 @@
 import type { Readable } from 'node:stream';
-import { BadGatewayException, Injectable, Logger } from '@nestjs/common';
+import {
+  BadGatewayException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   DeleteObjectCommand,
   DeleteObjectsCommand,
@@ -91,6 +96,13 @@ export class S3StorageClient {
     try {
       return await request(await this.s3());
     } catch (error) {
+      // The whole bucket is gone, not just a key: no caller can go on.
+      if ((error as { name?: string })?.name === 'NoSuchBucket') {
+        throw new NotFoundException(
+          'The bucket does not exist in object storage',
+        );
+      }
+
       if (isS3NotFound(error)) {
         throw error;
       }

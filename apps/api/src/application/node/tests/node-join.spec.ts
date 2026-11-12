@@ -123,6 +123,16 @@ describe('preflight', () => {
     });
   });
 
+  it('fails without iSCSI on a server the join cannot install it on', () => {
+    const result = evaluatePreflight(
+      `${passing}\nISCSI=0\nAPT=0`,
+      ['10.0.0.1'],
+      'worker',
+    );
+
+    expect(result.checks.find((c) => c.id === 'iscsi')?.status).toBe('fail');
+  });
+
   it('only warns when another node is unreachable', () => {
     const result = evaluatePreflight(
       passing.replace('PEER_0=1', 'PEER_0=0'),

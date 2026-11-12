@@ -10,9 +10,8 @@ import type {
   NodeDrainPod,
   NodeStorageRisk,
 } from '@acceleratio/shared';
+import { longhornNamespace } from '@/vendor/kubernetes/longhorn';
 
-export const LONGHORN_NAMESPACE =
-  process.env.LONGHORN_NAMESPACE?.trim() || 'longhorn-system';
 /** The emptyDir a static site's pods fill from RustFS on every start. */
 const REBUILT_VOLUME = 'files';
 const WORKLOAD_ID_LABEL = 'acceleratio.io/workload-id';
@@ -149,7 +148,7 @@ const classify = (
   // Longhorn's own pods (instance managers) hold no data of their own and are
   // recreated by Longhorn. Their budgets hold the eviction until Longhorn has
   // moved the replicas they serve, so they are evicted like any other pod.
-  if (pod.metadata?.namespace === LONGHORN_NAMESPACE) {
+  if (pod.metadata?.namespace === longhornNamespace()) {
     return {
       ...base,
       action: 'evict',
@@ -300,9 +299,14 @@ export const buildDrainPlan = (input: DrainPlanInput): NodeDrainPlan => {
     deleteBlockers.push('This is the last control plane node');
   }
 
-  // A Longhorn copy moves during the drain that precedes a removal.
+  // A Longhorn copy moves during the drain that precedes a removal, but
+  // only while the node is up: from a node that is down nothing can copy it.
+  const ready = node?.status?.conditions?.some(
+    (condition) => condition.type === 'Ready' && condition.status === 'True',
+  );
+
   for (const risk of storage.filter(
-    (item) => item.kind === 'persistent_volume',
+    (item) => item.kind === 'persistent_volume' || !ready,
   )) {
     deleteBlockers.push(
       `${risk.namespace ? `${risk.namespace}/` : ''}${risk.name}: ${risk.reason}`,

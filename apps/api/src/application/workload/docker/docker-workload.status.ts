@@ -18,7 +18,12 @@ const REPLICA_FAILURE = 'ReplicaFailure';
 const FALLBACK_REPLICA_FAILURE_MESSAGE = 'Replica creation failed';
 const POD_SCHEDULED = 'PodScheduled';
 const UNSCHEDULABLE = 'Unschedulable';
-const UNBOUND_CLAIMS = 'unbound immediate PersistentVolumeClaims';
+/**
+ * A pod waits for its scheduling to settle this long before it counts as
+ * failed: a new volume takes seconds to provision (Longhorn), and the pod is
+ * Unschedulable until it exists.
+ */
+export const UNSCHEDULABLE_GRACE_MS = 30_000;
 const OOM_KILLED = 'OOMKilled';
 // `spec.replicas` unset means the Deployment controller defaults it to one.
 const IMPLICIT_REPLICAS = 1;
@@ -60,17 +65,18 @@ const findContainerFailure = (pod: V1Pod): string | undefined => {
   return undefined;
 };
 
-const findSchedulingFailure = (pod: V1Pod): string | undefined => {
+const findSchedulingFailure = (pod: V1Pod, now: number): string | undefined => {
   const scheduled = (pod.status?.conditions ?? []).find(
     (condition) => condition.type === POD_SCHEDULED,
   );
+  const since = scheduled?.lastTransitionTime
+    ? new Date(scheduled.lastTransitionTime).getTime()
+    : Number.NEGATIVE_INFINITY;
 
   if (
     scheduled?.status === 'False' &&
     scheduled.reason === UNSCHEDULABLE &&
-    // A new volume is still being provisioned (Longhorn takes seconds); a
-    // claim that never binds fails the rollout at its progress deadline.
-    !scheduled.message?.includes(UNBOUND_CLAIMS)
+    now - since >= UNSCHEDULABLE_GRACE_MS
   ) {
     return withDetail(UNSCHEDULABLE, scheduled.message);
   }
@@ -78,9 +84,10 @@ const findSchedulingFailure = (pod: V1Pod): string | undefined => {
   return undefined;
 };
 
-const findPodFailure = (pods: V1Pod[]): string | undefined => {
+const findPodFailure = (pods: V1Pod[], now: number): string | undefined => {
   for (const pod of pods) {
-    const failure = findContainerFailure(pod) ?? findSchedulingFailure(pod);
+    const failure =
+      findContainerFailure(pod) ?? findSchedulingFailure(pod, now);
 
     if (failure !== undefined) {
       return failure;
@@ -140,6 +147,7 @@ const isAvailable = (deployment: V1Deployment, replicas: number): boolean => {
 export const deriveStatus = (
   deployment: V1Deployment | undefined,
   pods: V1Pod[] = [],
+  now = Date.now(),
 ): DerivedWorkloadStatus => {
   if (deployment === undefined) {
     return { status: 'draft', status_message: null };
@@ -168,7 +176,7 @@ export const deriveStatus = (
     return { status: 'failed', status_message: deploymentFailure };
   }
 
-  const podFailure = findPodFailure(pods);
+  const podFailure = findPodFailure(pods, now);
 
   if (podFailure !== undefined) {
     return { status: 'failed', status_message: podFailure };

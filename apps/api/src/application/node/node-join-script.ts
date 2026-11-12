@@ -154,6 +154,7 @@ export const preflightScript = (target: JoinTarget, peers: string[]): string =>
     // Longhorn attaches volumes over iSCSI, which LXC/OpenVZ containers cannot run.
     'echo "CONTAINER=$(systemd-detect-virt --container 2>/dev/null | head -n 1)"',
     'if command -v iscsiadm >/dev/null 2>&1; then echo ISCSI=1; else echo ISCSI=0; fi',
+    'if command -v apt-get >/dev/null 2>&1; then echo APT=1; else echo APT=0; fi',
     'if [ -e /usr/local/bin/k3s ] || [ -d /var/lib/rancher/k3s ]; then echo K3S_PRESENT=1; else echo K3S_PRESENT=0; fi',
     `if ss -ltn 2>/dev/null | grep -q ':10250 '; then echo PORT_10250_BUSY=1; else echo PORT_10250_BUSY=0; fi`,
     'echo "HOST_IPS=$(hostname -I 2>/dev/null)"',
@@ -217,16 +218,21 @@ export const evaluatePreflight = (
   add('curl', 'curl installed', facts.get('CURL') === '1' ? 'pass' : 'fail');
 
   const container = facts.get('CONTAINER') || 'none';
+  const iscsi = facts.get('ISCSI') === '1';
+  // The join installs open-iscsi with apt only.
+  const installable = facts.get('APT') !== '0';
 
   add(
     'iscsi',
     'iSCSI for Longhorn volumes',
-    container === 'none' ? 'pass' : 'fail',
+    container === 'none' && (iscsi || installable) ? 'pass' : 'fail',
     container !== 'none'
       ? `This server is a ${container} container; Longhorn needs a VM or bare metal`
-      : facts.get('ISCSI') === '1'
+      : iscsi
         ? 'open-iscsi installed'
-        : 'open-iscsi is installed during the join',
+        : installable
+          ? 'open-iscsi is installed during the join'
+          : 'Install the iSCSI initiator (iscsi-initiator-utils or open-iscsi) and start iscsid first',
   );
 
   const minCpus = role === 'server' ? MIN_CPUS : 1;
@@ -360,8 +366,9 @@ export const LONGHORN_HOST_SETUP = [
   'modprobe iscsi_tcp || true',
   'printf "iscsi_tcp\n" >/etc/modules-load.d/acceleratio.conf',
   'systemctl enable --now iscsid >/dev/null 2>&1 || systemctl enable --now iscsid.socket >/dev/null 2>&1 || true',
-  `if { [ -f /etc/multipath.conf ] || command -v multipathd >/dev/null 2>&1; } && ! grep -q '"IET"' /etc/multipath.conf 2>/dev/null; then`,
-  `  printf '\nblacklist {\n    device {\n        vendor "IET"\n        product "VIRTUAL-DISK"\n    }\n}\n' >>/etc/multipath.conf`,
+  // The markers match install.sh, whose uninstall removes the block.
+  `if { [ -f /etc/multipath.conf ] || command -v multipathd >/dev/null 2>&1; } && ! grep -qxF '# BEGIN acceleratio longhorn' /etc/multipath.conf 2>/dev/null; then`,
+  `  printf '# BEGIN acceleratio longhorn\nblacklist {\n    device {\n        vendor "IET"\n        product "VIRTUAL-DISK"\n    }\n}\n# END acceleratio longhorn\n' >>/etc/multipath.conf`,
   '  systemctl try-restart multipathd >/dev/null 2>&1 || true',
   'fi',
   'set +e; iscsiadm -m session >/dev/null 2>&1; rc=$?; set -e',

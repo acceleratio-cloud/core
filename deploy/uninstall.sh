@@ -225,6 +225,16 @@ remove_cilium() {
   fi
 }
 
+# The Longhorn blacklist install.sh added between these markers.
+remove_multipath() {
+  local conf=/etc/multipath.conf
+  [ -f "$conf" ] && grep -qxF "# BEGIN acceleratio longhorn" "$conf" || return 0
+  run sed -i '/^# BEGIN acceleratio longhorn$/,/^# END acceleratio longhorn$/d' "$conf"
+  if systemctl is-active --quiet multipathd 2>/dev/null; then
+    run systemctl restart multipathd || true
+  fi
+}
+
 # Longhorn volumes are iSCSI sessions on the host; removing k3s does not end
 # them.
 logout_iscsi() {
@@ -322,6 +332,7 @@ main() {
   remove_cilium
   remove_k3s
   logout_iscsi
+  remove_multipath
   remove_data
   remove_ufw_rules
   print_summary

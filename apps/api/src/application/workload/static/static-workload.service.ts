@@ -9,6 +9,7 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import type {
+  CreateWorkloadPayload,
   DockerWorkloadConfig,
   StaticRelease,
   StaticWorkloadConfig,
@@ -110,11 +111,13 @@ export class StaticWorkloadService extends DockerWorkloadService {
   private readonly publishing = new Set<string>();
   private readonly publishes = new Map<string, number>();
   private readonly open = new Set<string>();
+  /** Site keys being made now, by workload. */
+  private readonly siteKeys = new Map<string, Promise<void>>();
 
   constructor(
     @Inject(DATABASE) db: Database,
     projectService: ProjectService,
-    isolation: ProjectIsolationService,
+    private readonly siteIsolation: ProjectIsolationService,
     kubernetes: KubernetesService,
     status: WorkloadStatusService,
     events: WorkloadEventsService,
@@ -126,7 +129,7 @@ export class StaticWorkloadService extends DockerWorkloadService {
     super(
       db,
       projectService,
-      isolation,
+      siteIsolation,
       kubernetes,
       status,
       events,
@@ -134,6 +137,31 @@ export class StaticWorkloadService extends DockerWorkloadService {
       network,
       storageClasses,
     );
+  }
+
+  /** Starts making the site's key while the user uploads files. */
+  override async create(
+    projectId: string,
+    payload: CreateWorkloadPayload,
+  ): Promise<Workload> {
+    const created = await super.create(projectId, payload);
+
+    void this.siteIsolation
+      .ensure(projectId)
+      .then(() =>
+        this.ensureSiteKey({
+          id: created.id,
+          project_id: projectId,
+          name: created.name,
+        }),
+      )
+      .catch((error: unknown) =>
+        this.siteLogger.warn(
+          `The key of static site ${created.id} is made on its first deploy instead: ${(error as Error).message}`,
+        ),
+      );
+
+    return created;
   }
 
   /**
@@ -396,12 +424,34 @@ export class StaticWorkloadService extends DockerWorkloadService {
   }
 
   /**
-   * The site's read-only key to its prefix of the sites bucket. It is made
-   * on the first deploy and kept in the project namespace; the Secret is
-   * written only once RustFS knows the key, so a failed attempt is retried by
-   * the next deploy (which also removes the key of the failed attempt).
+   * The site's read-only key to its prefix of the sites bucket, kept in the
+   * project namespace. Creating the site starts it in the background, so the
+   * first deploy rarely waits for the Job; a deploy that comes first joins
+   * the same attempt instead of starting another.
    */
-  private async ensureSiteKey(input: WorkloadManifestInput): Promise<void> {
+  private ensureSiteKey(
+    site: Pick<WorkloadManifestInput, 'id' | 'project_id' | 'name'>,
+  ): Promise<void> {
+    let pending = this.siteKeys.get(site.id);
+
+    if (pending === undefined) {
+      pending = this.makeSiteKey(site).finally(() =>
+        this.siteKeys.delete(site.id),
+      );
+      this.siteKeys.set(site.id, pending);
+    }
+
+    return pending;
+  }
+
+  /**
+   * The Secret is written only once RustFS knows the key, so a failed
+   * attempt is retried by the next deploy (which also removes the key of the
+   * failed attempt).
+   */
+  private async makeSiteKey(
+    input: Pick<WorkloadManifestInput, 'id' | 'project_id' | 'name'>,
+  ): Promise<void> {
     try {
       const secret = await this.kubernetes.coreV1.readNamespacedSecret({
         name: siteKeySecretName(input.id),

@@ -13,11 +13,11 @@ import type {
   NodeOperationType,
 } from '@acceleratio/shared';
 import { KubernetesService } from '@/vendor/kubernetes/kubernetes.service';
+import { listLonghorn } from '@/vendor/kubernetes/longhorn';
 import { getKubernetesStatusCode } from '@/vendor/kubernetes/kubernetes-error';
 import { NodeService } from './node.service';
 import {
   buildDrainPlan,
-  LONGHORN_NAMESPACE,
   type LonghornReplica,
   type LonghornVolume,
 } from './node-drain-plan';
@@ -59,8 +59,8 @@ export class NodeDrainService {
         }),
         this.kubernetes.policyV1.listPodDisruptionBudgetForAllNamespaces(),
         this.kubernetes.coreV1.listPersistentVolume(),
-        this.listLonghorn<LonghornReplica>('replicas'),
-        this.listLonghorn<LonghornVolume>('volumes'),
+        listLonghorn<LonghornReplica>(this.kubernetes, 'replicas'),
+        listLonghorn<LonghornVolume>(this.kubernetes, 'volumes'),
       ]);
 
     return buildDrainPlan({
@@ -69,26 +69,9 @@ export class NodeDrainService {
       pods: pods.items,
       budgets: budgets.items,
       volumes: volumes.items,
-      longhornReplicas,
-      longhornVolumes,
+      longhornReplicas: longhornReplicas ?? [],
+      longhornVolumes: longhornVolumes ?? [],
     });
-  }
-
-  /** Longhorn objects of a kind; none when Longhorn is not installed. */
-  private async listLonghorn<T>(plural: string): Promise<T[]> {
-    try {
-      const list =
-        (await this.kubernetes.customObjects.listNamespacedCustomObject({
-          group: 'longhorn.io',
-          version: 'v1beta2',
-          namespace: LONGHORN_NAMESPACE,
-          plural,
-        })) as { items?: T[] };
-
-      return list.items ?? [];
-    } catch {
-      return [];
-    }
   }
 
   /** The newest operation for a node, running or finished. */

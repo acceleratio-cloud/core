@@ -36,6 +36,7 @@ import {
   toNestException,
 } from '@/vendor/kubernetes/kubernetes-error';
 import { KubernetesService } from '@/vendor/kubernetes/kubernetes.service';
+import { listLonghorn } from '@/vendor/kubernetes/longhorn';
 import { workload } from '@/application/workload/schemas/workload.schema';
 import { workloadVersion } from '@/application/workload/schemas/workload-version.schema';
 import { toStorageBenchmark } from './benchmark/storage-benchmark.results';
@@ -629,27 +630,18 @@ export class StorageClassService {
 
   /** Longhorn nodes that are Ready and accept new copies. */
   private async readStorageNodes(): Promise<number | null> {
-    try {
-      const list =
-        (await this.kubernetes.customObjects.listNamespacedCustomObject({
-          group: 'longhorn.io',
-          version: 'v1beta2',
-          namespace:
-            process.env.LONGHORN_NAMESPACE?.trim() || 'longhorn-system',
-          plural: 'nodes',
-        })) as { items?: LonghornNode[] };
+    const nodes = await listLonghorn<LonghornNode>(this.kubernetes, 'nodes');
 
-      return (list.items ?? []).filter(
+    return (
+      nodes?.filter(
         (node) =>
           node.spec?.allowScheduling !== false &&
           node.status?.conditions?.some(
             (condition) =>
               condition.type === 'Ready' && condition.status === 'True',
           ),
-      ).length;
-    } catch {
-      return null;
-    }
+      ).length ?? null
+    );
   }
 
   /**

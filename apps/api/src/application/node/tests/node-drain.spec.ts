@@ -51,12 +51,15 @@ const pod = (
   status: { phase: 'Running' },
 });
 
-const node = (name: string, controlPlane = false): V1Node => ({
+const node = (name: string, controlPlane = false, ready = true): V1Node => ({
   metadata: {
     name,
     labels: controlPlane
       ? { 'node-role.kubernetes.io/control-plane': 'true' }
       : {},
+  },
+  status: {
+    conditions: [{ type: 'Ready', status: ready ? 'True' : 'False' }],
   },
 });
 
@@ -163,6 +166,19 @@ describe('buildDrainPlan', () => {
     ]);
     expect(plan.storage[0].reason).toContain('copies it to another server');
     expect(plan.delete_blockers).toEqual([]);
+  });
+
+  it('blocks removal of a node that is down with the last copy of a volume', () => {
+    const plan = buildDrainPlan({
+      ...input([], [node('n1', false, false), node('n2', true)]),
+      longhornReplicas: [
+        { spec: { volumeName: 'pvc-a', nodeID: 'n1', healthyAt: 'x' } },
+      ],
+    });
+
+    expect(plan.delete_blockers).toEqual([
+      expect.stringContaining('The only healthy copy of this volume'),
+    ]);
   });
 
   it('evicts Longhorn pods and static site pods despite their local volumes', () => {

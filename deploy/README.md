@@ -73,7 +73,8 @@ install, a re-run, `--reset` and `uninstall.sh`.
 Ubuntu Server runs `multipathd`, which would claim Longhorn's disks. The
 installer adds a blacklist for Longhorn's devices only (vendor `IET`, product
 `VIRTUAL-DISK`) to `/etc/multipath.conf` and restarts `multipathd`; the host's
-own multipath setup is left alone.
+own multipath setup is left alone. The block sits between `# BEGIN/END
+acceleratio longhorn` markers, which `uninstall.sh` and `--reset` remove.
 
 ## Quick start
 

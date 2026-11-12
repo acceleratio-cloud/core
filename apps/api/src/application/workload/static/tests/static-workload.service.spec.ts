@@ -220,6 +220,48 @@ describe('StaticWorkloadService.uploadFile', () => {
   });
 });
 
+describe('StaticWorkloadService site key', () => {
+  it('starts on create and a deploy joins the same attempt', async () => {
+    const { service } = build();
+    const kubernetes = {
+      coreV1: {
+        readNamespacedSecret: jest
+          .fn()
+          .mockRejectedValue(Object.assign(new Error('gone'), { code: 404 })),
+        createNamespacedSecret: jest.fn().mockResolvedValue({}),
+      },
+    };
+    let finish: (value: null) => void = () => undefined;
+
+    Object.assign(service as unknown as Record<string, unknown>, {
+      kubernetes,
+      siteIsolation: { ensure: jest.fn().mockResolvedValue(undefined) },
+    });
+    jest
+      .spyOn(DockerWorkloadService.prototype, 'create')
+      .mockResolvedValue({ id: 'w1', name: 'Docs' } as never);
+    jest
+      .mocked(runBucketJob)
+      .mockReset()
+      .mockReturnValue(new Promise((resolve) => (finish = resolve)));
+
+    await service.create('p1', { name: 'Docs', type: 'static' });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const deploy = (
+      service as unknown as {
+        ensureSiteKey(site: object): Promise<void>;
+      }
+    ).ensureSiteKey({ id: 'w1', project_id: 'p1', name: 'Docs' });
+
+    finish(null);
+    await deploy;
+
+    expect(runBucketJob).toHaveBeenCalledTimes(1);
+    expect(kubernetes.coreV1.createNamespacedSecret).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('StaticWorkloadService.remove', () => {
   const removable = () => {
     const built = build();

@@ -868,6 +868,7 @@ reset_installation() {
 
   detach_cilium_bpf
   logout_iscsi
+  remove_multipath
 
   rm -f "${CILIUM_CNI_CONF_PATH%/}"/*cilium* 2>/dev/null || true
   rm -f "${CILIUM_CNI_BIN_PATH%/}/cilium-cni" 2>/dev/null || true
@@ -938,19 +939,32 @@ configure_ufw() {
 # their mounts. Blacklist only Longhorn's devices (vendor IET, product
 # VIRTUAL-DISK), as the Longhorn documentation recommends, so a host's own
 # multipath setup keeps working.
+# The block sits between markers so uninstall.sh and --reset can remove it.
+readonly MULTIPATH_BEGIN="# BEGIN acceleratio longhorn"
+readonly MULTIPATH_END="# END acceleratio longhorn"
+
 configure_multipath() {
   local conf=/etc/multipath.conf
-  if [ -f "$conf" ] && grep -q '"IET"' "$conf"; then
+  if [ -f "$conf" ] && grep -qxF "$MULTIPATH_BEGIN" "$conf"; then
     return 0
   fi
   if ! command -v multipathd >/dev/null 2>&1 && [ ! -f "$conf" ]; then
     return 0
   fi
   log_info "Blacklisting Longhorn devices in ${conf}"
-  printf '\n# %s: Longhorn volumes are not multipath.\nblacklist {\n    device {\n        vendor "IET"\n        product "VIRTUAL-DISK"\n    }\n}\n' \
-    "$MANAGED_BY" >>"$conf"
+  printf '%s\n# Longhorn volumes are not multipath.\nblacklist {\n    device {\n        vendor "IET"\n        product "VIRTUAL-DISK"\n    }\n}\n%s\n' \
+    "$MULTIPATH_BEGIN" "$MULTIPATH_END" >>"$conf"
   if systemctl is-active --quiet multipathd 2>/dev/null; then
     systemctl restart multipathd
+  fi
+}
+
+remove_multipath() {
+  local conf=/etc/multipath.conf
+  [ -f "$conf" ] && grep -qxF "$MULTIPATH_BEGIN" "$conf" || return 0
+  sed -i "/^${MULTIPATH_BEGIN}\$/,/^${MULTIPATH_END}\$/d" "$conf"
+  if systemctl is-active --quiet multipathd 2>/dev/null; then
+    systemctl restart multipathd || true
   fi
 }
 
@@ -1754,7 +1768,13 @@ install_rustfs() {
   log_info "Installing RustFS ${RUSTFS_IMAGE%%@*}"
   ensure_namespace "$RUSTFS_NAMESPACE"
   ensure_rustfs_secret
+  local before
+  before="$(cat "${CONFIG_DIR}/manifests/rustfs.yaml" 2>/dev/null || true)"
   write_rustfs_manifest
+  # A new RustFS image or setting gets the S3 smoke test, as charts do.
+  if [ "$before" != "$(cat "${CONFIG_DIR}/manifests/rustfs.yaml")" ]; then
+    SMOKE_NEEDED=1
+  fi
   k3s kubectl apply -f "${CONFIG_DIR}/manifests/rustfs.yaml" >/dev/null
   if ! k3s kubectl -n "$RUSTFS_NAMESPACE" rollout status deployment/rustfs --timeout=10m; then
     k3s kubectl -n "$RUSTFS_NAMESPACE" describe pod -l app.kubernetes.io/name=rustfs | tail -n 30 || true
