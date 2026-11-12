@@ -43,8 +43,14 @@ const COMPONENTS: PodComponent[] = [
   {
     id: 'storage',
     role: 'Storage',
-    name: 'SeaweedFS',
-    namespace: () => env('SEAWEEDFS_NAMESPACE', 'seaweedfs'),
+    name: 'Longhorn',
+    namespace: () => env('LONGHORN_NAMESPACE', 'longhorn-system'),
+  },
+  {
+    id: 'object-storage',
+    role: 'Object storage',
+    name: 'RustFS',
+    namespace: () => env('RUSTFS_NAMESPACE', 'rustfs'),
   },
   {
     id: 'databases',

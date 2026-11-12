@@ -151,6 +151,9 @@ export const preflightScript = (target: JoinTarget, peers: string[]): string =>
     'if [ "$(id -u)" = 0 ] || sudo -n true 2>/dev/null; then echo PRIVILEGED=1; else echo PRIVILEGED=0; fi',
     'if [ -d /run/systemd/system ]; then echo SYSTEMD=1; else echo SYSTEMD=0; fi',
     'if command -v curl >/dev/null 2>&1; then echo CURL=1; else echo CURL=0; fi',
+    // Longhorn attaches volumes over iSCSI, which LXC/OpenVZ containers cannot run.
+    'echo "CONTAINER=$(systemd-detect-virt --container 2>/dev/null | head -n 1)"',
+    'if command -v iscsiadm >/dev/null 2>&1; then echo ISCSI=1; else echo ISCSI=0; fi',
     'if [ -e /usr/local/bin/k3s ] || [ -d /var/lib/rancher/k3s ]; then echo K3S_PRESENT=1; else echo K3S_PRESENT=0; fi',
     `if ss -ltn 2>/dev/null | grep -q ':10250 '; then echo PORT_10250_BUSY=1; else echo PORT_10250_BUSY=0; fi`,
     'echo "HOST_IPS=$(hostname -I 2>/dev/null)"',
@@ -212,6 +215,19 @@ export const evaluatePreflight = (
     facts.get('PRIVILEGED') === '1' ? 'pass' : 'fail',
   );
   add('curl', 'curl installed', facts.get('CURL') === '1' ? 'pass' : 'fail');
+
+  const container = facts.get('CONTAINER') || 'none';
+
+  add(
+    'iscsi',
+    'iSCSI for Longhorn volumes',
+    container === 'none' ? 'pass' : 'fail',
+    container !== 'none'
+      ? `This server is a ${container} container; Longhorn needs a VM or bare metal`
+      : facts.get('ISCSI') === '1'
+        ? 'open-iscsi installed'
+        : 'open-iscsi is installed during the join',
+  );
 
   const minCpus = role === 'server' ? MIN_CPUS : 1;
   const cpus = number('CPUS');
@@ -330,12 +346,36 @@ export const buildJoinConfig = (options: InstallOptions): string => {
 };
 
 /**
+ * What Longhorn needs on every node, as `deploy/install.sh` sets it up:
+ * open-iscsi with a working iscsid, the iscsi_tcp module at boot, and
+ * multipathd kept off Longhorn's disks. A host where iscsid cannot reach the
+ * kernel (a container) fails the join here.
+ */
+export const LONGHORN_HOST_SETUP = [
+  'if command -v apt-get >/dev/null 2>&1; then',
+  '  export DEBIAN_FRONTEND=noninteractive',
+  '  apt-get -o DPkg::Lock::Timeout=600 update -qq',
+  '  apt-get -o DPkg::Lock::Timeout=600 install -y -qq --no-install-recommends open-iscsi nfs-common',
+  'fi',
+  'modprobe iscsi_tcp || true',
+  'printf "iscsi_tcp\n" >/etc/modules-load.d/acceleratio.conf',
+  'systemctl enable --now iscsid >/dev/null 2>&1 || systemctl enable --now iscsid.socket >/dev/null 2>&1 || true',
+  `if { [ -f /etc/multipath.conf ] || command -v multipathd >/dev/null 2>&1; } && ! grep -q '"IET"' /etc/multipath.conf 2>/dev/null; then`,
+  `  printf '\nblacklist {\n    device {\n        vendor "IET"\n        product "VIRTUAL-DISK"\n    }\n}\n' >>/etc/multipath.conf`,
+  '  systemctl try-restart multipathd >/dev/null 2>&1 || true',
+  'fi',
+  'set +e; iscsiadm -m session >/dev/null 2>&1; rc=$?; set -e',
+  'if [ "$rc" -ne 0 ] && [ "$rc" -ne 21 ]; then echo "iscsid does not work on this server; Longhorn needs a VM or bare metal" >&2; exit 1; fi',
+];
+
+/**
  * Installs k3s at the cluster's version. The config, which carries the join
  * token, arrives on stdin as part of this script, never on a command line.
  */
 export const installScript = (options: InstallOptions): string =>
   [
     'set -euo pipefail',
+    ...LONGHORN_HOST_SETUP,
     'umask 077',
     'mkdir -p /etc/rancher/k3s',
     `cat >/etc/rancher/k3s/config.yaml <<'ACCELERATIO_K3S_CONFIG'`,

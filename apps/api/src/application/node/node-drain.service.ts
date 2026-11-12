@@ -15,7 +15,12 @@ import type {
 import { KubernetesService } from '@/vendor/kubernetes/kubernetes.service';
 import { getKubernetesStatusCode } from '@/vendor/kubernetes/kubernetes-error';
 import { NodeService } from './node.service';
-import { buildDrainPlan } from './node-drain-plan';
+import {
+  buildDrainPlan,
+  LONGHORN_NAMESPACE,
+  type LonghornReplica,
+  type LonghornVolume,
+} from './node-drain-plan';
 import { PRIVILEGED_SHELL, uninstallScript } from './node-join-script';
 import { NodeOperationStore } from './node-operation.store';
 import { createRedactor, SshConnector, validateSshAccess } from './node-ssh';
@@ -46,26 +51,44 @@ export class NodeDrainService {
   async plan(node: string): Promise<NodeDrainPlan> {
     await this.nodes.get(node);
 
-    const [nodes, pods, allPods, budgets, volumes] = await Promise.all([
-      this.kubernetes.coreV1.listNode(),
-      this.kubernetes.coreV1.listPodForAllNamespaces({
-        fieldSelector: `spec.nodeName=${node}`,
-      }),
-      this.kubernetes.coreV1.listPodForAllNamespaces({
-        fieldSelector: 'metadata.namespace=seaweedfs',
-      }),
-      this.kubernetes.policyV1.listPodDisruptionBudgetForAllNamespaces(),
-      this.kubernetes.coreV1.listPersistentVolume(),
-    ]);
+    const [nodes, pods, budgets, volumes, longhornReplicas, longhornVolumes] =
+      await Promise.all([
+        this.kubernetes.coreV1.listNode(),
+        this.kubernetes.coreV1.listPodForAllNamespaces({
+          fieldSelector: `spec.nodeName=${node}`,
+        }),
+        this.kubernetes.policyV1.listPodDisruptionBudgetForAllNamespaces(),
+        this.kubernetes.coreV1.listPersistentVolume(),
+        this.listLonghorn<LonghornReplica>('replicas'),
+        this.listLonghorn<LonghornVolume>('volumes'),
+      ]);
 
     return buildDrainPlan({
       node,
       nodes: nodes.items,
       pods: pods.items,
-      allPods: allPods.items,
       budgets: budgets.items,
       volumes: volumes.items,
+      longhornReplicas,
+      longhornVolumes,
     });
+  }
+
+  /** Longhorn objects of a kind; none when Longhorn is not installed. */
+  private async listLonghorn<T>(plural: string): Promise<T[]> {
+    try {
+      const list =
+        (await this.kubernetes.customObjects.listNamespacedCustomObject({
+          group: 'longhorn.io',
+          version: 'v1beta2',
+          namespace: LONGHORN_NAMESPACE,
+          plural,
+        })) as { items?: T[] };
+
+      return list.items ?? [];
+    } catch {
+      return [];
+    }
   }
 
   /** The newest operation for a node, running or finished. */
@@ -398,9 +421,10 @@ export class NodeDrainService {
       node: pod.spec?.nodeName ?? '',
       nodes: [],
       pods: [pod],
-      allPods: [],
       budgets: [],
       volumes: [],
+      longhornReplicas: [],
+      longhornVolumes: [],
     });
 
     return this.shouldEvict(plan.pods[0]?.action ?? 'skip', force);

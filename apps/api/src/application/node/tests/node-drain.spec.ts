@@ -1,6 +1,10 @@
 import { ConflictException } from '@nestjs/common';
 import type { V1Node, V1Pod } from '@kubernetes/client-node';
-import { buildDrainPlan } from '../node-drain-plan';
+import {
+  buildDrainPlan,
+  type LonghornReplica,
+  type LonghornVolume,
+} from '../node-drain-plan';
 import { NodeDrainService } from '../node-drain.service';
 import { PRIVILEGED_SHELL } from '../node-join-script';
 import { FakeConnector, FakeOperationStore } from './fakes';
@@ -60,9 +64,10 @@ const input = (pods: V1Pod[], nodes = [node('n1', true), node('n2')]) => ({
   node: 'n1',
   nodes,
   pods,
-  allPods: [],
   budgets: [],
   volumes: [],
+  longhornReplicas: [] as LonghornReplica[],
+  longhornVolumes: [] as LonghornVolume[],
 });
 
 describe('buildDrainPlan', () => {
@@ -122,20 +127,62 @@ describe('buildDrainPlan', () => {
     );
   });
 
-  it('blocks removal when the only SeaweedFS volume server is on the node', () => {
-    const seaweed = pod('seaweedfs-volume-0', {
-      labels: { 'app.kubernetes.io/component': 'volume' },
+  it('explains a volume whose only healthy copy is on the node without blocking removal', () => {
+    const replica = (volume: string, node: string, healthy = true) => ({
+      spec: {
+        volumeName: volume,
+        nodeID: node,
+        healthyAt: '2026-11-12T10:00:00Z',
+        failedAt: healthy ? '' : '2026-11-12T11:00:00Z',
+      },
     });
-
-    seaweed.metadata!.namespace = 'seaweedfs';
-
     const plan = buildDrainPlan({
-      ...input([seaweed], [node('n1'), node('n2', true), node('n3', true)]),
-      allPods: [seaweed],
+      ...input([], [node('n1'), node('n2', true)]),
+      longhornReplicas: [
+        replica('pvc-a', 'n1'),
+        replica('pvc-a', 'n2', false),
+        replica('pvc-b', 'n1'),
+        replica('pvc-b', 'n2'),
+      ],
+      longhornVolumes: [
+        {
+          metadata: { name: 'pvc-a' },
+          status: {
+            kubernetesStatus: { namespace: 'project-1', pvcName: 'db' },
+          },
+        },
+      ],
     });
 
-    expect(plan.storage).toHaveLength(1);
-    expect(plan.delete_blockers[0]).toContain('SeaweedFS');
+    expect(plan.storage).toEqual([
+      expect.objectContaining({
+        kind: 'longhorn_replica',
+        namespace: 'project-1',
+        name: 'db',
+      }),
+    ]);
+    expect(plan.storage[0].reason).toContain('copies it to another server');
+    expect(plan.delete_blockers).toEqual([]);
+  });
+
+  it('evicts Longhorn pods and static site pods despite their local volumes', () => {
+    const manager = pod('instance-manager-1', {
+      owner: '',
+      spec: {
+        containers: [],
+        volumes: [{ name: 'dev', hostPath: { path: '/dev' } }],
+      },
+    });
+    const site = pod('site-1', {
+      labels: { 'acceleratio.io/workload-id': 'w1' },
+      spec: { containers: [], volumes: [{ name: 'files', emptyDir: {} }] },
+    });
+
+    manager.metadata!.namespace = 'longhorn-system';
+
+    const plan = buildDrainPlan(input([manager, site]));
+
+    expect(plan.pods.map((item) => item.action)).toEqual(['evict', 'evict']);
   });
 });
 

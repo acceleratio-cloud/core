@@ -109,6 +109,20 @@ describe('preflight', () => {
     ).toEqual(['memory', 'k3s', 'api_server']);
   });
 
+  it('refuses a container, where Longhorn cannot attach volumes', () => {
+    const result = evaluatePreflight(
+      `${passing}\nCONTAINER=lxc`,
+      ['10.0.0.1'],
+      'worker',
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.checks.find((c) => c.id === 'iscsi')).toMatchObject({
+      status: 'fail',
+      detail: expect.stringContaining('lxc container') as unknown,
+    });
+  });
+
   it('only warns when another node is unreachable', () => {
     const result = evaluatePreflight(
       passing.replace('PEER_0=1', 'PEER_0=0'),
@@ -161,6 +175,16 @@ describe('install script', () => {
     expect(commandLines.join('')).not.toContain(TOKEN);
     expect(commandLines[0]).toContain("INSTALL_K3S_VERSION='v1.31.4+k3s1'");
     expect(commandLines[0]).toContain('INSTALL_K3S_EXEC=agent');
+  });
+
+  it('sets up iSCSI for Longhorn before k3s, and fails when iscsid does not work', () => {
+    const script = installScript(options);
+
+    expect(script).toContain('open-iscsi');
+    expect(script).toContain('vendor "IET"');
+    expect(script.indexOf('iscsiadm -m session')).toBeLessThan(
+      script.indexOf('get.k3s.io'),
+    );
   });
 
   it('mirrors the image registry on the new node', () => {

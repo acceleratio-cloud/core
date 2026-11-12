@@ -50,7 +50,12 @@ export interface NodeDrainPod {
 }
 
 export interface NodeStorageRisk {
-  kind: "persistent_volume" | "seaweedfs";
+  /**
+   * `persistent_volume`: data pinned to this node (blocks removal).
+   * `longhorn_replica`: the last healthy copy of a Longhorn volume, which a
+   * drain moves to another node first.
+   */
+  kind: "persistent_volume" | "longhorn_replica";
   namespace: string | null;
   name: string;
   reason: string;
