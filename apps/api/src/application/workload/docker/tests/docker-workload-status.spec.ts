@@ -341,6 +341,25 @@ describe('deriveStatus', () => {
     });
   });
 
+  it('keeps deploying while a new volume is provisioned', () => {
+    expect(
+      deriveStatus(createDeployment(), [
+        createPod(
+          [],
+          [
+            {
+              type: 'PodScheduled',
+              status: 'False',
+              reason: 'Unschedulable',
+              message:
+                '0/1 nodes are available: pod has unbound immediate PersistentVolumeClaims. not found',
+            },
+          ],
+        ),
+      ]),
+    ).toEqual({ status: 'deploying', status_message: null });
+  });
+
   it('keeps a PodScheduled=False pod without Unschedulable deploying', () => {
     expect(
       deriveStatus(createDeployment(), [

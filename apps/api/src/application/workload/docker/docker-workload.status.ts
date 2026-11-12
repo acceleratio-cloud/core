@@ -18,6 +18,7 @@ const REPLICA_FAILURE = 'ReplicaFailure';
 const FALLBACK_REPLICA_FAILURE_MESSAGE = 'Replica creation failed';
 const POD_SCHEDULED = 'PodScheduled';
 const UNSCHEDULABLE = 'Unschedulable';
+const UNBOUND_CLAIMS = 'unbound immediate PersistentVolumeClaims';
 const OOM_KILLED = 'OOMKilled';
 // `spec.replicas` unset means the Deployment controller defaults it to one.
 const IMPLICIT_REPLICAS = 1;
@@ -64,7 +65,13 @@ const findSchedulingFailure = (pod: V1Pod): string | undefined => {
     (condition) => condition.type === POD_SCHEDULED,
   );
 
-  if (scheduled?.status === 'False' && scheduled.reason === UNSCHEDULABLE) {
+  if (
+    scheduled?.status === 'False' &&
+    scheduled.reason === UNSCHEDULABLE &&
+    // A new volume is still being provisioned (Longhorn takes seconds); a
+    // claim that never binds fails the rollout at its progress deadline.
+    !scheduled.message?.includes(UNBOUND_CLAIMS)
+  ) {
     return withDetail(UNSCHEDULABLE, scheduled.message);
   }
 
