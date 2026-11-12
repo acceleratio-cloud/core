@@ -1,5 +1,3 @@
-import { EventEmitter } from 'node:events';
-import type { ClientRequest, IncomingMessage } from 'node:http';
 import { Readable } from 'node:stream';
 import {
   BadGatewayException,
@@ -7,10 +5,7 @@ import {
   ConflictException,
   NotFoundException,
 } from '@nestjs/common';
-import type {
-  FilerRequest,
-  SeaweedfsFilerClient,
-} from '@/vendor/seaweedfs/seaweedfs-filer.client';
+import type { S3StorageClient } from '@/vendor/s3/s3.client';
 import type { S3BucketWorkloadService } from '../s3-bucket.service';
 import {
   contentDisposition,
@@ -19,10 +14,6 @@ import {
 } from '../s3-bucket-objects.service';
 
 // Both pull the ESM-only Kubernetes client; every instance here is faked.
-jest.mock('@/vendor/seaweedfs/seaweedfs-filer.client', () => ({
-  ...jest.requireActual<object>('@/vendor/seaweedfs/seaweedfs-filer.client'),
-  SeaweedfsFilerClient: class SeaweedfsFilerClient {},
-}));
 jest.mock('@/vendor/kubernetes/kubernetes.service', () => ({
   KubernetesService: class KubernetesService {},
 }));
@@ -32,57 +23,15 @@ jest.mock('../s3-bucket.service', () => ({
 
 const projectId = '2f1c9a3e-8b7d-4e6f-9a0b-1c2d3e4f5a6b';
 const workloadId = '3f9a1b2c-4d5e-6f70-8192-a3b4c5d6e7f8';
-const DIR = 2 ** 31 + 0o755;
-
-const response = (
-  status: number,
-  body: unknown = '',
-  headers: Record<string, string> = {},
-): IncomingMessage =>
-  Object.assign(
-    Readable.from([
-      Buffer.from(typeof body === 'string' ? body : JSON.stringify(body)),
-    ]),
-    { statusCode: status, headers },
-  ) as unknown as IncomingMessage;
-
-/** A ClientRequest stand-in that keeps what an upload writes. */
-const recordingRequest = () => {
-  const emitter = new EventEmitter();
-  const chunks: Buffer[] = [];
-  const request = Object.assign(emitter, {
-    write: (chunk: Buffer) => {
-      chunks.push(chunk);
-      return true;
-    },
-    end: (chunk?: Buffer) => {
-      if (chunk) {
-        chunks.push(chunk);
-      }
-      emitter.emit('finish');
-    },
-    destroy: jest.fn(),
-  });
-
-  return {
-    request: request as unknown as ClientRequest,
-    text: () => Buffer.concat(chunks).toString('utf8'),
-    finished: new Promise((resolve) => emitter.once('finish', resolve)),
-  };
-};
 
 const createService = (status: 'running' | 'deploying' = 'running') => {
-  const requests: FilerRequest[] = [];
-  const replies: (IncomingMessage | Error)[] = [];
-  const filer = {
-    request: jest.fn((input: FilerRequest) => {
-      requests.push(input);
-      const reply = replies.shift() ?? response(200, '{}');
-
-      return reply instanceof Error
-        ? Promise.reject(reply)
-        : Promise.resolve(reply);
-    }),
+  const s3 = {
+    list: jest.fn().mockResolvedValue({ Contents: [], CommonPrefixes: [] }),
+    head: jest.fn().mockResolvedValue(null),
+    get: jest.fn().mockResolvedValue(null),
+    put: jest.fn().mockResolvedValue(0),
+    delete: jest.fn().mockResolvedValue(undefined),
+    deletePrefix: jest.fn().mockResolvedValue(0),
   };
   const buckets = {
     readyBucket: jest.fn(() =>
@@ -95,103 +44,92 @@ const createService = (status: 'running' | 'deploying' = 'running') => {
   };
   const service = new S3BucketObjectsService(
     buckets as unknown as S3BucketWorkloadService,
-    filer as unknown as SeaweedfsFilerClient,
+    s3 as unknown as S3StorageClient,
   );
 
-  return { service, requests, replies };
+  return { service, s3 };
 };
 
 describe('S3BucketObjectsService.list', () => {
   it('lists one folder, folders first, as keys from the bucket root', async () => {
-    const { service, requests, replies } = createService();
+    const { service, s3 } = createService();
 
-    replies.push(
-      response(200, {
-        Entries: [
+    s3.list.mockResolvedValue({
+      CommonPrefixes: [{ Prefix: 'docs/2026/' }],
+      Contents: [
+        { Key: 'docs/', Size: 0 },
+        {
+          Key: 'docs/report 10.pdf',
+          Size: 2048,
+          LastModified: new Date('2026-11-04T10:00:00Z'),
+        },
+        { Key: 'docs/report 9.pdf', Size: 10 },
+      ],
+      IsTruncated: true,
+    });
+
+    await expect(service.list(projectId, workloadId, '/docs')).resolves.toEqual(
+      {
+        prefix: 'docs/',
+        truncated: true,
+        entries: [
           {
-            FullPath: '/buckets/demo-assets/docs/report 10.pdf',
-            Mode: 0o644,
-            Mime: 'application/pdf',
-            FileSize: 2048,
-            Mtime: '2026-11-04T10:00:00Z',
+            name: '2026',
+            path: 'docs/2026/',
+            kind: 'folder',
+            size: null,
+            content_type: null,
+            modified_at: null,
           },
           {
-            FullPath: '/buckets/demo-assets/docs/2026',
-            Mode: DIR,
-            Mtime: '2026-11-04T09:00:00Z',
+            name: 'report 9.pdf',
+            path: 'docs/report 9.pdf',
+            kind: 'file',
+            size: 10,
+            content_type: null,
+            modified_at: null,
           },
           {
-            FullPath: '/buckets/demo-assets/docs/report 9.pdf',
-            Mode: 0o644,
-            FileSize: 10,
+            name: 'report 10.pdf',
+            path: 'docs/report 10.pdf',
+            kind: 'file',
+            size: 2048,
+            content_type: null,
+            modified_at: '2026-11-04T10:00:00.000Z',
           },
         ],
-        ShouldDisplayLoadMore: true,
-      }),
+      },
     );
-
-    const listing = await service.list(projectId, workloadId, '/docs');
-
-    expect(requests[0]).toMatchObject({
-      method: 'GET',
-      path: '/buckets/demo-assets/docs/',
-      query: { limit: '1000' },
-      headers: { Accept: 'application/json' },
-    });
-    expect(listing).toEqual({
-      prefix: 'docs/',
-      truncated: true,
-      entries: [
-        {
-          name: '2026',
-          path: 'docs/2026/',
-          kind: 'folder',
-          size: null,
-          content_type: null,
-          modified_at: '2026-11-04T09:00:00Z',
-        },
-        expect.objectContaining({
-          name: 'report 9.pdf',
-          kind: 'file',
-          size: 10,
-        }),
-        expect.objectContaining({
-          name: 'report 10.pdf',
-          path: 'docs/report 10.pdf',
-          content_type: 'application/pdf',
-          size: 2048,
-        }),
-      ],
+    expect(s3.list).toHaveBeenCalledWith('demo-assets', 'docs/', {
+      delimiter: '/',
+      maxKeys: 1000,
     });
   });
 
-  it('encodes each segment of the path', async () => {
-    const { service, requests, replies } = createService();
+  it('lists an empty bucket root', async () => {
+    const { service } = createService();
 
-    replies.push(response(200, { Entries: null }));
-
-    await expect(
-      service.list(projectId, workloadId, 'my résumé/a#b'),
-    ).resolves.toMatchObject({ entries: [], truncated: false });
-    expect(requests[0].path).toBe(
-      '/buckets/demo-assets/my%20r%C3%A9sum%C3%A9/a%23b/',
-    );
+    await expect(service.list(projectId, workloadId, '')).resolves.toEqual({
+      prefix: '',
+      entries: [],
+      truncated: false,
+    });
   });
 
   it('reports a missing folder as 404', async () => {
-    const { service, replies } = createService();
+    const { service } = createService();
 
-    replies.push(response(404));
-
-    await expect(service.list(projectId, workloadId, 'gone')).rejects.toThrow(
-      NotFoundException,
-    );
+    await expect(
+      service.list(projectId, workloadId, 'missing/'),
+    ).rejects.toThrow(new NotFoundException('Folder not found'));
   });
 
-  it('turns an unreachable filer into 502', async () => {
-    const { service, replies } = createService();
+  it('passes an unreachable store on as 502', async () => {
+    const { service, s3 } = createService();
 
-    replies.push(new Error('ECONNREFUSED'));
+    s3.list.mockRejectedValue(
+      new BadGatewayException('Object storage could not list the folder'),
+    );
 
     await expect(service.list(projectId, workloadId, '')).rejects.toThrow(
       BadGatewayException,
@@ -199,20 +137,18 @@ describe('S3BucketObjectsService.list', () => {
   });
 
   it('refuses a bucket that is not ready', async () => {
-    const { service, requests } = createService('deploying');
+    const { service, s3 } = createService('deploying');
 
     await expect(service.list(projectId, workloadId, '')).rejects.toThrow(
       'The bucket is still being created',
     );
-    expect(requests).toHaveLength(0);
+    expect(s3.list).not.toHaveBeenCalled();
   });
 });
 
 describe('S3BucketObjectsService.createFolder', () => {
-  it('makes the folder when the name is free', async () => {
-    const { service, requests, replies } = createService();
-
-    replies.push(response(404), response(201, '{"name":"new"}'));
+  it('writes an empty marker object when the name is free', async () => {
+    const { service, s3 } = createService();
 
     await expect(
       service.createFolder(projectId, workloadId, 'docs/new'),
@@ -221,112 +157,87 @@ describe('S3BucketObjectsService.createFolder', () => {
       path: 'docs/new/',
       kind: 'folder',
     });
-    expect(requests[0]).toMatchObject({
-      path: '/buckets/demo-assets/docs/new',
-      query: { metadata: 'true' },
-    });
-    expect(requests[1]).toMatchObject({
-      method: 'POST',
-      path: '/buckets/demo-assets/docs/new/',
-      query: { op: 'mkdir' },
-    });
+    expect(s3.head).toHaveBeenCalledWith('demo-assets', 'docs/new');
+    expect(s3.put).toHaveBeenCalledWith(
+      'demo-assets',
+      'docs/new/',
+      Buffer.alloc(0),
+      'application/octet-stream',
+    );
   });
 
   it('refuses a name a file or folder already has', async () => {
-    const { service, requests, replies } = createService();
+    const { service, s3 } = createService();
 
-    replies.push(
-      response(200, { FullPath: '/buckets/demo-assets/docs', Mode: DIR }),
-    );
-
+    s3.head.mockResolvedValueOnce({ ContentLength: 3 });
     await expect(
       service.createFolder(projectId, workloadId, 'docs'),
     ).rejects.toThrow(ConflictException);
-    expect(requests).toHaveLength(1);
+
+    s3.list.mockResolvedValueOnce({ Contents: [{ Key: 'docs/a.txt' }] });
+    await expect(
+      service.createFolder(projectId, workloadId, 'docs'),
+    ).rejects.toThrow(ConflictException);
+    expect(s3.put).not.toHaveBeenCalled();
   });
 
-  it('validates the path before calling the filer', async () => {
-    const { service, requests } = createService();
+  it('validates the path before calling S3', async () => {
+    const { service, s3 } = createService();
 
     await expect(
       service.createFolder(projectId, workloadId, 'a/../b'),
     ).rejects.toThrow(BadRequestException);
-    expect(requests).toHaveLength(0);
+    expect(s3.head).not.toHaveBeenCalled();
   });
 });
 
 describe('S3BucketObjectsService.upload', () => {
-  it('streams the body to the filer as one multipart part', async () => {
-    const { service, requests, replies } = createService();
-    const recording = recordingRequest();
+  it('streams the body to its key with its content type', async () => {
+    const { service, s3 } = createService();
+    const body = Readable.from(['hello']);
 
-    replies.push(response(201, '{"name":"a.txt","size":5}'));
+    s3.put.mockResolvedValue(5);
 
-    const uploaded = service.upload(
-      projectId,
-      workloadId,
-      'docs/a "b".txt',
-      Readable.from([Buffer.from('he'), Buffer.from('llo')]),
-      'text/plain',
-    );
-
-    // The service resolves after the filer answers; drive the body first.
-    await new Promise((resolve) => setImmediate(resolve));
-    const body = requests[0].body as (request: ClientRequest) => void;
-
-    body(recording.request);
-    await recording.finished;
-
-    await expect(uploaded).resolves.toMatchObject({
-      path: 'docs/a "b".txt',
+    await expect(
+      service.upload(projectId, workloadId, 'docs/a.txt', body, 'text/plain'),
+    ).resolves.toMatchObject({
+      name: 'a.txt',
+      path: 'docs/a.txt',
+      kind: 'file',
       size: 5,
       content_type: 'text/plain',
     });
-
-    const boundary = /boundary=(.+)$/.exec(
-      requests[0].headers!['Content-Type'],
-    )![1];
-
-    expect(requests[0].path).toBe('/buckets/demo-assets/docs/a%20%22b%22.txt');
-    expect(recording.text()).toBe(
-      `--${boundary}\r\n` +
-        'Content-Disposition: form-data; name="file"; filename="a _b_.txt"\r\n' +
-        'Content-Type: text/plain\r\n\r\n' +
-        'hello' +
-        `\r\n--${boundary}--\r\n`,
+    expect(s3.put).toHaveBeenCalledWith(
+      'demo-assets',
+      'docs/a.txt',
+      body,
+      'text/plain',
     );
   });
 
   it('refuses a folder key', async () => {
-    const { service } = createService();
+    const { service, s3 } = createService();
 
     await expect(
-      service.upload(
-        projectId,
-        workloadId,
-        'docs/',
-        Readable.from([]),
-        undefined,
-      ),
+      service.upload(projectId, workloadId, 'docs/', Readable.from([]), ''),
     ).rejects.toThrow('File path cannot end with /');
+    expect(s3.put).not.toHaveBeenCalled();
   });
 });
 
 describe('S3BucketObjectsService.download', () => {
   it('streams the file with its type and length', async () => {
-    const { service, replies } = createService();
-    const body = response(200, 'hello', {
-      'content-type': 'text/plain',
-      'content-length': '5',
+    const { service, s3 } = createService();
+    const body = Readable.from(['hello']);
+
+    s3.get.mockResolvedValue({
+      Body: body,
+      ContentType: 'text/plain',
+      ContentLength: 5,
     });
 
-    replies.push(
-      response(200, { FullPath: '/buckets/demo-assets/a.txt', Mode: 0o644 }),
-      body,
-    );
-
     await expect(
-      service.download(projectId, workloadId, 'a.txt'),
+      service.download(projectId, workloadId, 'docs/a.txt'),
     ).resolves.toEqual({
       name: 'a.txt',
       contentType: 'text/plain',
@@ -336,58 +247,47 @@ describe('S3BucketObjectsService.download', () => {
   });
 
   it('refuses a folder and a missing file', async () => {
-    const { service, replies } = createService();
+    const { service, s3 } = createService();
 
-    replies.push(
-      response(200, { FullPath: '/buckets/demo-assets/docs', Mode: DIR }),
-    );
+    s3.list.mockResolvedValueOnce({ Contents: [{ Key: 'docs/a.txt' }] });
     await expect(
       service.download(projectId, workloadId, 'docs'),
-    ).rejects.toThrow('This path is a folder');
-
-    replies.push(response(404));
+    ).rejects.toThrow(new BadRequestException('This path is a folder'));
     await expect(
-      service.download(projectId, workloadId, 'nope'),
-    ).rejects.toThrow('File not found');
+      service.download(projectId, workloadId, 'missing.txt'),
+    ).rejects.toThrow(new NotFoundException('File not found'));
   });
 });
 
 describe('S3BucketObjectsService.remove', () => {
   it('deletes a folder with its contents', async () => {
-    const { service, requests, replies } = createService();
+    const { service, s3 } = createService();
 
-    replies.push(response(204));
+    s3.deletePrefix.mockResolvedValue(3);
 
     await service.remove(projectId, workloadId, 'docs', 'folder');
-
-    expect(requests[0]).toMatchObject({
-      method: 'DELETE',
-      path: '/buckets/demo-assets/docs/',
-      query: { recursive: 'true' },
-    });
+    expect(s3.deletePrefix).toHaveBeenCalledWith('demo-assets', 'docs/');
   });
 
-  it('deletes one file', async () => {
-    const { service, requests, replies } = createService();
+  it('deletes one file and nothing that only starts with its name', async () => {
+    const { service, s3 } = createService();
 
-    replies.push(response(204));
+    s3.head.mockResolvedValue({ ContentLength: 3 });
 
     await service.remove(projectId, workloadId, 'docs/a.txt', 'file');
-
-    expect(requests[0]).toMatchObject({
-      path: '/buckets/demo-assets/docs/a.txt',
-      query: {},
-    });
+    expect(s3.delete).toHaveBeenCalledWith('demo-assets', 'docs/a.txt');
+    expect(s3.deletePrefix).not.toHaveBeenCalled();
   });
 
-  it('maps a filer error to 502', async () => {
-    const { service, replies } = createService();
-
-    replies.push(response(500, 'boom'));
+  it('reports what is not there as 404', async () => {
+    const { service } = createService();
 
     await expect(
-      service.remove(projectId, workloadId, 'docs/a.txt', 'file'),
-    ).rejects.toThrow('SeaweedFS could not delete the file');
+      service.remove(projectId, workloadId, 'docs', 'folder'),
+    ).rejects.toThrow('Folder not found');
+    await expect(
+      service.remove(projectId, workloadId, 'a.txt', 'file'),
+    ).rejects.toThrow('File not found');
   });
 });
 

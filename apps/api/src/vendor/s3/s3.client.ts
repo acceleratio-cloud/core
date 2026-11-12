@@ -1,6 +1,7 @@
 import type { Readable } from 'node:stream';
 import { BadGatewayException, Injectable, Logger } from '@nestjs/common';
 import {
+  DeleteObjectCommand,
   DeleteObjectsCommand,
   GetObjectCommand,
   type GetObjectCommandOutput,
@@ -186,6 +187,13 @@ export class S3StorageClient {
 
       return size;
     });
+  }
+
+  /** Deletes one object; a missing one is not an error, as in S3. */
+  async delete(bucket: string, key: string): Promise<void> {
+    await this.run('delete the file', (client) =>
+      client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key })),
+    );
   }
 
   /** Deletes every object whose key starts with `prefix`; resolves with how many. */
