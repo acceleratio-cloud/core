@@ -49,8 +49,12 @@ export const VOLUME_DEPLOYMENT_STRATEGY = 'Recreate';
 export const ENV_SECRET_INFIX = '-env-';
 export const VOLUME_ID_LABEL = 'acceleratio.io/volume-id';
 export const VOLUME_CLAIM_INFIX = '-vol-';
-/** SeaweedFS mounts can be shared, so every replica and rollout can attach. */
-export const VOLUME_ACCESS_MODE = 'ReadWriteMany';
+/**
+ * A Longhorn volume is a block device on one server at a time, so a service
+ * with a volume runs one pod (see `normalizeDockerConfig`) and redeploys with
+ * `Recreate`.
+ */
+export const VOLUME_ACCESS_MODE = 'ReadWriteOnce';
 
 /**
  * The whole id as 32 hex characters. A shorter prefix could repeat between

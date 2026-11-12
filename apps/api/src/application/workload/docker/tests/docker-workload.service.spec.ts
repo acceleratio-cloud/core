@@ -242,7 +242,7 @@ const createService = () => {
   };
   const storageClasses = {
     kubernetesName: jest.fn((id: string | null) =>
-      Promise.resolve(id === null ? 'seaweedfs-storage' : `sc-${id}`),
+      Promise.resolve(id === null ? 'longhorn' : `sc-${id}`),
     ),
     assertVolumeProfile: jest.fn(() => Promise.resolve()),
   };
@@ -1641,7 +1641,7 @@ describe('DockerWorkloadService volumes', () => {
           name: `${externalName}-vol-7c8d9e0f1a2b4c3d8e4f5a6b7c8d9e0f`,
         },
         spec: {
-          storageClassName: 'seaweedfs-storage',
+          storageClassName: 'longhorn',
           resources: { requests: { storage: '10Gi' } },
         },
       },

@@ -224,7 +224,7 @@ describe('WorkloadService.removeProject', () => {
   it('still deletes the project when a service cannot be removed', async () => {
     const { docker, future, projectService, service } = setup();
 
-    docker.remove.mockRejectedValue(new Error('SeaweedFS is down'));
+    docker.remove.mockRejectedValue(new Error('storage is down'));
 
     await service.removeProject(projectId);
 

@@ -15,6 +15,9 @@ export const CPU_MAX_MIN = 0.01;
 export const CPU_MAX_MAX = 64;
 export const RAM_MAX_MIN = 16;
 export const RAM_MAX_MAX = 262144;
+export const VOLUME_REPLICAS_MESSAGE =
+  'A service with a volume runs one instance: a volume is attached to one server at a time';
+
 /** Pods a service runs when `replicas` is unset. */
 export const DEFAULT_REPLICAS = 1;
 export const REPLICAS_MIN = 1;
@@ -404,6 +407,11 @@ export const normalizeDockerConfig = (
 
   if (volumes !== undefined) {
     normalized.volumes = volumes;
+  }
+
+  // A volume attaches to one server at a time (ReadWriteOnce).
+  if (volumes?.length && (replicas ?? DEFAULT_REPLICAS) > 1) {
+    throw new BadRequestException(VOLUME_REPLICAS_MESSAGE);
   }
 
   return normalized;
