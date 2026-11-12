@@ -3,8 +3,8 @@
 # Acceleratio updater.
 #
 # Updates an installation made by deploy/install.sh to the versions pinned in
-# the target install.sh: k3s, Helm, Cilium, SeaweedFS, the SeaweedFS CSI
-# driver, VictoriaMetrics, VictoriaLogs, the CloudNativePG operator and
+# the target install.sh: k3s, Helm, Cilium, Longhorn, RustFS (and its rc
+# client), VictoriaMetrics, VictoriaLogs, the CloudNativePG operator and
 # Acceleratio (API and console).
 #
 # It prints a plan, takes a backup, runs the target install.sh (which is
@@ -175,9 +175,9 @@ usage() {
 Acceleratio updater
 
 Updates an installation made by deploy/install.sh to the versions pinned in
-the target install.sh: k3s, Helm, Cilium, SeaweedFS, the SeaweedFS CSI driver,
-VictoriaMetrics, VictoriaLogs, the CloudNativePG operator and Acceleratio
-(API and console).
+the target install.sh: k3s, Helm, Cilium, Longhorn, RustFS (and its rc
+client), VictoriaMetrics, VictoriaLogs, the CloudNativePG operator and
+Acceleratio (API and console).
 
 It prints the plan (current -> target version), backs up the database and the
 cluster state, runs the target install.sh, verifies the result and, if the
@@ -505,14 +505,14 @@ postgres_major() {
 }
 
 collect_plan() {
-  local ns seaweed_ns seaweed_rel csi_rel vm_ns vm_rel vl_ns vl_rel cnpg_ns cnpg_rel
+  local ns lh_ns lh_rel rustfs_ns vm_ns vm_rel vl_ns vl_rel cnpg_ns cnpg_rel
   local target api_image console_image pg_image cur
   local version
 
   ns="$(target_of ACCELERATIO_NAMESPACE)"
-  seaweed_ns="$(target_of SEAWEEDFS_NAMESPACE)"
-  seaweed_rel="$(target_of SEAWEEDFS_RELEASE)"
-  csi_rel="$(target_of SEAWEEDFS_CSI_RELEASE)"
+  lh_ns="$(target_of LONGHORN_NAMESPACE)"
+  lh_rel="$(target_of LONGHORN_RELEASE)"
+  rustfs_ns="$(target_of RUSTFS_NAMESPACE)"
   vm_ns="$(target_of VICTORIAMETRICS_NAMESPACE)"
   vm_rel="$(target_of VICTORIAMETRICS_RELEASE)"
   vl_ns="$(target_of VICTORIALOGS_NAMESPACE)"
@@ -524,8 +524,7 @@ collect_plan() {
   NAMESPACE="$ns"
   HELM_RELEASES=(
     "cilium|kube-system"
-    "${seaweed_rel}|${seaweed_ns}"
-    "${csi_rel}|${seaweed_ns}"
+    "${lh_rel}|${lh_ns}"
     "${vm_rel}|${vm_ns}"
     "${vl_rel}|${vl_ns}"
     "${cnpg_rel}|${cnpg_ns}"
@@ -539,8 +538,18 @@ collect_plan() {
   fi
   add_row "Helm" "$(current_helm_version)" "$(target_of HELM_VERSION)"
   add_row "Cilium" "$(helm_chart_version cilium kube-system)" "$(target_of CILIUM_VERSION)"
-  add_row "SeaweedFS" "$(helm_chart_version "$seaweed_rel" "$seaweed_ns")" "$(target_of SEAWEEDFS_CHART_VERSION)"
-  add_row "SeaweedFS CSI" "$(helm_chart_version "$csi_rel" "$seaweed_ns")" "$(target_of SEAWEEDFS_CSI_CHART_VERSION)"
+  if [ "$(target_of STORAGE_BACKEND)" = "longhorn" ]; then
+    add_row "Longhorn" "$(helm_chart_version "$lh_rel" "$lh_ns")" "$(target_of LONGHORN_CHART_VERSION)"
+  fi
+  # RustFS is replaced in place (Recreate); its data stays on the volume.
+  # Images are shown without their digest.
+  cur="$(current_image deployment rustfs "$rustfs_ns")"
+  target="$(target_of RUSTFS_IMAGE)"
+  add_row "RustFS" "${cur%%@*}" "${target%%@*}"
+  cur="$(kubectl -n "$ns" get deployment api \
+    -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="RUSTFS_RC_IMAGE")].value}' 2>/dev/null || true)"
+  target="$(target_of RC_IMAGE)"
+  add_row "RustFS rc client" "${cur%%@*}" "${target%%@*}"
   add_row "VictoriaMetrics" "$(helm_chart_version "$vm_rel" "$vm_ns")" "$(target_of VICTORIAMETRICS_CHART_VERSION)"
   add_row "VictoriaLogs" "$(helm_chart_version "$vl_rel" "$vl_ns")" "$(target_of VICTORIALOGS_CHART_VERSION)"
   add_row "CloudNativePG" "$(helm_chart_version "$cnpg_rel" "$cnpg_ns")" "$(target_of CNPG_CHART_VERSION)"
@@ -604,11 +613,12 @@ minor_of() {
 }
 
 check_version_skips() {
-  # k3s (Kubernetes) and Cilium support upgrades one minor version at a time.
+  # k3s (Kubernetes), Cilium and Longhorn support upgrades one minor version
+  # at a time.
   local i name cur tgt cur_mm tgt_mm found=0
   for i in "${!PLAN_NAMES[@]}"; do
     name="${PLAN_NAMES[$i]}"
-    case "$name" in k3s|Cilium) ;; *) continue ;; esac
+    case "$name" in k3s|Cilium|Longhorn) ;; *) continue ;; esac
     cur_mm="$(minor_of "${PLAN_CURRENT[$i]}")"
     tgt_mm="$(minor_of "${PLAN_TARGET[$i]}")"
     [ -n "$cur_mm" ] && [ -n "$tgt_mm" ] || continue
@@ -749,8 +759,8 @@ not_ready_nodes() {
     awk '$2 != "True" { print $1 }'
 }
 
-# check_nodes_ready: the install rolls DaemonSets (Cilium, the SeaweedFS CSI
-# driver) out to every node and waits for each one. A node that is down never
+# check_nodes_ready: the install rolls DaemonSets (Cilium, the Longhorn
+# manager and CSI plugin) out to every node and waits for each one. A node that is down never
 # reports its pod, so the wait times out after many minutes and the update
 # rolls back. Stop here instead, before the backup, and say which node it is.
 check_nodes_ready() {
@@ -949,6 +959,9 @@ rollback() {
   fi
   if [ -f "${BACKUP_DIR}/manifests/traefik-config.yaml" ]; then
     kubectl apply -f "${BACKUP_DIR}/manifests/traefik-config.yaml" >/dev/null 2>&1 || true
+  fi
+  if [ -f "${BACKUP_DIR}/manifests/rustfs.yaml" ]; then
+    kubectl apply -f "${BACKUP_DIR}/manifests/rustfs.yaml" >/dev/null 2>&1 || true
   fi
 
   print_recovery_help

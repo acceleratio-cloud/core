@@ -7,8 +7,12 @@ other hardware. It provisions a single-node Kubernetes cluster:
 - k3s `v1.36.5+k3s1` with embedded etcd
 - Cilium `1.20.4` as the CNI, replacing flannel and kube-proxy
 - Helm `3.18.0`
-- SeaweedFS `4.51.0` (master, volume, filer and S3)
-- SeaweedFS CSI `0.2.43` with the default StorageClass `seaweedfs-storage`
+- Longhorn `1.13.0` block storage (engine v1, iSCSI) with the default
+  StorageClass `longhorn`: one replica per volume by default, data under
+  `/var/lib/longhorn`
+- RustFS `1.0.5` as the S3 object store, one pod on a 50 GiB Longhorn volume
+  in the `rustfs` namespace: project buckets, PostgreSQL backups and static
+  site files; see [Object storage (RustFS)](#object-storage-rustfs)
 - VictoriaMetrics single node (chart `0.50.0`), which scrapes kubelet and
   cAdvisor metrics for the project Observability tab and keeps 14 days on the
   server's own disk (`/var/lib/victoria-metrics`)
@@ -19,7 +23,7 @@ other hardware. It provisions a single-node Kubernetes cluster:
   collected. Together they use about 90 MiB of memory at rest and about 110 MiB
   at 1,000 lines/s (limits 256 MiB and 160 MiB)
 - An image registry (zot `v2.1.23`) for services built from GitHub, on a
-  50 GiB SeaweedFS volume; see [Image registry](#image-registry)
+  50 GiB Longhorn volume; see [Image registry](#image-registry)
 
 and then deploys Acceleratio into the `acceleratio` namespace:
 
@@ -36,11 +40,12 @@ Cluster bootstrap verified on Ubuntu 24.04.5 (4 vCPU, 8 GiB RAM), Ubuntu 22.04.5
 11 GiB RAM, kernel 5.15) and Debian 12 (6 vCPU, 11 GiB RAM), with and without
 Docker. The test matrix covered a fresh install, the stdin/one-line path
 (`bash -s --`), an idempotent re-run, a reboot, an external kubeconfig, a
-PVC/DNS smoke test, S3 authentication, an etcd snapshot, live uninstall and
-reinstall, `--reset --yes`, `--help`, `--config`, a custom
-namespace/StorageClass/`CONFIG_DIR`/`LOG_DIR` with S3 disabled, and the
-sqlite, swap and port-conflict preflight refusals. The Acceleratio
-deployment step has been checked with `--dry-run` and manifest validation only.
+PVC/DNS smoke test, an etcd snapshot, live uninstall and reinstall,
+`--reset --yes`, `--help`, `--config`, a custom
+namespace/StorageClass/`CONFIG_DIR`/`LOG_DIR`, and the sqlite, swap and
+port-conflict preflight refusals. The Longhorn and RustFS storage layer was
+verified on Ubuntu 24.04 (4 vCPU, 8 GiB RAM, 51 GB disk, UFW enabled): a fresh
+install, a re-run, `--reset` and `uninstall.sh`.
 
 ## Requirements
 
@@ -49,9 +54,15 @@ deployment step has been checked with `--dry-run` and manifest validation only.
 - 2 vCPU, 4 GiB RAM and 20 GiB free disk recommended
   (the script refuses less than 2 GiB RAM and 10 GiB disk)
 - Linux kernel 5.10 or newer
-- `/dev/fuse` available on the host
-- outbound HTTPS to `get.k3s.io`, `get.helm.sh`, `quay.io`, GitHub Pages and
-  Docker Hub (the smoke test pulls `busybox:1.36`)
+- a VM or bare metal: Longhorn attaches volumes over iSCSI, which LXC and
+  OpenVZ containers cannot run (the installer stops before making changes
+  there; `STORAGE_BACKEND=local-path` is for development machines only)
+- disks with power-loss protection (or a battery-backed controller) for
+  production data: Longhorn writes with `O_DIRECT` but does not send a cache
+  flush to the disk on `fsync`
+- outbound HTTPS to `get.k3s.io`, `get.helm.sh`, `quay.io`,
+  `charts.longhorn.io`, GitHub Pages and Docker Hub (the smoke test pulls
+  `busybox:1.36`)
 - ports `30300/tcp` (console) and `30080/tcp` (API) reachable from the browsers
   that will use the dashboard
 - ports `6443/tcp`, `80/tcp`, `443/tcp` free; `8472/udp` between nodes if the
@@ -59,8 +70,10 @@ deployment step has been checked with `--dry-run` and manifest validation only.
   a [custom domain](#custom-domain)
 - swap disabled (or `ALLOW_SWAP=1` if you accept the kubelet risk)
 
-OpenVZ/LXC hosts often do not expose `/dev/fuse`; the installer stops
-before making changes if FUSE is unavailable.
+Ubuntu Server runs `multipathd`, which would claim Longhorn's disks. The
+installer adds a blacklist for Longhorn's devices only (vendor `IET`, product
+`VIRTUAL-DISK`) to `/etc/multipath.conf` and restarts `multipathd`; the host's
+own multipath setup is left alone.
 
 ## Quick start
 
@@ -115,10 +128,12 @@ log is also linked as `/var/log/acceleratio/install.log`.
 
 ## What the script does
 
-1. **Preflight** — OS, architecture, kernel, memory, disk, swap, FUSE, ports,
-   DNS/HTTPS and any existing k3s datastore.
-2. **Host packages** — `curl`, `fuse3`, `iptables`, `conntrack`, `socat`, etc.
-   and `net.ipv4.ip_forward=1`. Waits for a cloud-init or unattended-upgrades
+1. **Preflight** — OS, architecture, kernel, memory, disk, swap, LXC/OpenVZ,
+   ports, DNS/HTTPS and any existing k3s datastore.
+2. **Host packages** — `curl`, `iptables`, `conntrack`, `socat`, etc.,
+   `open-iscsi` and `nfs-common` for Longhorn (with `iscsid` enabled, the
+   `iscsi_tcp` module loaded at boot and checked to work) and
+   `net.ipv4.ip_forward=1`. Waits for a cloud-init or unattended-upgrades
    apt/dpkg lock before installing. If UFW is active, it adds allow rules
    (tagged `acceleratio-cluster`) for traffic from the pod and service CIDRs
    (`K3S_CLUSTER_CIDR`, `K3S_SERVICE_CIDR`) and for traffic routed from and to
@@ -132,14 +147,23 @@ log is also linked as `/var/log/acceleratio/install.log`.
 5. **Cilium** — installs Cilium with `kubeProxyReplacement: true` and the
    CNI paths used by k3s 1.36 (`/etc/cni/net.d` and `/opt/cni/bin`), then waits
    for the node and CoreDNS.
-6. **SeaweedFS** — installs master, volume, filer and the in-cluster S3
-   endpoint. SeaweedFS state lives on hostPath under `/var/lib/seaweedfs`.
-7. **Storage** — installs the SeaweedFS CSI driver, creates the configured
-   StorageClass (default `seaweedfs-storage`), marks it default and removes
-   the default annotation from any other StorageClass.
-8. **Verification** — checks nodes, Cilium, SeaweedFS and runs a PVC + DNS
-   smoke test that writes and reads a file through the default StorageClass.
-9. **Acceleratio** — generates the database password and session secret (kept
+6. **Longhorn** — installs the chart (UI off, one replica of each controller,
+   over-provisioning 300% because volumes are thin, drains move the last
+   replica of a volume before the node goes) and waits for every node to be
+   Ready in Longhorn. Data lives under `/var/lib/longhorn`.
+7. **Storage** — writes the StorageClass `longhorn`
+   (`numberOfReplicas: LONGHORN_REPLICAS`, `dataLocality: best-effort`, ext4,
+   expandable), marks it default and removes the default annotation from any
+   other StorageClass.
+8. **RustFS** — creates the admin keys once (Secret `rustfs/rustfs-root`), the
+   volume `rustfs-data`, the Deployment (one pod, `Recreate`, writes
+   acknowledged after `fdatasync`) and the Service `rustfs:9000`, then the
+   platform bucket `acceleratio-sites`.
+9. **Verification** — checks nodes, Cilium, Longhorn and RustFS, runs a PVC +
+   DNS smoke test that writes and reads a file through the default
+   StorageClass, and an S3 smoke test that writes, reads and deletes an object
+   in a temporary bucket.
+10. **Acceleratio** — generates the database password and session secret (kept
    in `/etc/acceleratio/acceleratio.env`), applies
    `/etc/acceleratio/manifests/acceleratio.yaml` and waits for PostgreSQL, the
    API and the console to become ready. The console and API are published on
@@ -183,14 +207,18 @@ Every variable can be set in the environment or in a file passed to
 | `CILIUM_CNI_CONF_PATH` | `/etc/cni/net.d` | CNI config directory used by the container runtime |
 | `CILIUM_CNI_BIN_PATH` | `/opt/cni/bin` | CNI plugin directory used by the container runtime |
 | `HELM_VERSION` | `3.18.0` | Helm binary version |
-| `SEAWEEDFS_CHART_VERSION` | `4.51.0` | SeaweedFS chart version |
-| `SEAWEEDFS_CSI_CHART_VERSION` | `0.2.43` | SeaweedFS CSI chart version |
-| `SEAWEEDFS_NAMESPACE` | `seaweedfs` | SeaweedFS namespace |
-| `SEAWEEDFS_RELEASE` | `seaweedfs` | Helm release name |
-| `SEAWEEDFS_CSI_RELEASE` | `seaweedfs-csi` | CSI Helm release name |
-| `SEAWEEDFS_DATA_DIR` | `/var/lib/seaweedfs` | hostPath for SeaweedFS state |
-| `SEAWEEDFS_S3_ENABLED` | `true` | in-cluster S3 on the filer |
-| `STORAGE_CLASS_NAME` | `seaweedfs-storage` | default StorageClass name |
+| `STORAGE_BACKEND` | `longhorn` | `local-path` uses the k3s local-path provisioner instead (development machines only) |
+| `LONGHORN_CHART_VERSION` | `1.13.0` | Longhorn chart version |
+| `LONGHORN_NAMESPACE` | `longhorn-system` | Longhorn namespace |
+| `LONGHORN_RELEASE` | `longhorn` | Helm release name |
+| `LONGHORN_DATA_DIR` | `/var/lib/longhorn` | where Longhorn keeps volume data |
+| `LONGHORN_REPLICAS` | `1` | replicas of each platform volume, each on another server (1-3) |
+| `STORAGE_CLASS_NAME` | `longhorn` | default StorageClass name (`local-path` with `STORAGE_BACKEND=local-path`) |
+| `RUSTFS_IMAGE` | `rustfs/rustfs:1.0.5@sha256:…` | RustFS image, pinned by digest |
+| `RC_IMAGE` | `rustfs/rc:v0.1.37@sha256:…` | rc client for RustFS admin Jobs, pinned by digest |
+| `RUSTFS_NAMESPACE` | `rustfs` | RustFS namespace |
+| `RUSTFS_SIZE` | `50Gi` | volume for all S3 data |
+| `SITES_BUCKET` | `acceleratio-sites` | platform bucket for static site files |
 | `VICTORIAMETRICS_CHART_VERSION` | `0.50.0` | `victoria-metrics-single` chart version |
 | `VICTORIAMETRICS_NAMESPACE` | `victoria-metrics` | VictoriaMetrics namespace |
 | `VICTORIAMETRICS_RELEASE` | `victoria-metrics` | Helm release and Service name |
@@ -228,7 +256,8 @@ export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 sudo k3s kubectl get nodes -o wide
 sudo k3s kubectl get pods -A
 sudo k3s kubectl get storageclass
-sudo k3s kubectl -n seaweedfs get pods -o wide
+sudo k3s kubectl -n longhorn-system get pods -o wide
+sudo k3s kubectl -n rustfs get pods -o wide
 sudo k3s kubectl -n acceleratio get pods -o wide
 sudo k3s etcd-snapshot list
 ```
@@ -237,8 +266,9 @@ Expected:
 
 - the node is `Ready` and has role `control-plane`
 - Cilium and `cilium-operator` are ready in `kube-system`
-- SeaweedFS master, volume and filer pods are `Running`
-- `seaweedfs-storage` is the only StorageClass marked `(default)`
+- the Longhorn manager, CSI plugin and instance manager pods are `Running`
+- the `rustfs` pod is `Running`
+- `longhorn` is the only StorageClass marked `(default)`
 - `postgres-0`, `api-*` and `console-*` are `Running` in `acceleratio`
 
 `k3s etcd-snapshot` can print `Unknown flag --...` warnings because it parses
@@ -263,7 +293,7 @@ EOF
 sudo k3s kubectl get pvc smoke -w
 ```
 
-The claim should bind to `seaweedfs-storage`.
+The claim should bind to `longhorn`.
 
 ## Cluster servers
 
@@ -310,10 +340,11 @@ its pods are deleted without waiting for the unreachable kubelet and disappear
 with the Node; leave SSH access off for it. You type the server name
 to confirm. Removal is refused for the only server in the cluster, for the last control-plane server, and while data
 exists only on that server: a PersistentVolume pinned to it (local or hostPath
-volumes) or the only SeaweedFS volume server, whose data is on a hostPath of
-that node. The default install runs SeaweedFS with one volume server, so the
-server it runs on cannot be removed until you add volume servers and move the
-data. Removing a control-plane server relies on k3s removing its etcd member
+volumes). Longhorn volumes are not pinned: with
+`nodeDrainPolicy: block-for-eviction-if-contains-last-replica` a drain first
+copies the last healthy replica of a volume to another server, so the drain
+plan lists such volumes and waits for the copy; with a single server there is
+nowhere to copy to and the drain cannot finish. Removing a control-plane server relies on k3s removing its etcd member
 when the Node is deleted; check `k3s etcd` health afterwards.
 
 **Labels and taints** are edited per server. A service can pin itself to
@@ -344,21 +375,30 @@ node name as SANs. If the server is behind NAT, `node-ip` stays on the private
 interface and the public address is added as an additional SAN for external
 clients.
 
-## SeaweedFS S3
+## Object storage (RustFS)
 
-When `SEAWEEDFS_S3_ENABLED=true`, the filer exposes S3 inside the cluster:
+RustFS serves S3 inside the cluster:
 
 ```
-http://seaweedfs-s3.seaweedfs.svc.cluster.local:8333
+http://rustfs.rustfs.svc.cluster.local:9000
 ```
 
-Credentials are generated by the chart and written to
-`${CONFIG_DIR}/seaweedfs-s3.env` (by default
-`/etc/acceleratio/seaweedfs-s3.env`) with mode `0600`. The endpoint is not
-published outside the cluster. Port-forward it for local use:
+It runs as one pod (single node, single drive) on the Longhorn volume
+`rustfs-data`, so its data has as many copies as `LONGHORN_REPLICAS`. It cannot
+grow into a distributed RustFS in place: that is a new deployment and a copy
+over S3. A bigger volume is a resize of `rustfs-data`.
+
+The admin keys are generated once into the Secret `rustfs/rustfs-root` and
+written to `${CONFIG_DIR}/rustfs-s3.env` (by default
+`/etc/acceleratio/rustfs-s3.env`) with mode `0600`. The API uses them to create
+buckets and per-bucket keys (Jobs running the `rc` client in the `rustfs`
+namespace) and to read and write objects. Each project bucket, each
+PostgreSQL backup bucket and each static site gets its own key limited to its
+bucket or prefix. The endpoint is not published outside the cluster.
+Port-forward it for local use:
 
 ```bash
-sudo k3s kubectl -n seaweedfs port-forward svc/seaweedfs-s3 8333:8333
+sudo k3s kubectl -n rustfs port-forward svc/rustfs 9000:9000
 ```
 
 ## Image registry
@@ -425,16 +465,18 @@ had your own, it saves a copy next to the manifest first.
 ## Database
 
 PostgreSQL runs as the StatefulSet `postgres` and keeps its files on the
-server's own disk (`/var/lib/acceleratio/postgres`), not on SeaweedFS, so the
-platform does not depend on itself to start. The database password and the
+server's own disk (`/var/lib/acceleratio/postgres`), not on Longhorn, so the
+platform does not depend on its own storage layer to start. The database password and the
 session secret are generated once and reused by later runs. Back up
 `/var/lib/acceleratio/postgres` and `/etc/acceleratio/acceleratio.env` together.
 
 ## Update
 
 `update.sh` brings an existing installation to the versions pinned in the
-target `install.sh`: k3s, Helm, Cilium, SeaweedFS, the SeaweedFS CSI driver,
+target `install.sh`: k3s, Helm, Cilium, Longhorn, RustFS and its `rc` client,
 VictoriaMetrics, VictoriaLogs with Vector and Acceleratio (API and console).
+Longhorn, like k3s and Cilium, moves one minor version at a time. RustFS is
+replaced in place (the pod is recreated; its data stays on the volume).
 Pull the new release, then:
 
 ```bash
@@ -603,14 +645,15 @@ back):
 sudo ./deploy/install.sh
 ```
 
-To start from scratch, including etcd and SeaweedFS data:
+To start from scratch, including etcd and every volume:
 
 ```bash
 sudo ./deploy/install.sh --reset --yes
 ```
 
-`--reset` is destructive. It removes the k3s datastore, Cilium networking and
-`/var/lib/seaweedfs`, the database in `/var/lib/acceleratio/postgres` and
+`--reset` is destructive. It removes the k3s datastore, Cilium networking,
+Longhorn (with every volume, including RustFS), its iSCSI sessions and
+`/var/lib/longhorn`, the database in `/var/lib/acceleratio/postgres` and
 `/etc/acceleratio`. It is not an in-place migration from an existing sqlite
 k3s cluster; the installer normally refuses that case.
 
@@ -628,13 +671,14 @@ curl -fsSL https://raw.githubusercontent.com/acceleratio-cloud/core/main/deploy/
 
 The uninstaller removes the Helm releases, detaches Cilium BPF filters from the
 host interfaces, removes Cilium CNI files and interfaces, and then removes k3s,
-etcd, the database and SeaweedFS data, and the UFW rules tagged
+etcd, Longhorn with every volume, its iSCSI sessions and `/var/lib/longhorn`,
+the database, and the UFW rules tagged
 `acceleratio-cluster` (only while UFW is active; delete them by hand otherwise). Detaching the filters before the CNI is removed keeps
 SSH and host networking usable without a reboot. It keeps kubeconfig files in
 `/root/.kube` and user home directories.
 
-If you changed `SEAWEEDFS_NAMESPACE`, `SEAWEEDFS_RELEASE`,
-`SEAWEEDFS_CSI_RELEASE`, `SEAWEEDFS_DATA_DIR`, `ACCELERATIO_NAMESPACE`,
+If you changed `LONGHORN_NAMESPACE`, `LONGHORN_RELEASE`,
+`LONGHORN_DATA_DIR`, `RUSTFS_NAMESPACE`, `ACCELERATIO_NAMESPACE`,
 `POSTGRES_DATA_DIR`, `CONFIG_DIR` or the
 `CILIUM_CNI_*` paths, pass the same values to `uninstall.sh`; otherwise it
 will look for the defaults.
@@ -642,7 +686,7 @@ will look for the defaults.
 ## Troubleshooting
 
 **Update or re-install stops with "Node(s) not ready".** Cilium and the
-SeaweedFS CSI driver are DaemonSets, and both scripts wait until every node runs
+Longhorn manager are DaemonSets, and both scripts wait until every node runs
 them. A server that is down (`NotReady`, often also `SchedulingDisabled` after an
 unfinished removal) would make that wait time out after ten minutes and the
 update roll back, so `update.sh` checks every node before the backup and
@@ -673,8 +717,9 @@ sudo k3s crictl info | grep -A4 '"cni"'
 ```
 
 **The installer refuses to start.** Check the message: common causes are an
-existing sqlite k3s datastore, active swap, missing `/dev/fuse`, less than
-10 GiB free disk, or a port conflict on `6443`.
+existing sqlite k3s datastore, active swap, an LXC/OpenVZ container or a
+host where `iscsid` does not work (Longhorn needs a VM or bare metal), less
+than 10 GiB free disk, or a port conflict on `6443`.
 
 **apt/dpkg lock on a fresh server.** cloud-init or unattended-upgrades may still be
 installing packages. The installer waits up to 10 minutes and passes
@@ -716,12 +761,14 @@ and Debian 12 setups kept a healthy Docker container running throughout,
 including after a reboot. If pods lose connectivity, stop Docker, re-run the
 installer, and check Docker's iptables rules before starting it again.
 
-**SeaweedFS CSI pods fail.** Confirm `/dev/fuse` exists and the node has the
-CSI node and mount DaemonSets:
+**A volume does not attach.** Check that `iscsid` runs on the node, that
+`multipathd` does not hold the device, and what Longhorn reports:
 
 ```bash
-ls -l /dev/fuse
-sudo k3s kubectl -n seaweedfs get ds
+systemctl status iscsid
+sudo multipath -ll
+sudo k3s kubectl -n longhorn-system get volumes.longhorn.io,nodes.longhorn.io
+sudo k3s kubectl -n longhorn-system logs ds/longhorn-manager --tail=50
 ```
 
 ## Limitations
@@ -731,11 +778,14 @@ sudo k3s kubectl -n seaweedfs get ds
   console.
 - Servers added from the console join over the address in `K3S_JOIN_URL`. SSH
   host keys are not verified; compare the logged fingerprint.
-- SeaweedFS does not rebalance onto added servers.
-- SeaweedFS state is on hostPath and is not replicated or backed up. A
-  production deployment needs real disks, backups and probably multiple
-  volume servers.
-- SeaweedFS S3 is in-cluster only and has no TLS termination from this
+- Volumes have one replica by default. More replicas (`LONGHORN_REPLICAS`
+  or a storage profile) need as many servers and a fast, dedicated network
+  between them: every write waits for each replica, so on a gigabit link
+  PostgreSQL runs about four times slower, and an unstable network marks
+  replicas degraded. Longhorn volumes are not backed up off the cluster.
+- RustFS is a single pod: it is unavailable while it restarts or moves to
+  another server, and it cannot grow into a distributed RustFS in place.
+- RustFS S3 is in-cluster only and has no TLS termination from this
   installer.
 - The console and API are published on plain HTTP node ports. For TLS, set a
   [custom domain](#custom-domain) in the console, or put a reverse proxy in
