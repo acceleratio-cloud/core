@@ -3,7 +3,14 @@ import { readInputs, render, type RenderContext } from '../marketplace-values';
 
 const context = (): RenderContext => ({
   inputs: { EMAIL: 'me@example.com' },
-  hosts: { postgres: 'demo-postgres.internal' },
+  services: {
+    postgres: {
+      host: 'demo-postgres-rw',
+      user: 'app',
+      database: 'app',
+      password: 'secret',
+    },
+  },
   appHost: 'demo-1-2-3-4.sslip.io',
   secrets: new Map(),
 });
@@ -16,8 +23,17 @@ describe('render', () => {
         context(),
       ),
     ).toBe(
-      'me@example.com demo-postgres.internal https://demo-1-2-3-4.sslip.io demo-1-2-3-4.sslip.io',
+      'me@example.com demo-postgres-rw https://demo-1-2-3-4.sslip.io demo-1-2-3-4.sslip.io',
     );
+  });
+
+  it('fills the login of a postgres service', () => {
+    expect(
+      render(
+        'postgres://${{ service.postgres.user }}:${{ service.postgres.password }}@${{ service.postgres.host }}/${{ service.postgres.database }}',
+        context(),
+      ),
+    ).toBe('postgres://app:secret@demo-postgres-rw/app');
   });
 
   it('generates each secret once per deploy, in its format', () => {

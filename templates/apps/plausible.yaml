@@ -32,21 +32,12 @@ services:
     env:
       BASE_URL: '${{ app.url }}'
       SECRET_KEY_BASE: '${{ base64.secret_key_base }}'
-      DATABASE_URL: 'postgres://plausible:${{ password.postgres }}@${{ service.postgres.host }}:5432/plausible'
+      DATABASE_URL: 'postgres://${{ service.postgres.user }}:${{ service.postgres.password }}@${{ service.postgres.host }}:5432/${{ service.postgres.database }}'
       CLICKHOUSE_DATABASE_URL: 'http://${{ service.clickhouse.host }}:8123/plausible_events_db'
   - name: postgres
-    image: postgres:17.11-alpine
+    type: postgres
     icon: postgres
-    port: 5432
-    volumes:
-      - path: /var/lib/postgresql/data
-        size_gib: 5
-    env:
-      POSTGRES_USER: plausible
-      POSTGRES_PASSWORD: '${{ password.postgres }}'
-      POSTGRES_DB: plausible
-      # A subfolder, so initdb never meets a non-empty volume root.
-      PGDATA: /var/lib/postgresql/data/pgdata
+    size_gib: 5
   - name: clickhouse
     image: clickhouse/clickhouse-server:24.12-alpine
     icon: clickhouse

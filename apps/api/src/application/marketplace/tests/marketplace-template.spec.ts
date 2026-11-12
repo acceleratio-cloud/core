@@ -160,6 +160,43 @@ describe('readTemplate', () => {
     ).not.toThrow();
   });
 
+  it('reads a postgres service and its login placeholders', () => {
+    const raw = valid() as Record<string, unknown> & ReturnType<typeof valid>;
+    (raw.services as unknown[])[1] = {
+      name: 'db',
+      type: 'postgres',
+      icon: 'postgres',
+      size_gib: 5,
+    };
+    raw.services[0] = {
+      ...raw.services[0],
+      env: { URL: '${{ service.db.user }}:${{ service.db.password }}' },
+    } as never;
+    expect(readTemplate('demo', raw, icons).services[1]).toEqual({
+      name: 'db',
+      type: 'postgres',
+      icon: 'data:postgres',
+      port: 5432,
+      size_gib: 5,
+      env: [],
+    });
+    rejects(
+      (r) => ((r.services[1].env = { V: '${{ service.demo.password }}' }), r),
+      /demo is not a postgres service/,
+    );
+    rejects(
+      (r) => (
+        Object.assign(r.services[1], { type: 'postgres', size_gib: 5 }),
+        r
+      ),
+      /image: is not a known field/,
+    );
+    rejects(
+      (r) => (Object.assign(r.services[1], { type: 'mysql' }), r),
+      /type: must be docker or postgres/,
+    );
+  });
+
   it('throws TemplateError for a non-mapping', () => {
     expect(() => readTemplate('demo', 'text', icons)).toThrow(TemplateError);
   });

@@ -41,18 +41,9 @@ services:
     env:
       MM_SERVICESETTINGS_SITEURL: '${{ app.url }}'
       MM_SQLSETTINGS_DRIVERNAME: postgres
-      MM_SQLSETTINGS_DATASOURCE: 'postgres://mattermost:${{ password.postgres }}@${{ service.postgres.host }}:5432/mattermost?sslmode=disable&connect_timeout=10'
+      MM_SQLSETTINGS_DATASOURCE: 'postgres://${{ service.postgres.user }}:${{ service.postgres.password }}@${{ service.postgres.host }}:5432/${{ service.postgres.database }}?sslmode=disable&connect_timeout=10'
       MM_BLEVESETTINGS_INDEXDIR: /mattermost/bleve-indexes
   - name: postgres
-    image: postgres:17.11-alpine
+    type: postgres
     icon: postgres
-    port: 5432
-    volumes:
-      - path: /var/lib/postgresql/data
-        size_gib: 10
-    env:
-      POSTGRES_USER: mattermost
-      POSTGRES_PASSWORD: '${{ password.postgres }}'
-      POSTGRES_DB: mattermost
-      # A subfolder, so initdb never meets a non-empty volume root.
-      PGDATA: /var/lib/postgresql/data/pgdata
+    size_gib: 10

@@ -164,13 +164,42 @@ const scalar = (value: unknown, path: string): string => {
   return value as string;
 };
 
+const POSTGRES_PORT = 5432;
+
+/** A managed PostgreSQL database: a name, an icon and a disk; nothing to run. */
+const postgresService = (
+  raw: Raw,
+  path: string,
+  icons: IconLookup,
+): TemplateService => {
+  object(raw, path, ['name', 'type', 'icon', 'size_gib']);
+  return {
+    name: match(
+      raw.name,
+      `${path}.name`,
+      SERVICE_NAME,
+      'lowercase letters, digits and hyphens',
+    ),
+    type: 'postgres',
+    icon: icon(raw.icon, `${path}.icon`, icons),
+    port: POSTGRES_PORT,
+    size_gib: number(raw.size_gib, `${path}.size_gib`, 1, MAX_VOLUME_GIB),
+    env: [],
+  };
+};
+
 const service = (
   value: unknown,
   path: string,
   icons: IconLookup,
 ): TemplateService => {
+  const type = (value as Raw | null)?.type;
+  if (type === 'postgres') return postgresService(value as Raw, path, icons);
+  if (type !== undefined && type !== 'docker')
+    fail(`${path}.type`, 'must be docker or postgres');
   const raw = object(value, path, [
     'name',
+    'type',
     'image',
     'icon',
     'port',
@@ -186,6 +215,7 @@ const service = (
       SERVICE_NAME,
       'lowercase letters, digits and hyphens',
     ),
+    type: 'docker',
     image: match(
       raw.image,
       `${path}.image`,
@@ -317,6 +347,9 @@ export const readTemplate = (
   const scope: RefScope = {
     inputs: new Set(inputs.map((i) => i.name)),
     services: new Set(services.map((s) => s.name)),
+    databases: new Set(
+      services.filter((s) => s.type === 'postgres').map((s) => s.name),
+    ),
     hasPublic: services.some((s) => s.public),
   };
   services.forEach((s, index) => {

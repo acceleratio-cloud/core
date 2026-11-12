@@ -3,7 +3,7 @@ import { ArrowLeft, ArrowUpRight, Check } from 'lucide-react';
 
 import { GithubIcon } from '@/shared/icons/github-icon';
 import { Button } from '@/shared/components/ui/button';
-import type { MarketplaceApp } from '@acceleratio/shared';
+import type { MarketplaceApp, MarketplaceService } from '@acceleratio/shared';
 
 import { AppCard } from '../components/app-card';
 import { AppIcon } from '../components/app-icon';
@@ -42,12 +42,12 @@ export const MarketplaceAppView = ({
       (other) => other.category === app.category && other.slug !== app.slug,
     )
     .slice(0, 3);
-  const volumes = app.services.flatMap((service) =>
-    (service.volumes ?? []).map((volume) => ({
-      service: service.name,
-      ...volume,
-    })),
-  );
+  // A database's disk counts like a container's volume.
+  const diskGib = (service: MarketplaceService) =>
+    service.type === 'postgres'
+      ? [service.size_gib ?? 0]
+      : (service.volumes ?? []).map((volume) => volume.size_gib);
+  const volumes = app.services.flatMap(diskGib);
   const publicService = app.services.find((service) => service.public);
 
   return (
@@ -190,11 +190,10 @@ export const MarketplaceAppView = ({
                 {formatMemory(app.resources.memory_mib)}
               </Detail>
               {app.services
-                .filter((service) => service.volumes?.length)
+                .filter((service) => diskGib(service).length)
                 .map((service) => (
                   <Detail key={service.name} term={`${service.name} disk`}>
-                    {service.volumes!.reduce((sum, v) => sum + v.size_gib, 0)}{' '}
-                    GiB
+                    {diskGib(service).reduce((sum, gib) => sum + gib, 0)} GiB
                   </Detail>
                 ))}
             </dl>
@@ -213,7 +212,7 @@ export const MarketplaceAppView = ({
                   key={service.name}
                   className="truncate font-mono text-xs text-muted-foreground"
                 >
-                  {service.image}
+                  {service.image ?? 'Managed PostgreSQL 17'}
                 </li>
               ))}
             </ul>

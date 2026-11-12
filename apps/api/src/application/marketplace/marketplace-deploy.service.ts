@@ -22,6 +22,7 @@ import {
   DockerWorkloadNetworkService,
   PUBLIC_IP_UNKNOWN_MESSAGE,
 } from '@/application/workload/docker/docker-workload-network.service';
+import { PostgresAccessService } from '@/application/workload/postgres/postgres-access.service';
 import { workload } from '@/application/workload/schemas/workload.schema';
 import { WorkloadService } from '@/application/workload/workload.service';
 import type { VersionAuthorInput } from '@/application/workload/workload-version.service';
@@ -34,7 +35,7 @@ import { MarketplaceService } from './marketplace.service';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /**
- * Turns a template into Docker services of one project: creates them, gives
+ * Turns a template into services of one project: creates them, gives
  * the public one a generated domain, fills the env placeholders and deploys.
  * A failure removes what this deploy created, the project too when it was new.
  */
@@ -51,6 +52,7 @@ export class MarketplaceDeployService {
     private readonly workloads: WorkloadService,
     private readonly network: DockerWorkloadNetworkService,
     private readonly dns: ControlPlaneDnsService,
+    private readonly postgres: PostgresAccessService,
   ) {}
 
   async deploy(
@@ -136,17 +138,30 @@ export class MarketplaceDeployService {
     try {
       for (const [index, service] of template.services.entries()) {
         created.push(
-          await this.workloads.create(projectId, {
-            name: names[index],
-            type: 'docker',
-            config: this.config(service.image, {
-              volumes: service.volumes?.map((volume) => ({
-                mount_path: volume.path,
-                size_gb: volume.size_gib,
-                storage_class_id: null,
-              })),
-            }),
-          }),
+          await this.workloads.create(
+            projectId,
+            service.type === 'postgres'
+              ? {
+                  name: names[index],
+                  type: 'postgres',
+                  config: {
+                    postgres_version: '17',
+                    size_gb: service.size_gib!,
+                    storage_class_id: null,
+                  },
+                }
+              : {
+                  name: names[index],
+                  type: 'docker',
+                  config: this.config(service.image!, {
+                    volumes: service.volumes?.map((volume) => ({
+                      mount_path: volume.path,
+                      size_gb: volume.size_gib,
+                      storage_class_id: null,
+                    })),
+                  }),
+                },
+          ),
         );
       }
 
@@ -160,14 +175,24 @@ export class MarketplaceDeployService {
               template.services[publicIndex].port!,
             );
 
+      const services: Record<string, Record<string, string>> = {};
+      for (const [index, service] of template.services.entries()) {
+        const made = created[index];
+        services[service.name] =
+          service.type === 'postgres'
+            ? {
+                host: made.postgres!.host,
+                user: made.postgres!.username,
+                database: made.postgres!.database,
+                password: (await this.postgres.credentials(projectId, made.id))
+                  .password,
+              }
+            : { host: made.internal_domain! };
+      }
+
       const context: RenderContext = {
         inputs,
-        hosts: Object.fromEntries(
-          template.services.map((service, index) => [
-            service.name,
-            created[index].internal_domain!,
-          ]),
-        ),
+        services,
         appHost,
         secrets: new Map(),
       };
@@ -175,7 +200,7 @@ export class MarketplaceDeployService {
       for (const [index, service] of template.services.entries()) {
         if (service.env.length === 0 && !service.command) continue;
         await this.workloads.update(projectId, created[index].id, {
-          config: this.config(service.image, {
+          config: this.config(service.image!, {
             env: service.env.map(({ key, value }) => ({
               key,
               value: render(value, context),
@@ -185,7 +210,9 @@ export class MarketplaceDeployService {
         });
       }
 
-      for (const workload of created) {
+      // A postgres service runs from the moment it is created.
+      for (const [index, workload] of created.entries()) {
+        if (template.services[index].type === 'postgres') continue;
         await this.workloads.deploy(projectId, workload.id, author);
       }
 

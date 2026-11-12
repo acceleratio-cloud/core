@@ -42,19 +42,10 @@ services:
       DB_TYPE: postgresdb
       DB_POSTGRESDB_HOST: '${{ service.postgres.host }}'
       DB_POSTGRESDB_PORT: 5432
-      DB_POSTGRESDB_DATABASE: n8n
-      DB_POSTGRESDB_USER: n8n
-      DB_POSTGRESDB_PASSWORD: '${{ password.postgres }}'
+      DB_POSTGRESDB_DATABASE: '${{ service.postgres.database }}'
+      DB_POSTGRESDB_USER: '${{ service.postgres.user }}'
+      DB_POSTGRESDB_PASSWORD: '${{ service.postgres.password }}'
   - name: postgres
-    image: postgres:17.11-alpine
+    type: postgres
     icon: postgres
-    port: 5432
-    volumes:
-      - path: /var/lib/postgresql/data
-        size_gib: 10
-    env:
-      POSTGRES_USER: n8n
-      POSTGRES_PASSWORD: '${{ password.postgres }}'
-      POSTGRES_DB: n8n
-      # A subfolder, so initdb never meets a non-empty volume root.
-      PGDATA: /var/lib/postgresql/data/pgdata
+    size_gib: 10

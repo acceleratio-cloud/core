@@ -27,18 +27,9 @@ services:
     port: 3000
     public: true
     env:
-      DATABASE_URL: 'postgres://umami:${{ password.postgres }}@${{ service.postgres.host }}:5432/umami'
+      DATABASE_URL: 'postgres://${{ service.postgres.user }}:${{ service.postgres.password }}@${{ service.postgres.host }}:5432/${{ service.postgres.database }}'
       APP_SECRET: '${{ hex.app_secret }}'
   - name: postgres
-    image: postgres:17.11-alpine
+    type: postgres
     icon: postgres
-    port: 5432
-    volumes:
-      - path: /var/lib/postgresql/data
-        size_gib: 5
-    env:
-      POSTGRES_USER: umami
-      POSTGRES_PASSWORD: '${{ password.postgres }}'
-      POSTGRES_DB: umami
-      # A subfolder, so initdb never meets a non-empty volume root.
-      PGDATA: /var/lib/postgresql/data/pgdata
+    size_gib: 5

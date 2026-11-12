@@ -30,19 +30,10 @@ services:
       MB_DB_TYPE: postgres
       MB_DB_HOST: '${{ service.postgres.host }}'
       MB_DB_PORT: 5432
-      MB_DB_DBNAME: metabase
-      MB_DB_USER: metabase
-      MB_DB_PASS: '${{ password.postgres }}'
+      MB_DB_DBNAME: '${{ service.postgres.database }}'
+      MB_DB_USER: '${{ service.postgres.user }}'
+      MB_DB_PASS: '${{ service.postgres.password }}'
   - name: postgres
-    image: postgres:17.11-alpine
+    type: postgres
     icon: postgres
-    port: 5432
-    volumes:
-      - path: /var/lib/postgresql/data
-        size_gib: 5
-    env:
-      POSTGRES_USER: metabase
-      POSTGRES_PASSWORD: '${{ password.postgres }}'
-      POSTGRES_DB: metabase
-      # A subfolder, so initdb never meets a non-empty volume root.
-      PGDATA: /var/lib/postgresql/data/pgdata
+    size_gib: 5

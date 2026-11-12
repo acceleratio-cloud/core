@@ -25,6 +25,9 @@ jest.mock(
     PUBLIC_IP_UNKNOWN_MESSAGE: 'No public IP',
   }),
 );
+jest.mock('@/application/workload/postgres/postgres-access.service', () => ({
+  PostgresAccessService: class {},
+}));
 jest.mock('../marketplace.service', () => ({ MarketplaceService: class {} }));
 
 const PROJECT = '11111111-1111-4111-8111-111111111111';
@@ -36,6 +39,7 @@ const template = {
   services: [
     {
       name: 'demo',
+      type: 'docker',
       image: 'example/demo:1.0.0',
       port: 3000,
       public: true,
@@ -43,7 +47,7 @@ const template = {
         {
           key: 'DATABASE_URL',
           value:
-            'postgres://demo:${{ password.db }}@${{ service.postgres.host }}/demo',
+            'postgres://${{ service.postgres.user }}:${{ service.postgres.password }}@${{ service.postgres.host }}/${{ service.postgres.database }}',
         },
         { key: 'URL', value: '${{ app.url }}' },
         { key: 'EMAIL', value: '${{ input.EMAIL }}' },
@@ -51,9 +55,16 @@ const template = {
     },
     {
       name: 'postgres',
-      image: 'postgres:17.11-alpine',
-      volumes: [{ path: '/var/lib/postgresql/data', size_gib: 5 }],
-      env: [{ key: 'POSTGRES_PASSWORD', value: '${{ password.db }}' }],
+      type: 'postgres',
+      size_gib: 5,
+      env: [],
+    },
+    {
+      name: 'redis',
+      type: 'docker',
+      image: 'redis:7.4.12-alpine',
+      volumes: [{ path: '/data', size_gib: 1 }],
+      env: [{ key: 'REDIS_PASSWORD', value: '${{ password.redis }}' }],
     },
   ],
 } as unknown as MarketplaceTemplate;
@@ -73,12 +84,21 @@ const setup = () => {
     }),
   };
   const workloads = {
-    create: jest.fn((project: string, body: { name: string }) => {
+    create: jest.fn((project: string, body: { name: string; type: string }) => {
       next += 1;
       return Promise.resolve({
         id: `w${next}`,
         name: body.name,
         internal_domain: `${body.name}.internal`,
+        ...(body.type === 'postgres'
+          ? {
+              postgres: {
+                host: `${body.name}-rw`,
+                username: 'app',
+                database: 'app',
+              },
+            }
+          : {}),
       });
     }),
     update: jest.fn(() => Promise.resolve({})),
@@ -98,6 +118,9 @@ const setup = () => {
   const marketplace = {
     find: jest.fn((slug: string) => (slug === 'demo' ? template : undefined)),
   };
+  const postgres = {
+    credentials: jest.fn(() => Promise.resolve({ password: 'pg-secret' })),
+  };
   const service = new MarketplaceDeployService(
     db as never,
     marketplace as never,
@@ -105,8 +128,17 @@ const setup = () => {
     workloads as never,
     network as never,
     dns as never,
+    postgres as never,
   );
-  return { service, projects, workloads, network, dns, existingNames };
+  return {
+    service,
+    projects,
+    workloads,
+    network,
+    dns,
+    postgres,
+    existingNames,
+  };
 };
 
 const payload = (extra: Record<string, unknown> = {}) =>
@@ -114,7 +146,7 @@ const payload = (extra: Record<string, unknown> = {}) =>
 
 describe('MarketplaceDeployService', () => {
   it('creates, wires and deploys every service of a new project', async () => {
-    const { service, projects, workloads, network } = setup();
+    const { service, projects, workloads, network, postgres } = setup();
 
     const result = await service.deploy(
       'demo',
@@ -124,26 +156,33 @@ describe('MarketplaceDeployService', () => {
 
     expect(result).toEqual({
       project_id: PROJECT,
-      workload_ids: ['w1', 'w2'],
+      workload_ids: ['w1', 'w2', 'w3'],
       url: 'https://demo-1-2-3-4.sslip.io',
     });
     expect(projects.create).toHaveBeenCalledWith({ name: 'Demo' });
     expect(workloads.create.mock.calls.map((call) => call[1])).toEqual([
       expect.objectContaining({ name: 'demo', type: 'docker' }),
-      expect.objectContaining({
+      {
         name: 'demo-postgres',
+        type: 'postgres',
+        config: {
+          postgres_version: '17',
+          size_gb: 5,
+          storage_class_id: null,
+        },
+      },
+      expect.objectContaining({
+        name: 'demo-redis',
+        type: 'docker',
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         config: expect.objectContaining({
           volumes: [
-            {
-              mount_path: '/var/lib/postgresql/data',
-              size_gb: 5,
-              storage_class_id: null,
-            },
+            { mount_path: '/data', size_gb: 1, storage_class_id: null },
           ],
         }),
       }),
     ]);
+    expect(postgres.credentials).toHaveBeenCalledWith(PROJECT, 'w2');
     expect(network.generate).toHaveBeenCalledWith(PROJECT, 'w1', {
       label: 'demo',
       port: 3000,
@@ -159,16 +198,21 @@ describe('MarketplaceDeployService', () => {
           ]
         )[2].config.env.map(({ key, value }) => [key, value]),
       );
-    const password = env(1).POSTGRES_PASSWORD;
-    expect(password).toMatch(/^[A-Za-z0-9]{32}$/);
+    // The postgres service has no env to fill.
+    expect(workloads.update.mock.calls.map((call) => call.at(1))).toEqual([
+      'w1',
+      'w3',
+    ]);
+    expect(env(1).REDIS_PASSWORD).toMatch(/^[A-Za-z0-9]{32}$/);
     expect(env(0)).toEqual({
-      DATABASE_URL: `postgres://demo:${password}@demo-postgres.internal/demo`,
+      DATABASE_URL: 'postgres://app:pg-secret@demo-postgres-rw/app',
       URL: 'https://demo-1-2-3-4.sslip.io',
       EMAIL: 'me@example.com',
     });
+    // A postgres service runs from creation; only the containers deploy.
     expect(workloads.deploy.mock.calls.map((call) => call[1])).toEqual([
       'w1',
-      'w2',
+      'w3',
     ]);
   });
 
@@ -219,6 +263,11 @@ describe('MarketplaceDeployService', () => {
           id: body.name,
           name: body.name,
           internal_domain: `${body.name}.internal`,
+          postgres: {
+            host: `${body.name}-rw`,
+            username: 'app',
+            database: 'app',
+          },
         });
       },
     );
@@ -235,7 +284,7 @@ describe('MarketplaceDeployService', () => {
         message: expect.stringContaining('already has a service') as unknown,
       }) as unknown,
     });
-    expect(workloads.create).toHaveBeenCalledTimes(2);
+    expect(workloads.create).toHaveBeenCalledTimes(3);
   });
 
   it('rejects bad requests before creating anything', async () => {
@@ -311,6 +360,7 @@ describe('MarketplaceDeployService', () => {
     expect(workloads.remove.mock.calls).toEqual([
       [EXISTING, 'w1'],
       [EXISTING, 'w2'],
+      [EXISTING, 'w3'],
     ]);
   });
 

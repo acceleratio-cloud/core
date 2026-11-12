@@ -49,7 +49,7 @@ services:
       PORT: 3000
       SECRET_KEY: '${{ hex.secret_key }}'
       UTILS_SECRET: '${{ hex.utils_secret }}'
-      DATABASE_URL: 'postgres://outline:${{ password.postgres }}@${{ service.postgres.host }}:5432/outline'
+      DATABASE_URL: 'postgres://${{ service.postgres.user }}:${{ service.postgres.password }}@${{ service.postgres.host }}:5432/${{ service.postgres.database }}'
       PGSSLMODE: disable
       REDIS_URL: 'redis://${{ service.redis.host }}:6379'
       FILE_STORAGE: local
@@ -62,18 +62,9 @@ services:
       OIDC_TOKEN_URI: '${{ input.OIDC_TOKEN_URI }}'
       OIDC_USERINFO_URI: '${{ input.OIDC_USERINFO_URI }}'
   - name: postgres
-    image: postgres:17.11-alpine
+    type: postgres
     icon: postgres
-    port: 5432
-    volumes:
-      - path: /var/lib/postgresql/data
-        size_gib: 10
-    env:
-      POSTGRES_USER: outline
-      POSTGRES_PASSWORD: '${{ password.postgres }}'
-      POSTGRES_DB: outline
-      # A subfolder, so initdb never meets a non-empty volume root.
-      PGDATA: /var/lib/postgresql/data/pgdata
+    size_gib: 10
   - name: redis
     image: redis:7.4.12-alpine
     icon: redis

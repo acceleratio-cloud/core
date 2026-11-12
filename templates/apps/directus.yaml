@@ -43,26 +43,17 @@ services:
       DB_CLIENT: pg
       DB_HOST: '${{ service.postgres.host }}'
       DB_PORT: 5432
-      DB_DATABASE: directus
-      DB_USER: directus
-      DB_PASSWORD: '${{ password.postgres }}'
+      DB_DATABASE: '${{ service.postgres.database }}'
+      DB_USER: '${{ service.postgres.user }}'
+      DB_PASSWORD: '${{ service.postgres.password }}'
       REDIS: 'redis://${{ service.redis.host }}:6379'
       CACHE_ENABLED: true
       CACHE_STORE: redis
       WEBSOCKETS_ENABLED: true
   - name: postgres
-    image: postgres:17.11-alpine
+    type: postgres
     icon: postgres
-    port: 5432
-    volumes:
-      - path: /var/lib/postgresql/data
-        size_gib: 10
-    env:
-      POSTGRES_USER: directus
-      POSTGRES_PASSWORD: '${{ password.postgres }}'
-      POSTGRES_DB: directus
-      # A subfolder, so initdb never meets a non-empty volume root.
-      PGDATA: /var/lib/postgresql/data/pgdata
+    size_gib: 10
   - name: redis
     image: redis:7.4.12-alpine
     icon: redis

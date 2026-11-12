@@ -72,13 +72,24 @@ export class MarketplaceService implements OnModuleInit {
       this.apps = this.templates.map((template) => ({
         ...template,
         services: template.services.map(
-          ({ name, image, icon, port, public: isPublic, volumes }) => ({
+          ({
             name,
+            type,
             image,
             icon,
             port,
             public: isPublic,
             volumes,
+            size_gib,
+          }) => ({
+            name,
+            type,
+            image,
+            icon,
+            port,
+            public: isPublic,
+            volumes,
+            size_gib,
           }),
         ),
       }));

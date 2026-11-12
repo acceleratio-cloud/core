@@ -12,6 +12,8 @@ import type { MarketplaceTemplate } from './marketplace-template';
     base64.<id>          64 base64 characters (48 random bytes)
     input.<NAME>         what the user typed for that input
     service.<name>.host  private hostname of a template service (`x.internal`)
+    service.<name>.user / .database / .password
+                         login of a `postgres` service
     app.url / app.host   the public service's https URL / hostname
 
   A generated value with the same ref is the same everywhere in one deploy, so
@@ -21,7 +23,7 @@ import type { MarketplaceTemplate } from './marketplace-template';
 const PLACEHOLDER = /\$\{\{\s*([^{}]*?)\s*\}\}/g;
 const SECRET_REF = /^(password|hex|base64)\.[a-z0-9_]{1,40}$/;
 const INPUT_REF = /^input\.([A-Z][A-Z0-9_]{0,63})$/;
-const SERVICE_REF = /^service\.([a-z0-9-]+)\.host$/;
+const SERVICE_REF = /^service\.([a-z0-9-]+)\.(host|user|database|password)$/;
 const ALPHANUMERIC =
   'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
 
@@ -29,6 +31,8 @@ const ALPHANUMERIC =
 export interface RefScope {
   inputs: ReadonlySet<string>;
   services: ReadonlySet<string>;
+  /** Services of type `postgres`, the only ones with a login. */
+  databases: ReadonlySet<string>;
   hasPublic: boolean;
 }
 
@@ -44,6 +48,8 @@ export const checkRefs = (value: string, scope: RefScope): string | null => {
     const service = SERVICE_REF.exec(ref);
     if (service) {
       if (!scope.services.has(service[1])) return `uses unknown ${ref}`;
+      if (service[2] !== 'host' && !scope.databases.has(service[1]))
+        return `uses ${ref}, but ${service[1]} is not a postgres service`;
       continue;
     }
     if (ref === 'app.url' || ref === 'app.host') {
@@ -60,8 +66,8 @@ export const checkRefs = (value: string, scope: RefScope): string | null => {
 
 export interface RenderContext {
   inputs: Readonly<Record<string, string>>;
-  /** Template service name → private hostname. */
-  hosts: Readonly<Record<string, string>>;
+  /** Template service name → `host`, and `user`, `database`, `password` of a postgres service. */
+  services: Readonly<Record<string, Readonly<Record<string, string>>>>;
   /** Hostname of the public service, when there is one. */
   appHost: string | null;
   /** Generated values of this deploy, filled as refs are first met. */
@@ -89,7 +95,7 @@ export const render = (value: string, context: RenderContext): string =>
     const input = INPUT_REF.exec(ref);
     if (input) return context.inputs[input[1]] ?? '';
     const service = SERVICE_REF.exec(ref);
-    if (service) return context.hosts[service[1]];
+    if (service) return context.services[service[1]][service[2]];
     if (ref === 'app.host') return context.appHost ?? '';
     if (ref === 'app.url')
       return context.appHost ? `https://${context.appHost}` : '';

@@ -35,23 +35,14 @@ services:
       OVERWRITEHOST: '${{ app.host }}'
       OVERWRITEPROTOCOL: https
       POSTGRES_HOST: '${{ service.postgres.host }}'
-      POSTGRES_DB: nextcloud
-      POSTGRES_USER: nextcloud
-      POSTGRES_PASSWORD: '${{ password.postgres }}'
+      POSTGRES_DB: '${{ service.postgres.database }}'
+      POSTGRES_USER: '${{ service.postgres.user }}'
+      POSTGRES_PASSWORD: '${{ service.postgres.password }}'
       REDIS_HOST: '${{ service.redis.host }}'
   - name: postgres
-    image: postgres:17.11-alpine
+    type: postgres
     icon: postgres
-    port: 5432
-    volumes:
-      - path: /var/lib/postgresql/data
-        size_gib: 10
-    env:
-      POSTGRES_USER: nextcloud
-      POSTGRES_PASSWORD: '${{ password.postgres }}'
-      POSTGRES_DB: nextcloud
-      # A subfolder, so initdb never meets a non-empty volume root.
-      PGDATA: /var/lib/postgresql/data/pgdata
+    size_gib: 10
   - name: redis
     image: redis:7.4.12-alpine
     icon: redis

@@ -11,17 +11,23 @@ export const MARKETPLACE_CATEGORIES = [
 
 export type MarketplaceCategory = (typeof MARKETPLACE_CATEGORIES)[number];
 
-/** One container a template creates. */
+/**
+ * One service a template creates: a container, or a managed PostgreSQL
+ * database (`type: 'postgres'`, no image, its disk in `size_gib`).
+ */
 export interface MarketplaceService {
   name: string;
-  /** Always carries an explicit tag other than `latest`. */
-  image: string;
+  type: 'docker' | 'postgres';
+  /** Docker only; always carries an explicit tag other than `latest`. */
+  image?: string;
   /** `data:image/svg+xml;base64,…`; render it in an `<img>`, never inline. */
   icon: string;
   port?: number;
   /** Exposed on the app's domain. At most one service per template. */
   public?: boolean;
   volumes?: { path: string; size_gib: number }[];
+  /** Disk of a `postgres` service in GiB. */
+  size_gib?: number;
 }
 
 /** A value the user fills in before deploying. */

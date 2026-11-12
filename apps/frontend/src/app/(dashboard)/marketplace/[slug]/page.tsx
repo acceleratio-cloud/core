@@ -1,3 +1,4 @@
+import '@xyflow/react/dist/style.css';
 import { notFound } from 'next/navigation';
 
 import { connection } from 'next/server';
