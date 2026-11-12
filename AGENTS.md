@@ -21,8 +21,12 @@ over `apps/api/.env`; a path or inline YAML), otherwise the local OrbStack
 cluster, otherwise (with `CLUSTER=0`) the current kubeconfig context
 (`~/.kube/config`). The local cluster is an OrbStack Linux machine named
 `acceleratio` that runs `deploy/install.sh` from this checkout, so it matches a
-server: k3s with embedded etcd, Cilium, SeaweedFS + CSI, VictoriaMetrics for the
-project Observability tab and VictoriaLogs with Vector for the Logs tab. `make dev`
+server: k3s with embedded etcd, Cilium, RustFS for S3, VictoriaMetrics for the
+project Observability tab and VictoriaLogs with Vector for the Logs tab. Storage
+differs: servers use Longhorn, the OrbStack machine (LXC, no iSCSI) uses the k3s
+local-path provisioner (`STORAGE_BACKEND=local-path`), so storage profiles are
+unavailable in development and Longhorn-specific behaviour is checked on a VM.
+`make dev` port-forwards RustFS for the API (`RUSTFS_S3_API_ENDPOINT`). `make dev`
 and `make setup` create or start it through `scripts/cluster.sh up` (idempotent;
 the released API and console the installer deploys are scaled to zero), write
 `~/.kube/acceleratio-orbstack.yaml` (context `orbstack-acceleratio`) and pass the

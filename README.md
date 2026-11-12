@@ -17,16 +17,17 @@ the keys to a third party.
 
 - **One-command install.** A single script turns a fresh Ubuntu or Debian server
   into a working cloud: single-node k3s with embedded etcd, Cilium networking,
-  SeaweedFS storage, VictoriaMetrics metrics, VictoriaLogs logs and the
-  Acceleratio control plane.
+  Longhorn volumes, RustFS object storage, VictoriaMetrics metrics,
+  VictoriaLogs logs and the Acceleratio control plane.
 - **Projects and services.** Group workloads into projects on a visual canvas and
   run Docker services from any image, with versioned configuration, environment
   variables and secrets.
 - **Domains with automatic HTTPS.** Every Docker service gets a generated domain,
   and custom domains go live with Let's Encrypt certificates once their DNS points
   at your server.
-- **Object storage.** S3-compatible buckets backed by SeaweedFS, with access keys
-  managed from the console, plus configurable storage classes for volumes.
+- **Object storage.** S3-compatible buckets in RustFS, with access keys managed
+  from the console, plus storage profiles (copies, disks, placement) for
+  Longhorn volumes.
 - **Observability and access.** Per-project metrics, project-wide logs with live
   tail, search and per-service filters, instance status and a browser terminal
   into running containers, without leaving the console.
@@ -36,7 +37,7 @@ the keys to a third party.
   Cilium network policies.
 - **Operator-first console.** First-run setup creates the initial account;
   servers, storage and system settings are managed from the same web console.
-- **Built on open components.** Kubernetes (k3s), Cilium, SeaweedFS, Traefik,
+- **Built on open components.** Kubernetes (k3s), Cilium, Longhorn, RustFS, Traefik,
   VictoriaMetrics, VictoriaLogs, Vector and PostgreSQL. Everything runs on a cluster you control, and
   you can inspect it with the standard Kubernetes tools.
 
@@ -46,13 +47,14 @@ the keys to a third party.
 
 One command turns a fresh Ubuntu or Debian server (bare metal, a private
 server or any other hardware) into a working Acceleratio cloud. The installer
-sets up a single-node k3s cluster with embedded etcd, Cilium and SeaweedFS with
-a default SeaweedFS StorageClass, then deploys PostgreSQL, the API and the
-console into the `acceleratio` namespace.
+sets up a single-node k3s cluster with embedded etcd, Cilium, Longhorn with the
+default StorageClass `longhorn` and RustFS for S3, then deploys PostgreSQL, the
+API and the console into the `acceleratio` namespace.
 
 Requirements: Ubuntu 22.04/24.04 or Debian 12 (amd64 or arm64), root access,
-2 vCPU, 4 GiB RAM and 20 GiB free disk recommended, a Linux 5.10+ kernel with
-`/dev/fuse`, and outbound HTTPS. The full list is in
+2 vCPU, 4 GiB RAM and 20 GiB free disk recommended, a Linux 5.10+ kernel, a
+VM or bare metal (Longhorn needs iSCSI, which LXC/OpenVZ containers lack), and
+outbound HTTPS. The full list is in
 [deploy/README.md](./deploy/README.md#requirements).
 
 ```bash
@@ -182,9 +184,12 @@ API and console from source on the Mac and points them at a cluster in an
 [OrbStack](https://orbstack.dev) Linux machine named `acceleratio`. The machine
 runs `deploy/install.sh` from your checkout (OrbStack shares the Mac filesystem
 with its machines), so the cluster is the one a server gets: k3s with embedded
-etcd, Cilium as the CNI, SeaweedFS and its CSI driver with the default
-StorageClass `seaweedfs-storage`, VictoriaMetrics for the project Usage Metrics
-tab, and VictoriaLogs with Vector for the Logs tab. The installer also deploys
+etcd, Cilium as the CNI, RustFS for S3, VictoriaMetrics for the project Usage
+Metrics tab, and VictoriaLogs with Vector for the Logs tab. Storage is the one
+difference: an OrbStack machine cannot run Longhorn (no iSCSI in LXC), so
+volumes use the k3s local-path provisioner (`STORAGE_BACKEND=local-path`,
+default StorageClass `local-path`) and storage profiles are unavailable. The
+API reaches RustFS through a `kubectl port-forward` that `make dev` starts. The installer also deploys
 the released API and console into the cluster; `cluster.sh` scales them to zero
 so they do not compete with the copy you are developing.
 
@@ -247,7 +252,7 @@ intentional non-local development cluster.
 
 The machine disables swap (OrbStack machines come with zram swap that the
 installer rejects); this affects only the machine. Data in the machine, such as
-SeaweedFS volumes and metrics, is deleted with `make cluster-down`. The
+volumes, buckets and metrics, is deleted with `make cluster-down`. The
 PostgreSQL database of `make dev` is separate: it lives in a Docker volume and
 survives `make cluster-down`.
 
