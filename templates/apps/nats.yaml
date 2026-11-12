@@ -1,0 +1,61 @@
+schema_version: 1
+name: NATS JetStream
+icon: nats
+category: Developer tools
+tagline: Messaging and streaming with JetStream, plus a web dashboard.
+description: |
+  NATS is a messaging server for pub/sub, request/reply and queues. With
+  JetStream on, it also keeps streams and key-value buckets on disk.
+
+  Services in the project connect to the nats service on port 4222 with the
+  token in its Environment tab (NATS_TOKEN). The NUI dashboard browses
+  subjects, streams and buckets. It has no login: anyone with its URL can
+  manage the streams.
+features:
+  - Pub/sub, request/reply and queue groups
+  - JetStream streams with replay and acknowledgements
+  - Key-value and object stores
+  - NUI dashboard for streams, buckets and messages
+license: Apache 2.0
+repository: https://github.com/nats-io/nats-server
+website: https://nats.io
+resources:
+  cpu: 0.5
+  memory_mib: 512
+services:
+  - name: nui
+    image: ghcr.io/nats-nui/nui:0.10.0
+    icon: nats
+    port: 31311
+    public: true
+    volumes:
+      - path: /db
+        size_gib: 1
+    # Writes a NATS CLI context first, so the dashboard opens connected to nats.
+    entrypoint:
+      - sh
+      - -c
+    command:
+      - |
+        mkdir -p /tmp/contexts
+        printf '{"url":"nats://%s:4222","token":"%s"}' "$NATS_HOST" "$NATS_TOKEN" > /tmp/contexts/nats.json
+        exec /entrypoint.sh --nats-cli-contexts=/tmp/contexts
+    env:
+      NATS_HOST: '${{ service.nats.host }}'
+      NATS_TOKEN: '${{ password.nats }}'
+  - name: nats
+    image: nats:2.15.3
+    icon: nats
+    port: 4222
+    volumes:
+      - path: /data
+        size_gib: 10
+    command:
+      - --server_name=nats
+      - --jetstream
+      - --store_dir=/data
+      - --http_port=8222
+      # Kubernetes fills $(NATS_TOKEN) from the env below.
+      - --auth=$(NATS_TOKEN)
+    env:
+      NATS_TOKEN: '${{ password.nats }}'

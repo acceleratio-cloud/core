@@ -198,13 +198,17 @@ export class MarketplaceDeployService {
       };
 
       for (const [index, service] of template.services.entries()) {
-        if (service.env.length === 0 && !service.command) continue;
+        if (service.env.length === 0 && !service.entrypoint && !service.command)
+          continue;
         await this.workloads.update(projectId, created[index].id, {
           config: this.config(service.image!, {
             env: service.env.map(({ key, value }) => ({
               key,
               value: render(value, context),
             })),
+            entrypoint: service.entrypoint?.map((value) =>
+              render(value, context),
+            ),
             command: service.command?.map((value) => render(value, context)),
           }),
         });

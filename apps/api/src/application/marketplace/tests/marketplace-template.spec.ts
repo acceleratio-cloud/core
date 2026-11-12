@@ -160,6 +160,24 @@ describe('readTemplate', () => {
     ).not.toThrow();
   });
 
+  it('reads entrypoint and command, checking their placeholders', () => {
+    const raw = valid();
+    Object.assign(raw.services[1], {
+      entrypoint: ['sh', '-c'],
+      command: ['echo ${{ service.demo.host }}'],
+    });
+    const service = readTemplate('demo', raw, icons).services[1];
+    expect(service.entrypoint).toEqual(['sh', '-c']);
+    expect(service.command).toEqual(['echo ${{ service.demo.host }}']);
+    rejects(
+      (r) => (
+        Object.assign(r.services[1], { entrypoint: ['${{ input.X }}'] }),
+        r
+      ),
+      /entrypoint\[0\]: uses undeclared input/,
+    );
+  });
+
   it('reads a postgres service and its login placeholders', () => {
     const raw = valid() as Record<string, unknown> & ReturnType<typeof valid>;
     (raw.services as unknown[])[1] = {

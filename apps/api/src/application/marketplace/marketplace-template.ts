@@ -31,9 +31,11 @@ const ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const MAX_VOLUMES = 10;
 const MAX_VOLUME_GIB = 100;
 
-/** A service as the API deploys it; `env` and `command` never reach the console. */
+/** A service as the API deploys it; `env`, `entrypoint` and `command` never reach the console. */
 export interface TemplateService extends MarketplaceService {
   env: EnvVar[];
+  /** Replaces the image's ENTRYPOINT; `command` replaces its CMD. */
+  entrypoint?: string[];
   command?: string[];
 }
 
@@ -206,6 +208,7 @@ const service = (
     'public',
     'volumes',
     'env',
+    'entrypoint',
     'command',
   ]);
   const result: TemplateService = {
@@ -249,10 +252,12 @@ const service = (
       return { key, value: scalar(item, `${path}.env.${key}`) };
     });
   }
-  if (raw.command !== undefined) {
-    result.command = list(raw.command, `${path}.command`, 64, (item, at) =>
-      scalar(item, at),
-    );
+  for (const field of ['entrypoint', 'command'] as const) {
+    if (raw[field] !== undefined) {
+      result[field] = list(raw[field], `${path}.${field}`, 64, (item, at) =>
+        scalar(item, at),
+      );
+    }
   }
   return result;
 };
@@ -359,10 +364,12 @@ export const readTemplate = (
         `${at}.env.${key}`,
         value,
       ]),
-      ...(s.command ?? []).map((value, i): [string, string] => [
-        `${at}.command[${i}]`,
-        value,
-      ]),
+      ...(['entrypoint', 'command'] as const).flatMap((field) =>
+        (s[field] ?? []).map((value, i): [string, string] => [
+          `${at}.${field}[${i}]`,
+          value,
+        ]),
+      ),
     ];
     for (const [path, value] of values) {
       const problem = checkRefs(value, scope);

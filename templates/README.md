@@ -52,7 +52,11 @@ needs PostgreSQL.
 
 ## Placeholders
 
-`env` values and `command` items may hold `${{ … }}` placeholders. Each one is
+A container may set `entrypoint` (replaces the image's ENTRYPOINT) and
+`command` (replaces its CMD), each a list of strings. Kubernetes fills
+`$(NAME)` in them from the service's own env.
+
+`env` values, `entrypoint` and `command` items may hold `${{ … }}` placeholders. Each one is
 checked when the template loads and filled in when the app is deployed:
 
 | Placeholder | Value |
