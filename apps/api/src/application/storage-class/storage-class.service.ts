@@ -13,7 +13,6 @@ import type {
   CreateStorageClassPayload,
   StorageBenchmark,
   StorageClass,
-  StorageClassParameters,
   StorageEnvironment,
   UpdateStorageClassPayload,
 } from '@acceleratio/shared';
@@ -55,7 +54,7 @@ import {
   DEFAULT_CLASS_ANNOTATION,
   fromDriverParameters,
   isManagedStorageClass,
-  SEAWEEDFS_PROVISIONER,
+  LONGHORN_PROVISIONER,
   type StorageClassManifestInput,
 } from './storage-class.manifests';
 import {
@@ -63,7 +62,12 @@ import {
   derivePlatformClusterStatus,
 } from './storage-class.status';
 
-export const DEFAULT_PLATFORM_STORAGE_CLASS_NAME = 'seaweedfs-storage';
+export const DEFAULT_PLATFORM_STORAGE_CLASS_NAME = 'longhorn';
+
+interface LonghornNode {
+  spec?: { allowScheduling?: boolean };
+  status?: { conditions?: { type?: string; status?: string }[] };
+}
 export const PLATFORM_FORBIDDEN_MESSAGE =
   'The platform storage class is managed by the installer and cannot be changed';
 const NOT_FOUND_MESSAGE = 'Storage class not found';
@@ -130,8 +134,8 @@ const isExternalNameConflict = (error: unknown): boolean => {
   );
 };
 
-const plural = (count: number, word: string) =>
-  `${count} ${word}${count === 1 ? '' : 's'}`;
+const plural = (count: number, word: string, many = `${word}s`) =>
+  `${count} ${count === 1 ? word : many}`;
 
 @Injectable()
 export class StorageClassService {
@@ -185,41 +189,6 @@ export class StorageClassService {
   }
 
   /**
-   * The profile an S3 bucket is created on: the given one, or the platform
-   * profile when none is chosen. Parameters of the platform profile come from
-   * the cluster; when it cannot be read, SeaweedFS defaults apply.
-   */
-  async resolveForBucket(id: string | null): Promise<{
-    id: string;
-    name: string;
-    parameters: StorageClassParameters;
-  }> {
-    await this.ensurePlatformRow();
-
-    const [row] = await this.db
-      .select({ id: storageClass.id })
-      .from(storageClass)
-      .where(
-        id === null
-          ? eq(storageClass.kind, 'platform')
-          : eq(storageClass.id, id),
-      )
-      .limit(1);
-
-    if (!row) {
-      throw new NotFoundException(NOT_FOUND_MESSAGE);
-    }
-
-    const profile = await this.get(row.id);
-
-    return {
-      id: profile.id,
-      name: profile.name,
-      parameters: profile.parameters ?? fromDriverParameters({}).parameters,
-    };
-  }
-
-  /**
    * The Kubernetes StorageClass name a volume claim uses: the given profile's,
    * or the platform class when none is chosen. Database only, so a save or
    * deploy does not wait on the cluster.
@@ -254,6 +223,15 @@ export class StorageClassService {
 
   async create(payload: CreateStorageClassPayload): Promise<StorageClass> {
     const input = normalizeCreatePayload(payload);
+    const nodes = await this.readStorageNodes();
+
+    // Longhorn places each copy on a different server.
+    if (nodes !== null && input.parameters.number_of_replicas > nodes) {
+      throw new BadRequestException(
+        `${plural(input.parameters.number_of_replicas, 'copy', 'copies')} on different servers need ${input.parameters.number_of_replicas} storage servers; the cluster has ${nodes}`,
+      );
+    }
+
     // Generated here so external_name is known before the single insert.
     const id = randomUUID();
     const values: NewStorageClassRow = {
@@ -340,14 +318,6 @@ export class StorageClassService {
       throw new ForbiddenException(PLATFORM_FORBIDDEN_MESSAGE);
     }
 
-    const buckets = await this.countBuckets(row.id);
-
-    if (buckets > 0) {
-      throw new ConflictException(
-        `Storage class is used by ${plural(buckets, 'S3 bucket')}. Delete them first.`,
-      );
-    }
-
     const services = await this.countVolumeServices(row.id);
 
     if (services > 0) {
@@ -398,14 +368,14 @@ export class StorageClassService {
   }
 
   async environment(): Promise<StorageEnvironment> {
-    const [csiDriverInstalled, volumeServers] = await Promise.all([
+    const [csiDriverInstalled, storageNodes] = await Promise.all([
       this.readCsiDriverInstalled(),
-      this.readVolumeServers(),
+      this.readStorageNodes(),
     ]);
 
     return {
       csi_driver_installed: csiDriverInstalled,
-      volume_servers: volumeServers,
+      storage_nodes: storageNodes,
     };
   }
 
@@ -566,21 +536,6 @@ export class StorageClassService {
   }
 
   /**
-   * PersistentVolumes of the class plus claims that have no such volume yet
-   * (pending, or bound to a volume of another class).
-   */
-  private async countBuckets(id: string): Promise<number> {
-    const [result] = await this.db
-      .select({ value: countRows() })
-      .from(workload)
-      .where(
-        and(eq(workload.storage_class_id, id), eq(workload.type, 's3_bucket')),
-      );
-
-    return result?.value ?? 0;
-  }
-
-  /**
    * Docker services whose pending or running config has a volume on this
    * profile. Claims are only created on deploy, so the cluster alone would
    * miss volumes that are saved but not deployed yet.
@@ -664,7 +619,7 @@ export class StorageClassService {
   private async readCsiDriverInstalled(): Promise<boolean | null> {
     try {
       await this.kubernetes.storageV1.readCSIDriver({
-        name: SEAWEEDFS_PROVISIONER,
+        name: LONGHORN_PROVISIONER,
       });
       return true;
     } catch (error) {
@@ -672,19 +627,26 @@ export class StorageClassService {
     }
   }
 
-  private async readVolumeServers(): Promise<number | null> {
-    const namespace = process.env.SEAWEEDFS_NAMESPACE?.trim() || 'seaweedfs';
-    const name =
-      process.env.SEAWEEDFS_VOLUME_STATEFULSET?.trim() || 'seaweedfs-volume';
-
+  /** Longhorn nodes that are Ready and accept new copies. */
+  private async readStorageNodes(): Promise<number | null> {
     try {
-      const statefulSet =
-        await this.kubernetes.appsV1.readNamespacedStatefulSet({
-          name,
-          namespace,
-        });
+      const list =
+        (await this.kubernetes.customObjects.listNamespacedCustomObject({
+          group: 'longhorn.io',
+          version: 'v1beta2',
+          namespace:
+            process.env.LONGHORN_NAMESPACE?.trim() || 'longhorn-system',
+          plural: 'nodes',
+        })) as { items?: LonghornNode[] };
 
-      return statefulSet.spec?.replicas ?? null;
+      return (list.items ?? []).filter(
+        (node) =>
+          node.spec?.allowScheduling !== false &&
+          node.status?.conditions?.some(
+            (condition) =>
+              condition.type === 'Ready' && condition.status === 'True',
+          ),
+      ).length;
     } catch {
       return null;
     }
@@ -745,7 +707,7 @@ export class StorageClassService {
 
       return {
         ...common,
-        provisioner: live?.provisioner ?? SEAWEEDFS_PROVISIONER,
+        provisioner: live?.provisioner ?? LONGHORN_PROVISIONER,
         // Until the cluster says otherwise, the platform class is the default.
         is_default: live
           ? live.metadata?.annotations?.[DEFAULT_CLASS_ANNOTATION] === 'true'
@@ -768,7 +730,7 @@ export class StorageClassService {
 
     return {
       ...common,
-      provisioner: SEAWEEDFS_PROVISIONER,
+      provisioner: LONGHORN_PROVISIONER,
       is_default: false,
       editable: true,
       parameters: desired.parameters,

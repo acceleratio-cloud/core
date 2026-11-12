@@ -53,13 +53,12 @@ export interface BenchmarkTestDefinition {
  * API can follow progress test by test. Sequential write lays out the test
  * file once; the other tests reuse it.
  *
- * SeaweedFS stores data append-only, so every overwrite consumes new space
- * until the volume is vacuumed, and the volume quota equals the claim size.
- * Write tests are therefore bounded by bytes (the file once, then
- * `io_size` per random writer, about 768 MiB in all), while read tests run
- * for a fixed time. The mount is FUSE, which handles O_DIRECT poorly, so
- * buffered I/O is used with the page cache dropped before each test
- * (`invalidate`) and an fsync at the end of each write test.
+ * Write tests are bounded by bytes (the file once, then `io_size` per random
+ * writer, about 768 MiB in all) so a run fits its 2 GiB claim on any driver,
+ * while read tests run for a fixed time. Buffered I/O is used with the page
+ * cache dropped before each test (`invalidate`) and an fsync at the end of
+ * each write test, so results compare across drivers that differ in
+ * O_DIRECT support.
  */
 export const BENCHMARK_TESTS: BenchmarkTestDefinition[] = [
   {

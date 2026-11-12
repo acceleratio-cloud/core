@@ -230,29 +230,31 @@ Invariants:
   Secret `<external_name>-env` and loads it with `envFrom`, and deletes the Secret when the version
   has none. Empty entrypoint/command/env lists are omitted, so older configs need no migration. Adding a type means adding an enum value and a config
   schema together.
-- An `s3_bucket` workload is a SeaweedFS bucket. Its `name` and `external_name` are both the bucket
-  name, which is unique across all projects (partial unique index `workload_s3_bucket_name_unique`,
-  because SeaweedFS has one bucket namespace). Its config is `{ "storage_class_id": uuid }`, recorded
-  once as version 1 and never changed; `storage_class_id` repeats it as a column so the storage
-  profile cannot be deleted while a bucket uses it. It has no draft and no Deployment: the API sets
+- An `s3_bucket` workload is a RustFS bucket. Its `name` and `external_name` are both the bucket
+  name, which is unique across all projects (partial unique index `workload_s3_bucket_name_unique`
+  on `type = 's3_bucket'`, migration `0031`, because RustFS has one bucket namespace); names starting
+  with `acceleratio-` or `pg-backup-` are reserved for the platform's own buckets. Its config is `{}`,
+  recorded once as version 1 and never changed. It has no draft and no Deployment: the API sets
   its status from the provisioning Job (`deploying` until the bucket exists, then `running` or
   `failed`) and keeps it on the project Secret as the annotations `acceleratio.io/bucket-phase`
   (`provisioning`, `ready`, `failed`) and `acceleratio.io/bucket-message`; a Secret without the
   annotation predates it and counts as ready. The access keys live in the Secret `s3-<bucket>` in the project namespace, never in the
-  database. For other types `storage_class_id` is null.
+  database; in RustFS they are a user attached to the policy `acc-<workload id>`. `storage_class_id`
+  is null for buckets.
 - A `static` workload is a site of uploaded files served by a Docker-style Deployment of
   `joseluisq/static-web-server`. Its config is `{ cpu_max?, ram_max?, replicas?, release_id? }`; the API drops
   every other Docker field, and the server image and flags are set on each apply, not stored, so versions never
-  pin them. Only publishing an upload changes `release_id`. `release_id` names a folder
-  `/sites/<workload id>/<release id>/` on the SeaweedFS filer, which pods read through a read-only, statically
-  provisioned PersistentVolume `static-site-<workload id>` over `/sites/<workload id>`. A release that the draft or a
+  pin them. Only publishing an upload changes `release_id`. `release_id` names the key prefix
+  `<workload id>/<release id>/` in the platform bucket `acceleratio-sites` (`SITES_BUCKET`); each pod copies its
+  release into an emptyDir with an init container, using the site's read-only key from the Secret
+  `static-site-<workload id>` (limited to `<workload id>/`). A release that the draft or a
   version references cannot be written to; releases are deleted with the site, not before.
 - A `postgres` workload is a single-instance CloudNativePG `Cluster` named `external_name`. Its
   config is `{ postgres_version, size_gb, storage_class_id, cpu_max?, ram_max? }`; the version and storage
   profile are fixed after creation, `size_gb` can only grow (and only on a StorageClass that allows
   volume expansion; the claim grows in place and `max_wal_size` follows at a quarter of the disk), and
   every change is applied at once and recorded as a new version (there is no draft, deploy or rollback). `storage_class_id` stays in the
-  config and the column stays null, so the bucket name index never applies. Like a bucket it has no
+  config and the column stays null. Like a bucket it has no
   Deployment: the API reads its status from the Cluster. The password lives only in the Secret
   `<external_name>-credentials`, never in the database. The API reads it only on request
   (`GET …/postgres/credentials`, the console's show button) and returns a new one once from regeneration. External access is not stored either: the NodePort Service `<external_name>-external`
@@ -343,7 +345,7 @@ Invariants:
 
 ### `storage_class`
 
-One row per SeaweedFS-backed Kubernetes StorageClass the console knows about. The row is the stable
+One row per Longhorn-backed Kubernetes StorageClass the console knows about. The row is the stable
 identity other resources reference; the StorageClass object in the cluster is what Kubernetes uses.
 
 Columns: `id`, `kind`, `name`, `description`, `external_name`, `parameters`, `reclaim_policy`,
@@ -354,20 +356,20 @@ Invariants:
 - `kind` is `platform` for the installer's class and `custom` for classes created in the console. At
   most one platform row exists (`storage_class_platform_unique`, a partial unique index). The API
   inserts it idempotently on the first read, named after `PLATFORM_STORAGE_CLASS_NAME` (default
-  `seaweedfs-storage`). Its settings columns stay null: the installer owns the object, so its
+  `longhorn`). Its settings columns stay null: the installer owns the object, so its
   settings are read from the cluster, and the API refuses to update or delete it.
 - `external_name` is the StorageClass name, unique, generated once as `sc-<slug>-<id prefix>` and
   never changed.
-- `parameters` (the SeaweedFS CSI tuning: `replication`, `disk_type`, `collection`, `ttl`,
-  `cache_capacity_mb`, `concurrent_writers`, `chunk_size_limit_mb`, `writeback_cache`),
+- `parameters` (the Longhorn settings: `number_of_replicas`, `data_locality`, `fs_type`,
+  `disk_selector`, `node_selector`; jsonb, so their shape changed without a migration),
   `reclaim_policy` and `volume_binding_mode` are written on create and never updated. Kubernetes
   forbids changing them on an existing StorageClass, so the console duplicates a class instead.
   `name`, `description` and `allow_volume_expansion` can change; the last one is patched on the live
   object.
-- Resources that pick a class (volumes, buckets) reference it with
+- Resources that pick a class (volumes) reference it with
   `storage_class_id uuid references storage_class(id) on delete restrict`. The restriction is the
   database half of the delete guard; the API also refuses to delete a class that PersistentVolumes,
-  claims in the cluster or S3 buckets still use.
+  claims in the cluster or saved service volumes still use.
 
 ### `storage_benchmark`
 

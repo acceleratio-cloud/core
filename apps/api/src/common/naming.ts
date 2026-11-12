@@ -163,7 +163,7 @@ const STORAGE_CLASS_PREFIX = 'sc-';
 /**
  * StorageClass name for a console-created class: `sc-<slug>-<id prefix>`.
  * The `sc-` prefix keeps custom classes apart from installer-managed ones
- * (the platform class is `seaweedfs-storage`). The slug is truncated to 40
+ * (the platform class is `longhorn`). The slug is truncated to 40
  * characters, so the longest name is 3 + 40 + 1 + 12 = 56 characters. Like
  * workload names it is generated once and never follows a rename; a name
  * with no usable characters gets the `workload` slug from `slugify`.

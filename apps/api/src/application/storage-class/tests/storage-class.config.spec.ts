@@ -5,7 +5,6 @@ import {
   normalizeCreatePayload,
   normalizeParameters,
   normalizeUpdatePayload,
-  replicationCopies,
 } from '../storage-class.config';
 
 const asPayload = (value: unknown) => value as CreateStorageClassPayload;
@@ -16,14 +15,11 @@ describe('normalizeCreatePayload', () => {
       name: 'Fast scratch',
       description: null,
       parameters: {
-        replication: '000',
-        disk_type: null,
-        collection: null,
-        ttl: null,
-        cache_capacity_mb: null,
-        concurrent_writers: null,
-        chunk_size_limit_mb: null,
-        writeback_cache: false,
+        number_of_replicas: 1,
+        data_locality: 'best-effort',
+        fs_type: 'ext4',
+        disk_selector: null,
+        node_selector: null,
       },
       reclaim_policy: 'Delete',
       volume_binding_mode: 'Immediate',
@@ -36,14 +32,11 @@ describe('normalizeCreatePayload', () => {
       name: 'SSD',
       description: '  Databases  ',
       parameters: {
-        replication: '001',
-        disk_type: 'ssd',
-        collection: 'db_data',
-        ttl: '7d',
-        cache_capacity_mb: 0,
-        concurrent_writers: 64,
-        chunk_size_limit_mb: 8,
-        writeback_cache: true,
+        number_of_replicas: 2,
+        data_locality: 'disabled',
+        fs_type: 'xfs',
+        disk_selector: ['ssd', ' NVMe ', 'ssd'],
+        node_selector: ['zone-a'],
       },
       reclaim_policy: 'Retain',
       volume_binding_mode: 'WaitForFirstConsumer',
@@ -52,39 +45,37 @@ describe('normalizeCreatePayload', () => {
 
     expect(result.description).toBe('Databases');
     expect(result.parameters).toEqual({
-      replication: '001',
-      disk_type: 'ssd',
-      collection: 'db_data',
-      ttl: '7d',
-      cache_capacity_mb: 0,
-      concurrent_writers: 64,
-      chunk_size_limit_mb: 8,
-      writeback_cache: true,
+      number_of_replicas: 2,
+      data_locality: 'disabled',
+      fs_type: 'xfs',
+      disk_selector: ['ssd', 'nvme'],
+      node_selector: ['zone-a'],
     });
     expect(result.reclaim_policy).toBe('Retain');
     expect(result.volume_binding_mode).toBe('WaitForFirstConsumer');
     expect(result.allow_volume_expansion).toBe(false);
   });
 
-  it('treats empty optional strings as unset', () => {
-    const result = normalizeParameters({ disk_type: '', ttl: '' });
+  it('reads tags from a comma-separated string and empty ones as unset', () => {
+    const result = normalizeParameters({
+      disk_selector: 'ssd, fast',
+      node_selector: '',
+    });
 
-    expect(result.disk_type).toBeNull();
-    expect(result.ttl).toBeNull();
+    expect(result.disk_selector).toEqual(['ssd', 'fast']);
+    expect(result.node_selector).toBeNull();
   });
 
   it.each([
-    [{ replication: '1' }, 'Replication'],
-    [{ replication: 'abc' }, 'Replication'],
-    [{ disk_type: 'SSD' }, 'Disk type'],
-    [{ collection: 'a b' }, 'Collection'],
-    [{ ttl: '7 days' }, 'TTL'],
-    [{ ttl: '0d' }, 'TTL'],
-    [{ cache_capacity_mb: -1 }, 'Cache capacity'],
-    [{ concurrent_writers: 0 }, 'Concurrent writers'],
-    [{ chunk_size_limit_mb: 1.5 }, 'Chunk size limit'],
-    [{ writeback_cache: 'yes' }, 'Write-back cache'],
-    [{ dataCenter: 'dc1' }, 'Unknown storage parameter: dataCenter'],
+    [{ number_of_replicas: 0 }, 'Copies'],
+    [{ number_of_replicas: 4 }, 'Copies'],
+    [{ number_of_replicas: 1.5 }, 'Copies'],
+    [{ data_locality: 'nearby' }, 'Data locality'],
+    [{ number_of_replicas: 2, data_locality: 'strict-local' }, 'only one copy'],
+    [{ fs_type: 'btrfs' }, 'File system'],
+    [{ disk_selector: ['a b'] }, 'Disk selector'],
+    [{ node_selector: 42 }, 'Node selector'],
+    [{ replication: '001' }, 'Unknown storage parameter: replication'],
   ])('rejects parameters %p', (parameters, message) => {
     expect(() =>
       normalizeCreatePayload(asPayload({ name: 'x', parameters })),
@@ -143,17 +134,5 @@ describe('normalizeUpdatePayload', () => {
     expect(() => normalizeUpdatePayload({ kind: 'platform' } as never)).toThrow(
       'Unknown field: kind',
     );
-  });
-});
-
-describe('replicationCopies', () => {
-  it.each([
-    ['000', 1],
-    ['001', 2],
-    ['010', 2],
-    ['200', 3],
-    ['111', 4],
-  ])('%s needs %i copies', (code, copies) => {
-    expect(replicationCopies(code)).toBe(copies);
   });
 });

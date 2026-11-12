@@ -5,7 +5,6 @@ import { ChevronRight, HardDrive, Plus, Trash2 } from 'lucide-react';
 
 import type { DockerWorkloadVolume, StorageClass } from '@acceleratio/shared';
 import type { StorageProfilesState } from '@/modules/workloads/hooks/use-storage-profiles';
-import { describeStorageProfile } from '@/modules/workloads/utils/s3-bucket';
 import {
   cleanMountPath,
   DEFAULT_VOLUME_SIZE,
@@ -37,6 +36,23 @@ import {
 } from '@/shared/components/ui/select';
 import { Slider } from '@/shared/components/ui/slider';
 import { DialogShell, SubmitError } from './workload-domain-dialogs';
+
+/** The settings of a profile, in one short line. */
+const describeStorageProfile = ({ parameters }: StorageClass): string => {
+  if (!parameters) {
+    return 'Settings unavailable.';
+  }
+
+  const copies = parameters.number_of_replicas;
+  const parts = [
+    copies === 1 ? 'One copy' : `${copies} copies on different servers`,
+    parameters.disk_selector
+      ? `${parameters.disk_selector.join(', ')} disks`
+      : null,
+  ].filter(Boolean);
+
+  return `${parts.join(', ')}.`;
+};
 
 const DEPLOY_NOTE = 'Saved as a pending change; Deploy applies it.';
 
@@ -251,7 +267,7 @@ export const ProfileField = ({
             <FieldDescription>
               {selected
                 ? describeStorageProfile(selected)
-                : 'Replication, disk type and expiry of the stored data.'}{' '}
+                : 'Copies, disks and placement of the stored data.'}{' '}
               Fixed once the volume exists. Profiles that keep data after
               deletion are not offered.
             </FieldDescription>

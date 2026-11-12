@@ -146,7 +146,7 @@ describe('benchmark manifests', () => {
     const section = (name: string) =>
       file.split(/\n(?=\[)/).find((part) => part.startsWith(`[${name}]`)) ?? '';
 
-    // Overwrites consume new space on SeaweedFS.
+    // A run fits its 2 GiB claim on any driver.
     expect(section('sequential-write')).not.toContain('time_based');
     expect(section('random-write')).toContain('io_size=64m');
     expect(section('random-write')).not.toContain('time_based');

@@ -1,6 +1,8 @@
 import { BadRequestException } from '@nestjs/common';
 import type {
   CreateStorageClassPayload,
+  StorageClassDataLocality,
+  StorageClassFsType,
   StorageClassParameters,
   StorageClassReclaimPolicy,
   StorageClassVolumeBindingMode,
@@ -9,11 +11,18 @@ import type {
 import { normalizeName } from '@/common/validation';
 
 export const DESCRIPTION_MAX_LENGTH = 1000;
-export const DEFAULT_REPLICATION = '000';
 export const DEFAULT_RECLAIM_POLICY: StorageClassReclaimPolicy = 'Delete';
 export const DEFAULT_VOLUME_BINDING_MODE: StorageClassVolumeBindingMode =
   'Immediate';
 export const DEFAULT_ALLOW_VOLUME_EXPANSION = true;
+export const MAX_REPLICAS = 3;
+export const DEFAULT_PARAMETERS: StorageClassParameters = {
+  number_of_replicas: 1,
+  data_locality: 'best-effort',
+  fs_type: 'ext4',
+  disk_selector: null,
+  node_selector: null,
+};
 
 export const LOCKED_SETTINGS_MESSAGE =
   'Storage settings cannot change after creation. Duplicate the class instead.';
@@ -26,33 +35,22 @@ const VOLUME_BINDING_MODES: readonly StorageClassVolumeBindingMode[] = [
   'Immediate',
   'WaitForFirstConsumer',
 ];
-
-const REPLICATION = /^[0-9]{3}$/;
-// SeaweedFS disk tags and collection names end up in volume file names.
-const TAG = /^[a-z0-9][a-z0-9_-]{0,31}$/;
-// SeaweedFS TTL: a count and a unit (minute, hour, day, week, month, year).
-const TTL = /^[1-9][0-9]{0,4}[mhdwMy]$/;
-
-interface IntegerRange {
-  min: number;
-  max: number;
-}
-
-export const INTEGER_LIMITS = {
-  cache_capacity_mb: { min: 0, max: 1_048_576 },
-  concurrent_writers: { min: 1, max: 1024 },
-  chunk_size_limit_mb: { min: 1, max: 1024 },
-} satisfies Record<string, IntegerRange>;
+const DATA_LOCALITIES: readonly StorageClassDataLocality[] = [
+  'disabled',
+  'best-effort',
+  'strict-local',
+];
+const FS_TYPES: readonly StorageClassFsType[] = ['ext4', 'xfs'];
+// Longhorn tags; the selector parameter joins them with commas.
+const TAG = /^[a-z0-9][a-z0-9._-]{0,62}$/;
+const MAX_TAGS = 10;
 
 const PARAMETER_KEYS: readonly (keyof StorageClassParameters)[] = [
-  'replication',
-  'disk_type',
-  'collection',
-  'ttl',
-  'cache_capacity_mb',
-  'concurrent_writers',
-  'chunk_size_limit_mb',
-  'writeback_cache',
+  'number_of_replicas',
+  'data_locality',
+  'fs_type',
+  'disk_selector',
+  'node_selector',
 ];
 
 const CREATE_KEYS = new Set([
@@ -64,13 +62,6 @@ const CREATE_KEYS = new Set([
   'allow_volume_expansion',
 ]);
 const UPDATE_KEYS = new Set(['name', 'description', 'allow_volume_expansion']);
-
-/**
- * Copies needed by a SeaweedFS replication code `xyz`: the original plus x
- * copies in other data centers, y on other racks and z on other servers.
- */
-export const replicationCopies = (replication: string): number =>
-  1 + Array.from(replication).reduce((sum, digit) => sum + Number(digit), 0);
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -111,41 +102,44 @@ const normalizeBoolean = (value: unknown, label: string): boolean => {
   return value;
 };
 
-const normalizeOptionalTag = (value: unknown, label: string): string | null => {
+/** Tags from an array, or a comma-separated string; null when there are none. */
+const normalizeTags = (value: unknown, label: string): string[] | null => {
   if (value === undefined || value === null || value === '') {
     return null;
   }
 
-  if (typeof value !== 'string' || !TAG.test(value.trim())) {
-    throw new BadRequestException(
-      `${label} must be up to 32 lowercase letters, digits, '-' or '_'`,
-    );
+  const items =
+    typeof value === 'string'
+      ? value.split(',')
+      : Array.isArray(value)
+        ? (value as unknown[])
+        : null;
+
+  if (items === null) {
+    throw new BadRequestException(`${label} must be a list of tags`);
   }
 
-  return value.trim();
-};
+  const tags: string[] = [];
 
-const normalizeOptionalInteger = (
-  value: unknown,
-  label: string,
-  { min, max }: IntegerRange,
-): number | null => {
-  if (value === undefined || value === null) {
-    return null;
+  for (const item of items) {
+    const tag = typeof item === 'string' ? item.trim().toLowerCase() : '';
+
+    if (!TAG.test(tag)) {
+      throw new BadRequestException(
+        `${label} tags are up to 63 lowercase letters, digits, '.', '-' or '_'`,
+      );
+    }
+
+    if (!tags.includes(tag)) {
+      tags.push(tag);
+    }
   }
 
-  if (
-    typeof value !== 'number' ||
-    !Number.isInteger(value) ||
-    value < min ||
-    value > max
-  ) {
-    throw new BadRequestException(
-      `${label} must be a whole number from ${min} to ${max}`,
-    );
+  if (tags.length > MAX_TAGS) {
+    throw new BadRequestException(`${label} takes at most ${MAX_TAGS} tags`);
   }
 
-  return value;
+  return tags.length > 0 ? tags : null;
 };
 
 const normalizeEnum = <T extends string>(
@@ -180,53 +174,45 @@ export const normalizeParameters = (input: unknown): StorageClassParameters => {
     }
   }
 
-  const replication =
-    value.replication === undefined || value.replication === null
-      ? DEFAULT_REPLICATION
-      : value.replication;
+  const replicas =
+    value.number_of_replicas ?? DEFAULT_PARAMETERS.number_of_replicas;
 
-  if (typeof replication !== 'string' || !REPLICATION.test(replication)) {
+  if (
+    typeof replicas !== 'number' ||
+    !Number.isInteger(replicas) ||
+    replicas < 1 ||
+    replicas > MAX_REPLICAS
+  ) {
     throw new BadRequestException(
-      'Replication must be a three-digit SeaweedFS code such as 000 or 001',
+      `Copies must be a whole number from 1 to ${MAX_REPLICAS}`,
     );
   }
 
-  let ttl: string | null = null;
+  const dataLocality = normalizeEnum(
+    value.data_locality,
+    DATA_LOCALITIES,
+    DEFAULT_PARAMETERS.data_locality,
+    'Data locality',
+  );
 
-  if (value.ttl !== undefined && value.ttl !== null && value.ttl !== '') {
-    if (typeof value.ttl !== 'string' || !TTL.test(value.ttl.trim())) {
-      throw new BadRequestException(
-        'TTL must be a number and a unit (m, h, d, w, M, y), such as 7d',
-      );
-    }
-
-    ttl = value.ttl.trim();
+  // Longhorn keeps a strict-local volume on the pod's own server only.
+  if (dataLocality === 'strict-local' && replicas !== 1) {
+    throw new BadRequestException(
+      "A copy kept strictly on the service's server allows only one copy",
+    );
   }
 
   return {
-    replication,
-    disk_type: normalizeOptionalTag(value.disk_type, 'Disk type'),
-    collection: normalizeOptionalTag(value.collection, 'Collection'),
-    ttl,
-    cache_capacity_mb: normalizeOptionalInteger(
-      value.cache_capacity_mb,
-      'Cache capacity',
-      INTEGER_LIMITS.cache_capacity_mb,
+    number_of_replicas: replicas,
+    data_locality: dataLocality,
+    fs_type: normalizeEnum(
+      value.fs_type,
+      FS_TYPES,
+      DEFAULT_PARAMETERS.fs_type,
+      'File system',
     ),
-    concurrent_writers: normalizeOptionalInteger(
-      value.concurrent_writers,
-      'Concurrent writers',
-      INTEGER_LIMITS.concurrent_writers,
-    ),
-    chunk_size_limit_mb: normalizeOptionalInteger(
-      value.chunk_size_limit_mb,
-      'Chunk size limit',
-      INTEGER_LIMITS.chunk_size_limit_mb,
-    ),
-    writeback_cache:
-      value.writeback_cache === undefined || value.writeback_cache === null
-        ? false
-        : normalizeBoolean(value.writeback_cache, 'Write-back cache'),
+    disk_selector: normalizeTags(value.disk_selector, 'Disk selector'),
+    node_selector: normalizeTags(value.node_selector, 'Node selector'),
   };
 };
 
