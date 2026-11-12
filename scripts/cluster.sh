@@ -259,6 +259,12 @@ print_env() {
     value="$(kube -n "$NAMESPACE" get secret api -o "jsonpath={.data.${key}}" 2>/dev/null | base64 -d 2>/dev/null || true)"
     [[ -n "$value" ]] && printf '%s=%s\n' "$key" "$value"
   done
+
+  # The machine has no public IP; its address is reachable from this Mac, so
+  # generated sslip.io domains resolve to it and work locally.
+  value="$(kube get nodes -o 'jsonpath={.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null || true)"
+  [[ -n "$value" ]] && printf 'ACCELERATIO_PUBLIC_IP=%s\n' "$value"
+  return 0
 }
 
 case "${1:-}" in
