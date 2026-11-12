@@ -629,7 +629,7 @@ export interface WorkloadInstancesSnapshot {
 export interface CreateWorkloadPayload {
   name: string;
   type: WorkloadType;
-  /** Required for `docker`; an `s3_bucket` without one uses the platform profile. */
+  /** Required for `docker`; an `s3_bucket` takes none. */
   config?: WorkloadConfig;
 }
 

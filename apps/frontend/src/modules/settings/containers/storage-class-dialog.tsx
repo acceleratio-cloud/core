@@ -83,7 +83,7 @@ const TITLES: Record<StorageClassDialogMode, string> = {
 
 const DESCRIPTIONS: Record<StorageClassDialogMode, string> = {
   create:
-    'A storage profile decides how volumes and buckets keep their data: how many copies, on which disks, and for how long.',
+    'A storage profile decides how volumes keep their data: how many copies, on which disks and servers.',
   duplicate:
     'Creates a new profile from these settings. The original stays unchanged.',
   edit: 'How data is stored is fixed once a profile exists, so volumes never change under you. Duplicate the profile to change it.',

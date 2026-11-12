@@ -208,7 +208,7 @@ export const StorageSettings = ({
     <SettingsSection
       id="storage"
       title="Storage profiles"
-      description="Choose how volumes and buckets keep their data: how many copies, on which disks, and for how long."
+      description="Choose how volumes keep their data: how many copies, on which disks and servers."
       action={
         <Button type="button" size="sm" onClick={() => openDialog('create')}>
           <Plus
@@ -225,8 +225,8 @@ export const StorageSettings = ({
           role="status"
           className="mb-5 rounded-md border border-border bg-surface-muted px-3 py-2.5 text-[13px] text-fg-secondary"
         >
-          Longhorn is not installed in this cluster (a development cluster
-          uses local disks). Profiles can be created, but no volumes will be
+          Longhorn is not installed in this cluster (a development cluster uses
+          local disks). Profiles can be created, but no volumes will be
           provisioned from them.
         </p>
       ) : null}
