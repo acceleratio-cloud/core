@@ -2,31 +2,28 @@ import type { V1Job } from '@kubernetes/client-node';
 import { getKubernetesStatusCode } from '@/vendor/kubernetes/kubernetes-error';
 import type { KubernetesService } from '@/vendor/kubernetes/kubernetes.service';
 import {
+  rustfsAdminSecret,
+  rustfsNamespace,
+  rustfsS3Endpoint,
+} from '@/vendor/s3/rustfs';
+import {
   type BucketJobInput,
   bucketJobName,
   buildBucketJob,
-  DEFAULT_S3_ENDPOINT,
-  DEFAULT_SEAWEEDFS_FILER,
-  DEFAULT_SEAWEEDFS_MASTER,
-  DEFAULT_SEAWEEDFS_NAMESPACE,
-  DEFAULT_SEAWEEDFS_SHELL_IMAGE,
-  type SeaweedfsTarget,
-  SHELL_CONTAINER,
+  DEFAULT_RUSTFS_RC_IMAGE,
+  RC_CONTAINER,
+  type RustfsTarget,
 } from './s3-bucket.manifests';
 
-/** Where `weed shell` Jobs run and what they connect to. */
-export const seaweedfsTarget = (): SeaweedfsTarget => ({
-  namespace:
-    process.env.SEAWEEDFS_NAMESPACE?.trim() || DEFAULT_SEAWEEDFS_NAMESPACE,
-  master: process.env.SEAWEEDFS_MASTER?.trim() || DEFAULT_SEAWEEDFS_MASTER,
-  filer: process.env.SEAWEEDFS_FILER?.trim() || DEFAULT_SEAWEEDFS_FILER,
-  image:
-    process.env.SEAWEEDFS_SHELL_IMAGE?.trim() || DEFAULT_SEAWEEDFS_SHELL_IMAGE,
-});
+export { rustfsS3Endpoint };
 
-/** The S3 gateway, as pods in the cluster reach it. */
-export const seaweedfsS3Endpoint = (): string =>
-  process.env.SEAWEEDFS_S3_ENDPOINT?.trim() || DEFAULT_S3_ENDPOINT;
+/** Where `rc` Jobs run and what they connect to. */
+export const rustfsTarget = (): RustfsTarget => ({
+  namespace: rustfsNamespace(),
+  endpoint: rustfsS3Endpoint(),
+  image: process.env.RUSTFS_RC_IMAGE?.trim() || DEFAULT_RUSTFS_RC_IMAGE,
+  adminSecret: rustfsAdminSecret(),
+});
 
 export const readBucketJob = async (
   kubernetes: KubernetesService,
@@ -79,7 +76,7 @@ export const startBucketJob = async (
   });
 };
 
-/** The log of a Job's pod, where a failed `weed shell` step left its error. */
+/** The log of a Job's pod, where a failed `rc` step left its error. */
 export const readBucketJobLog = async (
   kubernetes: KubernetesService,
   name: string,
@@ -99,7 +96,7 @@ export const readBucketJobLog = async (
     return await kubernetes.coreV1.readNamespacedPodLog({
       name: pod,
       namespace,
-      container: SHELL_CONTAINER,
+      container: RC_CONTAINER,
     });
   } catch {
     return null;

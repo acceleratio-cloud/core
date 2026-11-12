@@ -6,8 +6,6 @@ import {
   normalizePrefix,
 } from '../s3-bucket.config';
 
-const profileId = '7c1d2e3f-4a5b-6c7d-8e9f-0a1b2c3d4e5f';
-
 describe('normalizeBucketName', () => {
   it.each(['abc', 'demo-assets', 'a1-b2-c3', 'x'.repeat(63), '  logs  '])(
     'accepts %p',
@@ -32,38 +30,29 @@ describe('normalizeBucketName', () => {
     );
   });
 
+  it.each([
+    'acceleratio-sites',
+    'pg-backup-3f9a1b2c-4d5e-6f70-8192-a3b4c5d6e7f8',
+  ])('rejects the platform name %p', (name) => {
+    expect(() => normalizeBucketName(name)).toThrow(/are reserved/);
+  });
+
   it.each([undefined, null, '', '   ', 42])('requires a name (%p)', (name) => {
     expect(() => normalizeBucketName(name)).toThrow('Bucket name is required');
   });
 });
 
 describe('normalizeBucketConfig', () => {
-  it.each([
-    undefined,
-    null,
-    {},
-    { storage_class_id: null },
-    { storage_class_id: '' },
-  ])('falls back to the platform profile for %p', (config) => {
-    expect(normalizeBucketConfig(config)).toEqual({ storage_class_id: null });
+  it.each([undefined, null, {}])('accepts an empty config (%p)', (config) => {
+    expect(normalizeBucketConfig(config)).toEqual({});
   });
 
-  it('keeps a chosen profile, lowercased', () => {
-    expect(
-      normalizeBucketConfig({ storage_class_id: profileId.toUpperCase() }),
-    ).toEqual({ storage_class_id: profileId });
-  });
-
-  it('rejects unknown keys', () => {
+  it('rejects any setting, including the old storage profile', () => {
     expect(() =>
-      normalizeBucketConfig({ storage_class_id: profileId, versioning: true }),
-    ).toThrow('Unknown bucket setting: versioning');
-  });
-
-  it.each(['not-a-uuid', 12, ['a']])('rejects the profile id %p', (id) => {
-    expect(() => normalizeBucketConfig({ storage_class_id: id })).toThrow(
-      'storage_class_id must be a storage profile id',
-    );
+      normalizeBucketConfig({
+        storage_class_id: '7c1d2e3f-4a5b-6c7d-8e9f-0a1b2c3d4e5f',
+      }),
+    ).toThrow('Unknown bucket setting: storage_class_id');
   });
 
   it('rejects a config that is not an object', () => {

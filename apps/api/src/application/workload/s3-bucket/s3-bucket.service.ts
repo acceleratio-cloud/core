@@ -25,7 +25,6 @@ import type {
 import { and, asc, eq } from 'drizzle-orm';
 import { ProjectIsolationService } from '@/application/project/project-isolation.service';
 import { ProjectService } from '@/application/project/project.service';
-import { StorageClassService } from '@/application/storage-class/storage-class.service';
 import { WorkloadEventsService } from '@/application/workload/observer/workload-events.service';
 import {
   workload,
@@ -50,13 +49,13 @@ import {
 } from '@/vendor/kubernetes/kubernetes-error';
 import { jobOutcome } from '@/vendor/kubernetes/job-outcome';
 import { KubernetesService } from '@/vendor/kubernetes/kubernetes.service';
+import { S3_REGION } from '@/vendor/s3/rustfs';
 import {
   MANAGED_BY_LABEL,
   MANAGED_BY_VALUE,
 } from '../docker/docker-workload.manifests';
 import { buildDiff } from '@/application/workload/workload-version.diff';
 import { normalizeBucketConfig, normalizeBucketName } from './s3-bucket.config';
-import { diffBucketConfigs } from './s3-bucket.diff';
 import {
   ACTIVE_DEADLINE_SECONDS,
   BUCKET_ERROR_PREFIX,
@@ -68,23 +67,21 @@ import {
   buildProjectSecret,
   type BucketPhase,
   projectSecretName,
-  S3_REGION,
   type BucketJobInput,
   type BucketKeys,
   type BucketOperation,
-  type SeaweedfsTarget,
+  type RustfsTarget,
 } from './s3-bucket.manifests';
 import {
   readBucketJob,
   readBucketJobLog,
-  seaweedfsS3Endpoint,
-  seaweedfsTarget,
+  rustfsS3Endpoint,
+  rustfsTarget,
   startBucketJob,
-} from './seaweedfs-jobs';
+} from './rustfs-jobs';
 
 export const UNSUPPORTED_ACTION_MESSAGE = 'Not supported for S3 buckets';
-export const LOCKED_BUCKET_MESSAGE =
-  'Bucket name and storage profile cannot change after creation';
+export const LOCKED_BUCKET_MESSAGE = 'Bucket name cannot change after creation';
 export const BUCKET_TAKEN_MESSAGE = 'Bucket name is already taken';
 
 const UNIQUE_VIOLATION = '23505';
@@ -142,7 +139,7 @@ export const bucketErrorFromLog = (log: string | null): string => {
 
   return (
     line?.slice(BUCKET_ERROR_PREFIX.length).trim() ||
-    'SeaweedFS did not finish the bucket operation'
+    'Object storage did not finish the bucket operation'
   );
 };
 
@@ -192,11 +189,10 @@ const decode = (secret: V1Secret, key: string): string | undefined => {
 };
 
 /**
- * S3 buckets in SeaweedFS. A bucket has no Deployment, so the workload
- * observer never touches it: this service owns the status. Creating a bucket
- * runs a `weed shell` Job that makes the bucket, applies the storage
- * profile's rules to its path and registers an identity limited to it. The
- * keys live in a Secret in the project namespace, never in the database.
+ * S3 buckets in RustFS. A bucket has no Deployment, so the workload observer
+ * never touches it: this service owns the status. Creating a bucket runs an
+ * `rc` Job that makes the bucket and registers a key limited to it. The keys
+ * live in a Secret in the project namespace, never in the database.
  */
 @Injectable()
 export class S3BucketWorkloadService
@@ -216,7 +212,6 @@ export class S3BucketWorkloadService
     private readonly kubernetes: KubernetesService,
     private readonly events: WorkloadEventsService,
     private readonly versions: WorkloadVersionService,
-    private readonly storageClasses: StorageClassService,
   ) {}
 
   /** Creates that were running when the API stopped are followed again. */
@@ -256,12 +251,12 @@ export class S3BucketWorkloadService
     this.timers.clear();
   }
 
-  private get target(): SeaweedfsTarget {
-    return seaweedfsTarget();
+  private get target(): RustfsTarget {
+    return rustfsTarget();
   }
 
   private get endpoint(): string {
-    return seaweedfsS3Endpoint();
+    return rustfsS3Endpoint();
   }
 
   async list(projectId: string): Promise<Workload[]> {
@@ -310,21 +305,7 @@ export class S3BucketWorkloadService
     }
 
     const bucket = normalizeBucketName(payload?.name);
-    const requested = normalizeBucketConfig(payload?.config);
-    let profile: Awaited<ReturnType<StorageClassService['resolveForBucket']>>;
-
-    try {
-      profile = await this.storageClasses.resolveForBucket(
-        requested.storage_class_id,
-      );
-    } catch (error) {
-      if (error instanceof NotFoundException) {
-        throw new BadRequestException('Storage profile not found');
-      }
-
-      throw error;
-    }
-
+    const config: S3BucketConfig = normalizeBucketConfig(payload?.config);
     const id = randomUUID();
     let row: WorkloadRow;
 
@@ -339,7 +320,6 @@ export class S3BucketWorkloadService
           draft_config: null,
           position: await nextWorkloadPosition(this.db, projectId),
           external_name: bucket,
-          storage_class_id: profile.id,
           last_deployed_at: new Date(),
         })
         .returning();
@@ -351,7 +331,6 @@ export class S3BucketWorkloadService
       throw error;
     }
 
-    const config: S3BucketConfig = { storage_class_id: profile.id };
     const keys = generateBucketKeys();
     const namespace = projectNamespace(projectId);
 
@@ -375,7 +354,6 @@ export class S3BucketWorkloadService
         projectId,
         bucket,
         operation: 'create',
-        parameters: profile.parameters,
         target: this.target,
       };
       const job = await this.startJob(input);
@@ -465,10 +443,9 @@ export class S3BucketWorkloadService
   }
 
   /**
-   * Replaces the bucket's keys. SeaweedFS drops the identity with every old
-   * key and registers it again with a new pair; only once it confirms does
-   * the project Secret get the new pair, so the Secret never holds keys
-   * SeaweedFS does not know. Services read the Secret when they start, so
+   * Replaces the bucket's keys. RustFS registers the new pair and removes
+   * every old one; only once it confirms does the project Secret get the new
+   * pair, so the Secret never holds keys RustFS does not know. Services read the Secret when they start, so
    * they keep the old keys, which stop working, until they restart.
    */
   async rotateCredentials(
@@ -517,7 +494,7 @@ export class S3BucketWorkloadService
 
       if (result.outcome === 'running') {
         throw new ServiceUnavailableException(
-          'SeaweedFS is still applying the new keys. Try again in a minute.',
+          'Object storage is still applying the new keys. Try again in a minute.',
         );
       }
 
@@ -545,7 +522,7 @@ export class S3BucketWorkloadService
         );
 
         throw new ServiceUnavailableException(
-          'SeaweedFS has new keys, but they could not be saved. Regenerate them again.',
+          'Object storage has new keys, but they could not be saved. Regenerate them again.',
         );
       }
 
@@ -608,8 +585,8 @@ export class S3BucketWorkloadService
   }
 
   /**
-   * Deletes the bucket with its data, its storage rule and its identity,
-   * then the keys and the row. The row stays when SeaweedFS does not confirm,
+   * Deletes the bucket with its data and its keys in RustFS, then the
+   * Secret and the row. The row stays when RustFS does not confirm,
    * so a bucket is never forgotten while its data still exists.
    */
   async remove(projectId: string, id: string): Promise<void> {
@@ -634,7 +611,7 @@ export class S3BucketWorkloadService
 
     if (result.outcome === 'running') {
       throw new ServiceUnavailableException(
-        'SeaweedFS is still deleting the bucket. Try again in a minute.',
+        'Object storage is still deleting the bucket. Try again in a minute.',
       );
     }
 
@@ -701,35 +678,13 @@ export class S3BucketWorkloadService
       this.versions.resolveSide(row, base),
       this.versions.resolveSide(row, target),
     ]);
-    const leftConfig = left.config as S3BucketConfig | null;
-    const rightConfig = right.config as S3BucketConfig | null;
-    const names = new Map<string, string>();
-
-    for (const profileId of new Set(
-      [leftConfig?.storage_class_id, rightConfig?.storage_class_id].filter(
-        (value): value is string => typeof value === 'string',
-      ),
-    )) {
-      // A deleted profile still reads, by its id.
-      names.set(
-        profileId,
-        await this.storageClasses
-          .get(profileId)
-          .then((profile) => profile.name)
-          .catch(() => profileId),
-      );
-    }
-
     return buildDiff({
       workloadId: row.id,
       type: this.type,
       base: left.side,
       target: right.side,
-      sections: diffBucketConfigs(
-        leftConfig,
-        rightConfig,
-        (profileId) => names.get(profileId) ?? profileId,
-      ),
+      // A bucket has no settings that change after creation.
+      sections: [],
     });
   }
 
@@ -898,7 +853,7 @@ export class S3BucketWorkloadService
         row,
         secret,
         'failed',
-        'SeaweedFS did not create the bucket in time',
+        'Object storage did not create the bucket in time',
       );
 
       return true;

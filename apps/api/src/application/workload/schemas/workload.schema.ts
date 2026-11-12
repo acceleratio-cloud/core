@@ -96,15 +96,11 @@ export const workload = pgTable(
       table.project_id,
       table.internal_hostname,
     ),
-    // SeaweedFS has one bucket namespace for the whole cluster, so a bucket
-    // name is unique across projects, not only within one. Only buckets set
-    // `storage_class_id`, and the predicate says so instead of naming the
-    // `s3_bucket` enum value: PostgreSQL cannot use an enum value in the
-    // transaction that adds it, and casting the enum to text is not
-    // immutable, which an index predicate requires.
+    // RustFS has one bucket namespace for the whole cluster, so a bucket
+    // name is unique across projects, not only within one.
     uniqueIndex('workload_s3_bucket_name_unique')
       .on(table.external_name)
-      .where(sql`${table.storage_class_id} is not null`),
+      .where(sql`${table.type} = 's3_bucket'`),
   ],
 );
 

@@ -28,6 +28,8 @@
   },
   "dependencies": {
     "@acceleratio/shared": "file:../../packages/shared",
+    "@aws-sdk/client-s3": "^3.1167.0",
+    "@aws-sdk/lib-storage": "^3.1167.0",
     "@kubernetes/client-node": "^2.0.1",
     "@nestjs/common": "^11.0.1",
     "@nestjs/core": "^11.0.1",

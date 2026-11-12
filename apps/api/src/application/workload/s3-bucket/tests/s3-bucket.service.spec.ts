@@ -1,12 +1,7 @@
-import {
-  BadRequestException,
-  ConflictException,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import type { V1Job } from '@kubernetes/client-node';
 import type { ProjectIsolationService } from '@/application/project/project-isolation.service';
 import type { ProjectService } from '@/application/project/project.service';
-import type { StorageClassService } from '@/application/storage-class/storage-class.service';
 import type { Database } from '@/vendor/db/database.constants';
 import type { KubernetesService } from '@/vendor/kubernetes/kubernetes.service';
 import type { WorkloadEventsService } from '../../observer/workload-events.service';
@@ -33,13 +28,9 @@ jest.mock('@/application/project/project.service', () => ({
 jest.mock('@/application/project/project-isolation.service', () => ({
   ProjectIsolationService: class ProjectIsolationService {},
 }));
-jest.mock('@/application/storage-class/storage-class.service', () => ({
-  StorageClassService: class StorageClassService {},
-}));
 
 const projectId = '2f1c9a3e-8b7d-4e6f-9a0b-1c2d3e4f5a6b';
 const workloadId = '3f9a1b2c-4d5e-6f70-8192-a3b4c5d6e7f8';
-const profileId = '7c1d2e3f-4a5b-6c7d-8e9f-0a1b2c3d4e5f';
 const namespace = `project-${projectId}`;
 
 const row = (overrides: Partial<WorkloadRow> = {}): WorkloadRow => ({
@@ -53,7 +44,7 @@ const row = (overrides: Partial<WorkloadRow> = {}): WorkloadRow => ({
   position: { x: 0, y: 0 },
   external_name: 'demo-assets',
   internal_hostname: null,
-  storage_class_id: profileId,
+  storage_class_id: null,
   last_deployed_at: new Date('2026-11-04T10:00:00.000Z'),
   icon: null,
   created_at: new Date('2026-11-04T10:00:00.000Z'),
@@ -152,7 +143,7 @@ const projectSecret = (phase?: string, message?: string) => ({
   data: {
     AWS_ACCESS_KEY_ID: Buffer.from('ACKEY').toString('base64'),
     AWS_SECRET_ACCESS_KEY: Buffer.from('SECRET').toString('base64'),
-    AWS_ENDPOINT_URL: Buffer.from('http://s3:8333').toString('base64'),
+    AWS_ENDPOINT_URL: Buffer.from('http://s3:9000').toString('base64'),
     AWS_REGION: Buffer.from('us-east-1').toString('base64'),
   },
 });
@@ -195,13 +186,6 @@ const createService = () => {
     findByIds: jest.fn().mockResolvedValue(new Map()),
     list: jest.fn().mockResolvedValue([]),
   };
-  const storageClasses = {
-    resolveForBucket: jest.fn().mockResolvedValue({
-      id: profileId,
-      name: 'Fast',
-      parameters: { replication: '001', disk_type: 'ssd', ttl: null },
-    }),
-  };
   const service = new S3BucketWorkloadService(
     database.db,
     projectService,
@@ -209,7 +193,6 @@ const createService = () => {
     kubernetes,
     events as unknown as WorkloadEventsService,
     versions as unknown as WorkloadVersionService,
-    storageClasses as unknown as StorageClassService,
   );
 
   return {
@@ -219,7 +202,6 @@ const createService = () => {
     batchV1,
     events,
     versions,
-    storageClasses,
     ensureIsolation,
   };
 };
@@ -248,7 +230,6 @@ describe('S3BucketWorkloadService.create', () => {
     const created = await service.create(projectId, {
       name: ' demo-assets ',
       type: 's3_bucket',
-      config: { storage_class_id: profileId },
     });
 
     service.onModuleDestroy();
@@ -257,14 +238,13 @@ describe('S3BucketWorkloadService.create', () => {
       name: 'demo-assets',
       type: 's3_bucket',
       external_name: 'demo-assets',
-      storage_class_id: profileId,
     });
     expect(calls.insertValues[0]).not.toHaveProperty('status');
     const [[recorded]] = context.versions.record.mock.calls as [
       [{ workloadId: string; config: unknown }],
     ];
 
-    expect(recorded.config).toEqual({ storage_class_id: profileId });
+    expect(recorded.config).toEqual({});
     expect(context.ensureIsolation).toHaveBeenCalledWith(projectId);
 
     const [projectCall, jobSecretCall] = coreV1.createNamespacedSecret.mock
@@ -281,7 +261,7 @@ describe('S3BucketWorkloadService.create', () => {
       },
     });
     expect(jobSecretCall[0]).toMatchObject({
-      namespace: 'seaweedfs',
+      namespace: 'rustfs',
       body: {
         metadata: {
           ownerReferences: [expect.objectContaining({ uid: 'job-uid' })],
@@ -289,7 +269,7 @@ describe('S3BucketWorkloadService.create', () => {
       },
     });
     expect(batchV1.createNamespacedJob).toHaveBeenCalledWith(
-      expect.objectContaining({ namespace: 'seaweedfs' }),
+      expect.objectContaining({ namespace: 'rustfs' }),
     );
     expect(created).toMatchObject({
       type: 's3_bucket',
@@ -297,7 +277,7 @@ describe('S3BucketWorkloadService.create', () => {
       draft_config: null,
       s3: {
         bucket: 'demo-assets',
-        endpoint: 'http://s3:8333',
+        endpoint: 'http://s3:9000',
         access_key_id: 'ACKEY',
         secret_name: 's3-demo-assets',
       },
@@ -318,18 +298,18 @@ describe('S3BucketWorkloadService.create', () => {
     expect(batchV1.createNamespacedJob).not.toHaveBeenCalled();
   });
 
-  it('maps an unknown storage profile to 400', async () => {
-    const { service, storageClasses } = createService();
+  it('rejects bucket settings', async () => {
+    const { service, results } = createService();
 
-    storageClasses.resolveForBucket.mockRejectedValue(new NotFoundException());
+    results.select.push([]);
 
     await expect(
       service.create(projectId, {
         name: 'demo-assets',
         type: 's3_bucket',
-        config: { storage_class_id: profileId },
+        config: { versioning: true } as never,
       }),
-    ).rejects.toThrow('Storage profile not found');
+    ).rejects.toThrow('Unknown bucket setting: versioning');
   });
 
   it('removes the row again when the cluster refuses the Job', async () => {
@@ -435,7 +415,7 @@ describe('S3BucketWorkloadService provisioning poll', () => {
     expect(writtenAnnotations(context.coreV1)).toEqual({
       'acceleratio.io/bucket-phase': 'failed',
       'acceleratio.io/bucket-message':
-        'SeaweedFS did not create the bucket in time',
+        'Object storage did not create the bucket in time',
     });
   });
 
@@ -531,7 +511,7 @@ describe('S3BucketWorkloadService.remove', () => {
     expect(calls.deletes).toBe(1);
   });
 
-  it('keeps the row when SeaweedFS reports an error', async () => {
+  it('keeps the row when RustFS reports an error', async () => {
     const { service, results, calls, batchV1, coreV1 } = createService();
 
     results.select.push([row()]);
@@ -539,18 +519,18 @@ describe('S3BucketWorkloadService.remove', () => {
       .mockRejectedValueOnce(notFound())
       .mockResolvedValue(job({ failed: 1 }));
     coreV1.readNamespacedPodLog.mockResolvedValue(
-      'BUCKET_ERROR filer unavailable',
+      'BUCKET_ERROR rustfs unavailable',
     );
 
     await expect(service.remove(projectId, workloadId)).rejects.toThrow(
-      'Could not delete the bucket: filer unavailable',
+      'Could not delete the bucket: rustfs unavailable',
     );
     expect(calls.deletes).toBe(0);
   });
 });
 
 describe('S3BucketWorkloadService locked and unsupported actions', () => {
-  it('refuses a rename or a new storage profile', async () => {
+  it('refuses a rename or new settings', async () => {
     const { service, results } = createService();
 
     results.select.push([row()], [row()]);
@@ -560,7 +540,7 @@ describe('S3BucketWorkloadService locked and unsupported actions', () => {
     ).rejects.toThrow(LOCKED_BUCKET_MESSAGE);
     await expect(
       service.update(projectId, workloadId, {
-        config: { storage_class_id: profileId },
+        config: {},
       }),
     ).rejects.toThrow(LOCKED_BUCKET_MESSAGE);
   });
@@ -600,7 +580,7 @@ describe('S3BucketWorkloadService.rotateCredentials', () => {
     status,
   });
 
-  it('saves the new keys only after SeaweedFS takes them', async () => {
+  it('saves the new keys only after RustFS takes them', async () => {
     const { service, results, coreV1, batchV1 } = createService();
 
     // findRow for the rotation, then for the credentials it returns.
@@ -639,7 +619,7 @@ describe('S3BucketWorkloadService.rotateCredentials', () => {
     expect(credentials.secret_access_key).toBe('SECRET');
   });
 
-  it('keeps the old Secret when SeaweedFS refuses', async () => {
+  it('keeps the old Secret when RustFS refuses', async () => {
     const { service, results, coreV1, batchV1 } = createService();
 
     results.select.push([row()]);
@@ -698,7 +678,7 @@ describe('S3BucketWorkloadService.credentials', () => {
 
     await expect(service.credentials(projectId, workloadId)).resolves.toEqual({
       bucket: 'demo-assets',
-      endpoint: 'http://s3:8333',
+      endpoint: 'http://s3:9000',
       region: 'us-east-1',
       access_key_id: 'ACKEY',
       secret_access_key: 'SECRET',
@@ -735,7 +715,7 @@ describe('helpers', () => {
       bucketErrorFromLog('noise\nBUCKET_ERROR first\nBUCKET_ERROR second\n'),
     ).toBe('second');
     expect(bucketErrorFromLog(null)).toBe(
-      'SeaweedFS did not finish the bucket operation',
+      'Object storage did not finish the bucket operation',
     );
   });
 });

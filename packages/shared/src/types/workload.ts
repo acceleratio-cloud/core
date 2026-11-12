@@ -91,13 +91,10 @@ export interface WorkloadEnv {
 }
 
 /**
- * An S3 bucket in SeaweedFS. The bucket is named after the workload and its
- * storage profile is fixed when it is created.
+ * An S3 bucket in RustFS. The bucket is named after the workload and has no
+ * settings of its own.
  */
-export interface S3BucketConfig {
-  /** Storage profile whose replication, disk type and TTL the bucket uses. */
-  storage_class_id: string;
-}
+export type S3BucketConfig = Record<string, never>;
 
 /**
  * A service built from a repository branch read through a GitHub App of the
