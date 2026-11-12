@@ -119,7 +119,12 @@ log is also linked as `/var/log/acceleratio/install.log`.
    DNS/HTTPS and any existing k3s datastore.
 2. **Host packages** — `curl`, `fuse3`, `iptables`, `conntrack`, `socat`, etc.
    and `net.ipv4.ip_forward=1`. Waits for a cloud-init or unattended-upgrades
-   apt/dpkg lock before installing.
+   apt/dpkg lock before installing. If UFW is active, it adds allow rules
+   (tagged `acceleratio-cluster`) for traffic from the pod and service CIDRs
+   (`K3S_CLUSTER_CIDR`, `K3S_SERVICE_CIDR`) and for traffic routed from and to
+   them; otherwise pods cannot reach the API server and CoreDNS never becomes
+   ready. Other UFW rules are left as they are and UFW stays enabled.
+   `--dry-run` prints these rules without adding them.
 3. **k3s** — writes `/etc/rancher/k3s/config.yaml` and installs k3s with
    `cluster-init: true`, flannel disabled, network policy disabled and
    kube-proxy disabled.
@@ -623,7 +628,8 @@ curl -fsSL https://raw.githubusercontent.com/acceleratio-cloud/core/main/deploy/
 
 The uninstaller removes the Helm releases, detaches Cilium BPF filters from the
 host interfaces, removes Cilium CNI files and interfaces, and then removes k3s,
-etcd, the database and SeaweedFS data. Detaching the filters before the CNI is removed keeps
+etcd, the database and SeaweedFS data, and the UFW rules tagged
+`acceleratio-cluster` (only while UFW is active; delete them by hand otherwise). Detaching the filters before the CNI is removed keeps
 SSH and host networking usable without a reboot. It keeps kubeconfig files in
 `/root/.kube` and user home directories.
 

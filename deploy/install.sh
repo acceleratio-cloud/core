@@ -689,12 +689,16 @@ check_ports() {
   fi
 }
 
+ufw_active() {
+  command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep "Status: active" >/dev/null
+}
+
 check_warnings() {
   if systemctl is-active --quiet docker 2>/dev/null; then
     log_warn "Docker is active. It can coexist with k3s/Cilium, but its iptables rules are not managed by this installer."
   fi
-  if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep "Status: active" >/dev/null 2>&1; then
-    log_warn "UFW is active. Open ${ACCELERATIO_CONSOLE_NODE_PORT}/tcp and ${ACCELERATIO_API_NODE_PORT}/tcp for the dashboard, and 6443/tcp, 80/tcp, 443/tcp and 8472/udp between cluster nodes if needed."
+  if ufw_active; then
+    log_warn "UFW is active. The installer allows traffic from ${K3S_CLUSTER_CIDR} and ${K3S_SERVICE_CIDR} and keeps your other rules. Open ${ACCELERATIO_CONSOLE_NODE_PORT}/tcp and ${ACCELERATIO_API_NODE_PORT}/tcp for the dashboard, and 6443/tcp, 80/tcp, 443/tcp and 8472/udp between cluster nodes if needed."
   fi
   if systemctl is-active --quiet firewalld 2>/dev/null; then
     log_warn "firewalld is active. Cilium requires careful firewall configuration; review its rules."
@@ -847,6 +851,23 @@ reset_installation() {
 # ---------------------------------------------------------------------------
 # Host packages.
 # ---------------------------------------------------------------------------
+
+# UFW's default deny drops pod traffic to the host (CoreDNS cannot reach the
+# API server through 10.43.0.1 -> node:6443), so allow the pod and service
+# CIDRs in and through the host. The comment lets uninstall.sh find the rules;
+# ufw skips rules that already exist.
+UFW_RULE_COMMENT="acceleratio-cluster"
+
+configure_ufw() {
+  ufw_active || return 0
+  log_info "UFW is active: allowing ${K3S_CLUSTER_CIDR} and ${K3S_SERVICE_CIDR}"
+  local cidr
+  for cidr in "$K3S_CLUSTER_CIDR" "$K3S_SERVICE_CIDR"; do
+    run ufw allow from "$cidr" comment "$UFW_RULE_COMMENT"
+    run ufw route allow from "$cidr" comment "$UFW_RULE_COMMENT"
+    run ufw route allow to "$cidr" comment "$UFW_RULE_COMMENT"
+  done
+}
 
 wait_for_apt_lock() {
   local deadline=$((SECONDS + 600))
@@ -2612,6 +2633,7 @@ main() {
   fi
 
   step "Installing host packages" install_packages
+  configure_ufw
   step "Installing k3s" install_k3s
   prepull_images
   step "Installing the kubeconfig" configure_kubeconfig

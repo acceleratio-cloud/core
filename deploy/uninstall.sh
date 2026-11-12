@@ -269,6 +269,16 @@ remove_data() {
   fi
 }
 
+# Deletes the UFW rules install.sh tagged with this comment, highest number
+# first so the remaining numbers stay valid.
+remove_ufw_rules() {
+  command -v ufw >/dev/null 2>&1 || return 0
+  local number
+  for number in $(ufw status numbered 2>/dev/null | sed -n 's/^\[ *\([0-9]*\)\].*# acceleratio-cluster *$/\1/p' | sort -rn); do
+    run ufw --force delete "$number"
+  done
+}
+
 print_summary() {
   if (( DRY_RUN )); then
     printf '\n%s\n' "${C_GREEN}Acceleratio uninstall dry run complete${C_RESET}"
@@ -295,6 +305,7 @@ main() {
   remove_cilium
   remove_k3s
   remove_data
+  remove_ufw_rules
   print_summary
 }
 
