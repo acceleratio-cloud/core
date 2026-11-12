@@ -58,7 +58,6 @@ import { buildDiff } from '@/application/workload/workload-version.diff';
 import { normalizeBucketConfig, normalizeBucketName } from './s3-bucket.config';
 import {
   ACTIVE_DEADLINE_SECONDS,
-  BUCKET_ERROR_PREFIX,
   BUCKET_WORKLOAD_LABEL,
   bucketJobName,
   buildJobSecret,
@@ -73,6 +72,7 @@ import {
   type RustfsTarget,
 } from './s3-bucket.manifests';
 import {
+  bucketErrorFromLog,
   readBucketJob,
   readBucketJobLog,
   rustfsS3Endpoint,
@@ -128,19 +128,6 @@ export const generateBucketKeys = (): BucketKeys => {
     accessKeyId: `AC${id}`,
     secretAccessKey: randomBytes(30).toString('base64url'),
   };
-};
-
-/** The message a failed Job left, or a generic one when it left none. */
-export const bucketErrorFromLog = (log: string | null): string => {
-  const line = (log ?? '')
-    .split('\n')
-    .reverse()
-    .find((entry) => entry.startsWith(BUCKET_ERROR_PREFIX));
-
-  return (
-    line?.slice(BUCKET_ERROR_PREFIX.length).trim() ||
-    'Object storage did not finish the bucket operation'
-  );
 };
 
 const phaseOf = (secret: V1Secret): BucketPhase => {

@@ -1,6 +1,7 @@
 import { ConflictException } from '@nestjs/common';
 import { PassThrough, Readable } from 'node:stream';
 import { DockerWorkloadService } from '../../docker/docker-workload.service';
+import { runBucketJob } from '../../s3-bucket/rustfs-jobs';
 import {
   PUBLISH_TO_CHANGE_FILES_MESSAGE,
   PUBLISHED_RELEASE_MESSAGE,
@@ -11,9 +12,12 @@ import {
 jest.mock('@/vendor/kubernetes/kubernetes.service', () => ({
   KubernetesService: class KubernetesService {},
 }));
-jest.mock('@/vendor/seaweedfs/seaweedfs-filer.client', () => ({
-  ...jest.requireActual<object>('@/vendor/seaweedfs/seaweedfs-filer.client'),
-  SeaweedfsFilerClient: class SeaweedfsFilerClient {},
+jest.mock('@/vendor/s3/s3.client', () => ({
+  S3StorageClient: class S3StorageClient {},
+}));
+jest.mock('../../s3-bucket/rustfs-jobs', () => ({
+  ...jest.requireActual<object>('../../s3-bucket/rustfs-jobs'),
+  runBucketJob: jest.fn(),
 }));
 jest.mock('@/application/project/project.service', () => ({
   ProjectService: class ProjectService {},
@@ -28,13 +32,13 @@ jest.mock('@/application/storage-class/storage-class.service', () => ({
 const live = '11111111-1111-4111-8111-111111111111';
 const next = '22222222-2222-4222-8222-222222222222';
 
-/** A filer response that answers `status` once the request body ends. */
-const reply = (status: number, body = '{}') =>
-  Object.assign(Readable.from([Buffer.from(body)]), { statusCode: status });
-
 const build = () => {
   const none = {} as never;
-  const filer = { request: jest.fn() };
+  const s3 = {
+    put: jest.fn().mockResolvedValue(1),
+    head: jest.fn().mockResolvedValue({ ContentLength: 1 }),
+    deletePrefix: jest.fn().mockResolvedValue(0),
+  };
   const service = new StaticWorkloadService(
     none,
     none,
@@ -45,7 +49,7 @@ const build = () => {
     none,
     none,
     none,
-    filer as never,
+    s3 as never,
   );
   const internals = service as unknown as {
     findRow: jest.Mock;
@@ -62,7 +66,7 @@ const build = () => {
     .mockResolvedValue({ config: { release_id: live, replicas: 3 } });
   internals.versionServes = jest.fn().mockResolvedValue(false);
 
-  return { service, internals, filer };
+  return { service, internals, s3 };
 };
 
 afterEach(() => jest.restoreAllMocks());
@@ -93,18 +97,18 @@ describe('StaticWorkloadService.update', () => {
 
 describe('StaticWorkloadService.publishRelease', () => {
   it('keeps the settings read after the index check', async () => {
-    const { service, internals, filer } = build();
+    const { service, internals, s3 } = build();
     const update = jest
       .spyOn(DockerWorkloadService.prototype, 'update')
       .mockResolvedValue({ id: 'w1' } as never);
 
-    filer.request.mockImplementation(() => {
+    s3.head.mockImplementation(() => {
       // A settings save lands while the index is checked.
       internals.findRow.mockResolvedValue({
         id: 'w1',
         draft_config: { release_id: live, replicas: 5 },
       });
-      return Promise.resolve(reply(200));
+      return Promise.resolve({ ContentLength: 1 });
     });
 
     await service.publishRelease('p1', 'w1', next);
@@ -115,9 +119,9 @@ describe('StaticWorkloadService.publishRelease', () => {
   });
 
   it('refuses while files of the release are uploading', async () => {
-    const { service, filer } = build();
+    const { service, s3 } = build();
 
-    filer.request.mockImplementation(
+    s3.put.mockImplementation(
       () => new Promise(() => undefined), // the upload never finishes
     );
     void service.uploadFile(
@@ -148,23 +152,27 @@ describe('StaticWorkloadService.uploadFile', () => {
     );
 
   it('drops a hidden file without writing it', async () => {
-    const { service, filer } = build();
+    const { service, s3 } = build();
 
     await expect(upload(service, '.git/config')).resolves.toBeUndefined();
-    expect(filer.request).not.toHaveBeenCalled();
+    expect(s3.put).not.toHaveBeenCalled();
   });
 
   it('asks the database once per release, not once per file', async () => {
-    const { service, internals, filer } = build();
-
-    filer.request.mockImplementation(() => Promise.resolve(reply(201)));
+    const { service, internals, s3 } = build();
 
     for (const path of ['index.html', 'app.js', 'app.css']) {
       await upload(service, path);
     }
 
     expect(internals.versionServes).toHaveBeenCalledTimes(1);
-    expect(filer.request).toHaveBeenCalledTimes(3);
+    expect(s3.put).toHaveBeenCalledTimes(3);
+    expect(s3.put).toHaveBeenCalledWith(
+      'acceleratio-sites',
+      `w1/${next}/index.html`,
+      expect.any(Readable),
+      'application/octet-stream',
+    );
   });
 
   it('refuses a release the draft serves', async () => {
@@ -181,13 +189,12 @@ describe('StaticWorkloadService.uploadFile', () => {
   });
 
   it('refuses when a publish starts while the database is asked', async () => {
-    const { service, internals, filer } = build();
+    const { service, internals } = build();
     let answer: (value: boolean) => void = () => undefined;
 
     internals.versionServes.mockReturnValue(
       new Promise<boolean>((resolve) => (answer = resolve)),
     );
-    filer.request.mockResolvedValue(reply(200));
     jest
       .spyOn(DockerWorkloadService.prototype, 'update')
       .mockResolvedValue({ id: 'w1' } as never);
@@ -201,16 +208,14 @@ describe('StaticWorkloadService.uploadFile', () => {
   });
 
   it('takes files again once a published draft is discarded', async () => {
-    const { service, filer } = build();
+    const { service } = build();
 
     jest
       .spyOn(DockerWorkloadService.prototype, 'update')
       .mockResolvedValue({ id: 'w1' } as never);
-    filer.request.mockResolvedValue(reply(200));
     await service.publishRelease('p1', 'w1', next);
 
     // The draft was discarded: the database no longer references it.
-    filer.request.mockImplementation(() => Promise.resolve(reply(201)));
     await expect(upload(service)).resolves.toBeUndefined();
   });
 });
@@ -219,10 +224,7 @@ describe('StaticWorkloadService.remove', () => {
   const removable = () => {
     const built = build();
     const kubernetes = {
-      coreV1: {
-        deleteNamespacedPersistentVolumeClaim: jest.fn().mockResolvedValue({}),
-        deletePersistentVolume: jest.fn().mockResolvedValue({}),
-      },
+      coreV1: { deleteNamespacedSecret: jest.fn().mockResolvedValue({}) },
     };
 
     (built.service as unknown as { kubernetes: unknown }).kubernetes =
@@ -231,35 +233,37 @@ describe('StaticWorkloadService.remove', () => {
       .spyOn(DockerWorkloadService.prototype, 'remove')
       .mockResolvedValue(undefined);
     built.internals.findRow.mockResolvedValue({ id: 'w1', project_id: 'p1' });
+    jest.mocked(runBucketJob).mockResolvedValue(null);
 
     return { ...built, kubernetes };
   };
 
-  it('deletes the claim, the volume and every release', async () => {
-    const { service, kubernetes, filer } = removable();
+  it('deletes the key and every release', async () => {
+    const { service, kubernetes, s3 } = removable();
 
-    filer.request.mockResolvedValue(reply(200));
     await service.remove('p1', 'w1');
 
-    expect(
-      kubernetes.coreV1.deleteNamespacedPersistentVolumeClaim,
-    ).toHaveBeenCalledWith({ name: 'static-site-w1', namespace: 'project-p1' });
-    expect(kubernetes.coreV1.deletePersistentVolume).toHaveBeenCalledWith({
+    expect(kubernetes.coreV1.deleteNamespacedSecret).toHaveBeenCalledWith({
       name: 'static-site-w1',
+      namespace: 'project-p1',
     });
-    expect(filer.request).toHaveBeenCalledWith(
+    expect(runBucketJob).toHaveBeenCalledWith(
+      kubernetes,
       expect.objectContaining({
-        method: 'DELETE',
-        path: '/sites/w1/',
-        query: { recursive: 'true' },
+        operation: 'delete',
+        bucket: 'acceleratio-sites',
+        prefix: 'w1/',
       }),
+      null,
+      expect.any(Number),
     );
+    expect(s3.deletePrefix).toHaveBeenCalledWith('acceleratio-sites', 'w1/');
   });
 
   it('only logs when the storage cannot be cleaned up', async () => {
-    const { service, filer } = removable();
+    const { service, s3 } = removable();
 
-    filer.request.mockRejectedValue(new Error('filer down'));
+    s3.deletePrefix.mockRejectedValue(new Error('rustfs down'));
 
     await expect(service.remove('p1', 'w1')).resolves.toBeUndefined();
   });

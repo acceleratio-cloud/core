@@ -32,11 +32,9 @@ import {
   bucketJobName,
   buildJobSecret,
 } from '../s3-bucket/s3-bucket.manifests';
+import { generateBucketKeys } from '../s3-bucket/s3-bucket.service';
 import {
   bucketErrorFromLog,
-  generateBucketKeys,
-} from '../s3-bucket/s3-bucket.service';
-import {
   readBucketJob,
   readBucketJobLog,
   rustfsS3Endpoint,

@@ -14,7 +14,7 @@ export const staticReleasesApi = {
     const { data } = await api.post<StaticRelease>(releasesPath(projectId, id));
     return data;
   },
-  /** Raw body, streamed by the API to SeaweedFS; the type rides in a header. */
+  /** Raw body, streamed by the API to object storage; the type rides in a header. */
   uploadFile: async (
     projectId: string,
     id: string,

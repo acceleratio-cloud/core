@@ -6,10 +6,14 @@ import {
   rustfsNamespace,
   rustfsS3Endpoint,
 } from '@/vendor/s3/rustfs';
+import { jobOutcome } from '@/vendor/kubernetes/job-outcome';
 import {
+  BUCKET_ERROR_PREFIX,
   type BucketJobInput,
   bucketJobName,
+  type BucketKeys,
   buildBucketJob,
+  buildJobSecret,
   DEFAULT_RUSTFS_RC_IMAGE,
   RC_CONTAINER,
   type RustfsTarget,
@@ -101,4 +105,61 @@ export const readBucketJobLog = async (
   } catch {
     return null;
   }
+};
+
+/** The message a failed Job left, or a generic one when it left none. */
+export const bucketErrorFromLog = (log: string | null): string => {
+  const line = (log ?? '')
+    .split('\n')
+    .reverse()
+    .find((entry) => entry.startsWith(BUCKET_ERROR_PREFIX));
+
+  return (
+    line?.slice(BUCKET_ERROR_PREFIX.length).trim() ||
+    'Object storage did not finish the bucket operation'
+  );
+};
+
+/**
+ * Runs a Job to its end: starts it, hands it the keys it registers (create
+ * and rotate) and polls. Resolves with null once it succeeded, otherwise
+ * with why it did not.
+ */
+export const runBucketJob = async (
+  kubernetes: KubernetesService,
+  input: BucketJobInput,
+  keys: BucketKeys | null,
+  timeoutMs: number,
+): Promise<string | null> => {
+  const job = await startBucketJob(kubernetes, input);
+  const name = job.metadata!.name!;
+  const namespace = input.target.namespace;
+
+  if (keys !== null) {
+    await kubernetes.coreV1.createNamespacedSecret({
+      namespace,
+      body: buildJobSecret(input, keys, { name, uid: job.metadata!.uid! }),
+    });
+  }
+
+  for (const deadline = Date.now() + timeoutMs; Date.now() < deadline;) {
+    const current = await readBucketJob(kubernetes, name, namespace).catch(
+      () => null,
+    );
+    const outcome = current === null ? 'running' : jobOutcome(current);
+
+    if (outcome === 'succeeded') {
+      return null;
+    }
+
+    if (outcome === 'failed') {
+      return bucketErrorFromLog(
+        await readBucketJobLog(kubernetes, name, namespace),
+      );
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+
+  return 'Object storage did not finish in time';
 };

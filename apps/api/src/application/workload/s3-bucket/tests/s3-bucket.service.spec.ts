@@ -7,10 +7,10 @@ import type { KubernetesService } from '@/vendor/kubernetes/kubernetes.service';
 import type { WorkloadEventsService } from '../../observer/workload-events.service';
 import type { WorkloadRow } from '../../schemas/workload.schema';
 import type { WorkloadVersionService } from '../../workload-version.service';
+import { bucketErrorFromLog } from '../rustfs-jobs';
 import { BUCKET_WORKLOAD_LABEL } from '../s3-bucket.manifests';
 import {
   BUCKET_TAKEN_MESSAGE,
-  bucketErrorFromLog,
   generateBucketKeys,
   LOCKED_BUCKET_MESSAGE,
   S3BucketWorkloadService,

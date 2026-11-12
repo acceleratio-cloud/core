@@ -1,13 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import type { IncomingMessage } from 'node:http';
 import type { Readable } from 'node:stream';
 import {
-  BadGatewayException,
   BadRequestException,
   ConflictException,
   Inject,
   Injectable,
   Logger,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import type {
   DockerWorkloadConfig,
@@ -27,20 +26,18 @@ import { DATABASE } from '@/vendor/db/database.constants';
 import type { Database } from '@/vendor/db/database.constants';
 import { getKubernetesStatusCode } from '@/vendor/kubernetes/kubernetes-error';
 import { KubernetesService } from '@/vendor/kubernetes/kubernetes.service';
-import {
-  encodeFilerPath,
-  filerUpload,
-  readBody,
-  SeaweedfsFilerClient,
-  type FilerRequest,
-} from '@/vendor/seaweedfs/seaweedfs-filer.client';
+import { sitesBucket } from '@/vendor/s3/rustfs';
+import { S3StorageClient } from '@/vendor/s3/s3.client';
 import { DockerWorkloadNetworkService } from '../docker/docker-workload-network.service';
 import { diffDockerConfigs } from '../docker/docker-workload.diff';
 import type { WorkloadManifestInput } from '../docker/docker-workload.manifests';
 import { DockerWorkloadService } from '../docker/docker-workload.service';
 import { WorkloadEventsService } from '../observer/workload-events.service';
 import { WorkloadStatusService } from '../observer/workload-status.service';
+import { runBucketJob, rustfsTarget } from '../s3-bucket/rustfs-jobs';
 import { normalizeObjectPath } from '../s3-bucket/s3-bucket.config';
+import type { BucketJobInput } from '../s3-bucket/s3-bucket.manifests';
+import { generateBucketKeys } from '../s3-bucket/s3-bucket.service';
 import { workloadVersion } from '../schemas/workload-version.schema';
 import { compareField, changesOf } from '../workload-version.diff';
 import {
@@ -54,18 +51,21 @@ import {
   releaseOf,
 } from './static-workload.config';
 import {
-  buildSiteClaim,
-  buildSiteVolume,
-  releasePath,
+  buildSiteFilesContainer,
+  buildSiteKeySecret,
+  releaseKeyPrefix,
+  SITE_KEY_LABEL,
   SITE_MOUNT_PATH,
+  siteKeySecretName,
+  sitePrefix,
   siteServerArgs,
-  sitesRoot,
   SITE_READINESS_PROBE,
-  siteVolumeName,
   STATIC_SERVER_IMAGE,
 } from './static-workload.manifests';
 
 const DEFAULT_CONTENT_TYPE = 'application/octet-stream';
+/** The key Job pulls the rc image on a site's first deploy. */
+const KEY_JOB_WAIT_MS = 3 * 60 * 1000;
 
 const releaseKey = (workloadId: string, releaseId: string): string =>
   `${workloadId}/${releaseId}`;
@@ -81,10 +81,11 @@ export const PUBLISH_TO_CHANGE_FILES_MESSAGE =
 /**
  * A site of uploaded files. It runs as a Docker service whose image is a
  * static file server, so domains, instances, logs, versions and rollback are
- * the Docker service's. Files go to the SeaweedFS filer under
- * `/sites/<workload>/<release>/`; the pods mount `/sites/<workload>`
- * read-only and the version picks the release, so a deploy is a rolling
- * update onto new files and a rollback serves the old ones again.
+ * the Docker service's. Files go to the platform's sites bucket in RustFS
+ * under `<workload>/<release>/`; each pod copies its version's release into
+ * an emptyDir before the server starts, with the site's own read-only key,
+ * so a deploy is a rolling update onto new files and a rollback serves the
+ * old ones again. A pod starts slower the bigger the site.
  *
  * shortcut: releases are kept until the site is deleted, including uploads
  * never published; prune unreferenced ones if storage becomes a concern.
@@ -120,7 +121,7 @@ export class StaticWorkloadService extends DockerWorkloadService {
     versions: WorkloadVersionService,
     network: DockerWorkloadNetworkService,
     storageClasses: StorageClassService,
-    private readonly filer: SeaweedfsFilerClient,
+    private readonly s3: S3StorageClient,
   ) {
     super(
       db,
@@ -223,31 +224,32 @@ export class StaticWorkloadService extends DockerWorkloadService {
     return super.deploy(projectId, id, author);
   }
 
-  /** Deletes the service, then the site's volume and every release. */
+  /** Deletes the service, then the site's key and every release. */
   override async remove(projectId: string, id: string): Promise<void> {
     const row = await this.findRow(projectId, id);
 
     await super.remove(projectId, id);
 
-    const name = siteVolumeName(row.id);
-
     try {
       await this.ignoreNotFound(() =>
-        this.kubernetes.coreV1.deleteNamespacedPersistentVolumeClaim({
-          name,
+        this.kubernetes.coreV1.deleteNamespacedSecret({
+          name: siteKeySecretName(row.id),
           namespace: projectNamespace(row.project_id),
         }),
       );
-      await this.ignoreNotFound(() =>
-        this.kubernetes.coreV1.deletePersistentVolume({ name }),
-      );
-      const response = await this.filer.request({
-        method: 'DELETE',
-        path: `${sitesRoot(row.id)}/`,
-        query: { recursive: 'true' },
-      });
 
-      await this.expectOk(response, 'delete the site files', [404]);
+      const failure = await runBucketJob(
+        this.kubernetes,
+        this.keyJobInput(row, 'delete'),
+        null,
+        KEY_JOB_WAIT_MS,
+      );
+
+      if (failure !== null) {
+        throw new Error(`the site key was not removed: ${failure}`);
+      }
+
+      await this.s3.deletePrefix(sitesBucket(), sitePrefix(row.id));
     } catch (error) {
       // The service is already gone; what is left is storage, not a site.
       this.siteLogger.warn(
@@ -311,14 +313,12 @@ export class StaticWorkloadService extends DockerWorkloadService {
     this.writing.set(key, (this.writing.get(key) ?? 0) + 1);
 
     try {
-      const upload = filerUpload(
-        `${releasePath(row.id, releaseId)}/${encodeFilerPath(path)}`,
-        path.split('/').pop()!,
-        contentType?.trim() || DEFAULT_CONTENT_TYPE,
+      await this.s3.put(
+        sitesBucket(),
+        `${releaseKeyPrefix(row.id, releaseId)}${path}`,
         body,
+        contentType?.trim() || DEFAULT_CONTENT_TYPE,
       );
-
-      await this.expectOk(await this.send(upload.request), 'upload the file');
     } finally {
       const left = (this.writing.get(key) ?? 1) - 1;
 
@@ -336,7 +336,7 @@ export class StaticWorkloadService extends DockerWorkloadService {
     return normalizeStaticConfig(config);
   }
 
-  /** The server serves the version's release from the read-only volume. */
+  /** The server serves the version's release, copied in by an init container. */
   protected override async prepareManifest(
     input: WorkloadManifestInput,
   ): Promise<WorkloadManifestInput> {
@@ -346,7 +346,9 @@ export class StaticWorkloadService extends DockerWorkloadService {
       throw new ConflictException(NO_FILES_MESSAGE);
     }
 
-    await this.ensureSiteVolume(input);
+    await this.ensureSiteKey(input);
+
+    const target = rustfsTarget();
 
     return {
       ...input,
@@ -358,9 +360,15 @@ export class StaticWorkloadService extends DockerWorkloadService {
         command: siteServerArgs(releaseId),
       },
       readiness_probe: SITE_READINESS_PROBE,
-      read_only_claim: {
-        name: siteVolumeName(input.id),
+      files: {
         mount_path: SITE_MOUNT_PATH,
+        init: buildSiteFilesContainer({
+          workloadId: input.id,
+          releaseId,
+          bucket: sitesBucket(),
+          endpoint: target.endpoint,
+          image: target.image,
+        }),
       },
     };
   }
@@ -387,18 +395,60 @@ export class StaticWorkloadService extends DockerWorkloadService {
     ];
   }
 
-  private async ensureSiteVolume(input: WorkloadManifestInput): Promise<void> {
-    await this.ignoreConflict(() =>
-      this.kubernetes.coreV1.createPersistentVolume({
-        body: buildSiteVolume(input),
-      }),
-    );
-    await this.ignoreConflict(() =>
-      this.kubernetes.coreV1.createNamespacedPersistentVolumeClaim({
+  /**
+   * The site's read-only key to its prefix of the sites bucket. It is made
+   * on the first deploy and kept in the project namespace; the Secret is
+   * written only once RustFS knows the key, so a failed attempt is retried by
+   * the next deploy (which also removes the key of the failed attempt).
+   */
+  private async ensureSiteKey(input: WorkloadManifestInput): Promise<void> {
+    try {
+      const secret = await this.kubernetes.coreV1.readNamespacedSecret({
+        name: siteKeySecretName(input.id),
         namespace: projectNamespace(input.project_id),
-        body: buildSiteClaim(input),
-      }),
+      });
+
+      if (secret.metadata?.labels?.[SITE_KEY_LABEL] === input.id) {
+        return;
+      }
+    } catch (error) {
+      if (getKubernetesStatusCode(error) !== 404) {
+        throw error;
+      }
+    }
+
+    const keys = generateBucketKeys();
+    const failure = await runBucketJob(
+      this.kubernetes,
+      this.keyJobInput(input, 'create'),
+      keys,
+      KEY_JOB_WAIT_MS,
     );
+
+    if (failure !== null) {
+      throw new ServiceUnavailableException(
+        `Could not create the site's access key: ${failure}`,
+      );
+    }
+
+    await this.kubernetes.coreV1.createNamespacedSecret({
+      namespace: projectNamespace(input.project_id),
+      body: buildSiteKeySecret(input, keys),
+    });
+  }
+
+  private keyJobInput(
+    site: Pick<WorkloadManifestInput, 'id' | 'project_id'>,
+    operation: 'create' | 'delete',
+  ): BucketJobInput {
+    return {
+      workloadId: site.id,
+      projectId: site.project_id,
+      bucket: sitesBucket(),
+      prefix: sitePrefix(site.id),
+      operation,
+      target: rustfsTarget(),
+    };
   }
 
   private async versionServes(
@@ -423,60 +473,13 @@ export class StaticWorkloadService extends DockerWorkloadService {
     workloadId: string,
     releaseId: string,
   ): Promise<void> {
-    const response = await this.send({
-      method: 'GET',
-      path: `${releasePath(workloadId, releaseId)}/index.html`,
-      query: { metadata: 'true' },
-      headers: { Accept: 'application/json' },
-    });
-
-    if (response.statusCode === 404) {
-      response.resume();
-      throw new BadRequestException(MISSING_INDEX_MESSAGE);
-    }
-
-    await this.expectOk(response, 'read the upload');
-  }
-
-  private async send(request: FilerRequest): Promise<IncomingMessage> {
-    try {
-      return await this.filer.request(request);
-    } catch (error) {
-      this.siteLogger.warn(
-        `SeaweedFS filer request failed: ${(error as Error).message}`,
-      );
-
-      throw new BadGatewayException('SeaweedFS could not be reached');
-    }
-  }
-
-  /** Reads the body; anything but 2xx (or an `allowed` status) is a 502. */
-  private async expectOk(
-    response: IncomingMessage,
-    action: string,
-    allowed: number[] = [],
-  ): Promise<void> {
-    const status = response.statusCode ?? 500;
-    const text = await readBody(response);
-
-    if ((status >= 200 && status < 300) || allowed.includes(status)) {
-      return;
-    }
-
-    this.siteLogger.warn(
-      `Filer could not ${action}: ${status} ${text.slice(0, 300)}`,
+    const index = await this.s3.head(
+      sitesBucket(),
+      `${releaseKeyPrefix(workloadId, releaseId)}index.html`,
     );
 
-    throw new BadGatewayException(`SeaweedFS could not ${action}`);
-  }
-
-  private async ignoreConflict(run: () => Promise<unknown>): Promise<void> {
-    try {
-      await run();
-    } catch (error) {
-      if (getKubernetesStatusCode(error) !== 409) {
-        throw error;
-      }
+    if (index === null) {
+      throw new BadRequestException(MISSING_INDEX_MESSAGE);
     }
   }
 

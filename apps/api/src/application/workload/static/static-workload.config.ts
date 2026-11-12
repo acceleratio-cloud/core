@@ -9,7 +9,7 @@ import { STATIC_SERVER_IMAGE } from './static-workload.manifests';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
-/** A release id from a request; it becomes a filer folder name. */
+/** A release id from a request; it becomes a key prefix in the sites bucket. */
 export const releaseIdOf = (value: unknown): string => {
   if (typeof value !== 'string' || !UUID.test(value.toLowerCase())) {
     throw new BadRequestException('release_id must be a UUID');

@@ -24,3 +24,7 @@ export const rustfsS3Endpoint = (): string =>
  */
 export const rustfsApiEndpoint = (): string =>
   process.env.RUSTFS_S3_API_ENDPOINT?.trim() || rustfsS3Endpoint();
+
+/** The platform bucket with every static site's files. */
+export const sitesBucket = (): string =>
+  process.env.SITES_BUCKET?.trim() || 'acceleratio-sites';
