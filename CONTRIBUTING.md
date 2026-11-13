@@ -22,32 +22,79 @@ vulnerability, do not open a public issue: follow [SECURITY.md](./SECURITY.md).
 
 ## Development setup
 
-Requirements: Docker, [Bun](https://bun.sh) 1.4 and Node.js 22.
+The API and the console run from source on your machine against a development
+server: an Ubuntu or Debian server (VM or bare metal) that only you use. It
+runs the whole platform except the API and the console, and publishes
+PostgreSQL (port `30432`) and RustFS S3 (port `30900`) for your local API.
+
+**Never point local development at a shared or production cluster.**
+
+On the server ([requirements](./scripts/README.md#requirements)):
 
 ```bash
-make dev
+curl -fsSL https://raw.githubusercontent.com/acceleratio-cloud/core/main/scripts/install.sh | sudo bash -s -- --dev
 ```
 
-This installs dependencies, starts PostgreSQL through Docker Compose, applies
-migrations, and runs the API on <http://localhost:8080> and the console on
-<http://localhost:3000>. Create the first account at
-<http://localhost:3000/auth/installation>.
+It ends by printing the values for `apps/api/.env`. Allow ports `30432`,
+`30900` and `6443` from your address only: PostgreSQL and S3 are protected by
+their passwords alone. Run the command again to update the server; to test
+installer changes, copy your `scripts/install.sh` there and run
+`sudo ./install.sh --dev`.
 
-Useful targets: `make setup` (prepare without starting servers), `make db-up` /
-`make db-down`, `make migrate`, and `make cluster-up` / `make cluster-down` for a
-local OrbStack cluster (k3s + Cilium). The manual sequence is in the
-[README](./README.md).
+On your machine you need [Bun](https://bun.sh) 1.4 and Node.js 22:
 
-**Never point local development at a shared or production cluster.** `make dev`
-refuses non-local Kubernetes contexts unless `ALLOW_REMOTE_KUBECONTEXT=1` is
-set; do not set it for a cluster you care about.
+```bash
+scp root@<server>:/etc/acceleratio/kubeconfig.yaml ~/.kube/acceleratio-dev.yaml
+
+cp apps/api/.env.example apps/api/.env
+# Add the values the installer printed and KUBECONFIG=~/.kube/acceleratio-dev.yaml,
+# and set BETTER_AUTH_SECRET and INTEGRATIONS_ENCRYPTION_KEY (openssl rand -base64 32).
+cp apps/frontend/.env.example apps/frontend/.env.local
+
+(cd packages/shared && bun install && bun run build)
+(cd apps/api && bun install && bun run db:migrate)
+(cd apps/frontend && bun install)
+
+# One terminal each
+(cd apps/api && bun run start:dev)       # http://localhost:8080
+(cd apps/frontend && bun run dev)        # http://localhost:3000
+```
+
+Create the first account at <http://localhost:3000/auth/installation>.
+
+To change the API port, update `PORT` and `BETTER_AUTH_URL` in `apps/api/.env`
+and `NEXT_PUBLIC_API_URL` in `apps/frontend/.env.local`. For another console
+port, run `bun run dev -- --port 3001` and add its origin to `CORS_ORIGINS`.
+
+### GitHub integration
+
+Settings → Integrations creates a GitHub App that works on `localhost`, but
+GitHub delivers webhooks (pushes, uninstall, suspend) only over HTTPS. To
+receive them, tunnel the API, for example with
+`ngrok http --url=<your-static-domain> 8080`, set
+`GITHUB_CALLBACK_BASE_URL=https://<your-static-domain>` in `apps/api/.env` and
+restart the API before creating the App.
+
+### Container images
+
+Both images build from the repository root, because the apps depend on
+`packages/shared`:
+
+```bash
+docker build -f apps/api/Dockerfile -t acceleratio/api:dev .
+docker build -f apps/frontend/Dockerfile -t acceleratio/console:dev .
+```
+
+The API image does not migrate on start; run
+`node dist/vendor/db/migrate.js` in it first. The console reads `API_URL` (and
+optionally `API_INTERNAL_URL`) at start. Both answer `GET /healthz`.
 
 ## Repository layout
 
 - `apps/api` - NestJS API ("core"), Drizzle schema and migrations.
 - `apps/frontend` - Next.js console.
 - `packages/shared` - the typed contract between the two.
-- `deploy` - installer, updater and uninstaller for a k3s server.
+- `scripts` - installer, updater and uninstaller for a k3s server.
 
 Conventions live in [docs/FILE_STRUCTURE.md](./docs/FILE_STRUCTURE.md). Read it
 before adding files: for example, tests go in a `tests/` folder and are never
@@ -93,7 +140,7 @@ existing migration, and never reorder or remove enum values. See
 
 ### Deploy scripts
 
-Changes to `deploy/*.sh` must keep working on a fresh Ubuntu 22.04, Ubuntu
+Changes to `scripts/*.sh` must keep working on a fresh Ubuntu 22.04, Ubuntu
 24.04 and Debian 12 server. Say in the PR how you tested them (`--dry-run` is
 not enough for behavior changes).
 
