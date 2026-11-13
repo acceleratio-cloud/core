@@ -1,7 +1,6 @@
 "use client"
 
 import { useState } from "react"
-import { useRouter } from "next/navigation"
 import { useForm } from "react-hook-form"
 
 import { getApiErrorMessage } from "@/api"
@@ -23,7 +22,6 @@ interface Form {
 }
 
 export const InstallationForm = () => {
-  const router = useRouter()
   const { signUp } = useAuth()
   const [formError, setFormError] = useState<string | null>(null)
   const {
@@ -38,7 +36,9 @@ export const InstallationForm = () => {
 
     try {
       await signUp({ name: fullName, email, password })
-      router.replace("/")
+      // A full load: the client router still holds the redirects it got
+      // before the account existed ("/" -> /auth -> /auth/installation).
+      window.location.replace("/")
     } catch (error) {
       setFormError(getApiErrorMessage(error))
     }

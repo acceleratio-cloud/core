@@ -1,4 +1,4 @@
-import { notFound } from "next/navigation";
+import { redirect } from "next/navigation";
 import { connection } from "next/server";
 
 import { getAuthStatus } from "@/api/auth/server";
@@ -11,8 +11,9 @@ export default async function InstallationPage() {
 
   const status = await getAuthStatus();
 
+  // Already set up: the dashboard sends signed-out visitors on to sign-in.
   if (status?.initialized) {
-    notFound();
+    redirect("/");
   }
 
   return (
