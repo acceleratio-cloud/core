@@ -691,7 +691,11 @@ export const EditDockerWorkloadConfig = () => {
                   key={name}
                   label={label}
                   htmlFor={`workload-config-${name}`}
-                  hint={`For example ${example}.`}
+                  hint={
+                    <span className="whitespace-nowrap">
+                      e.g. <code className="font-mono">{example}</code>
+                    </span>
+                  }
                 >
                   <Input
                     id={`workload-config-${name}`}
