@@ -37,6 +37,17 @@ const postManifest = (postUrl: string, manifest: string) => {
   form.submit();
 };
 
+const NAME_CHARS = 'abcdefghijklmnopqrstuvwxyz0123456789';
+
+/** GitHub App names are global, so the default carries a timestamp and a random suffix. */
+const generateAppName = () => {
+  const suffix = Array.from(
+    { length: 4 },
+    () => NAME_CHARS[Math.floor(Math.random() * NAME_CHARS.length)],
+  ).join('');
+  return `acceleratio-${Date.now()}-${suffix}`;
+};
+
 type GithubAppDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -46,7 +57,7 @@ export const GithubAppDialog = ({
   open,
   onOpenChange,
 }: GithubAppDialogProps) => {
-  const [name, setName] = useState('');
+  const [name, setName] = useState(generateAppName);
   const [organization, setOrganization] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
