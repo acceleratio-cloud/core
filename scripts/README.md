@@ -1,6 +1,6 @@
 # Installer
 
-`deploy/install.sh` turns a fresh Ubuntu or Debian server into an Acceleratio
+`scripts/install.sh` turns a fresh Ubuntu or Debian server into an Acceleratio
 cloud with a single command. It works on bare metal, a private server or any
 other hardware. It provisions a single-node Kubernetes cluster:
 
@@ -32,7 +32,9 @@ and then deploys Acceleratio into the `acceleratio` namespace:
   every start through an init container
 - the console (`ghcr.io/acceleratio-cloud/console:0.3.1`)
 
-When it finishes, the installer prints the dashboard URL.
+When it finishes, the installer prints the dashboard URL. With `--dev` it
+installs everything except the API and the console; see
+[Development server](#development-server).
 
 ## Tested
 
@@ -56,7 +58,7 @@ install, a re-run, `--reset` and `uninstall.sh`.
 - Linux kernel 5.10 or newer
 - a VM or bare metal: Longhorn attaches volumes over iSCSI, which LXC and
   OpenVZ containers cannot run (the installer stops before making changes
-  there; `STORAGE_BACKEND=local-path` is for development machines only)
+  there; `STORAGE_BACKEND=local-path` runs on them without storage profiles)
 - disks with power-loss protection (or a battery-backed controller) for
   production data: Longhorn writes with `O_DIRECT` but does not send a cache
   flush to the disk on `fsync`
@@ -81,7 +83,7 @@ acceleratio longhorn` markers, which `uninstall.sh` and `--reset` remove.
 On the server, with root:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/acceleratio-cloud/core/main/deploy/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/acceleratio-cloud/core/main/scripts/install.sh | sudo bash
 ```
 
 When it finishes, it prints the dashboard address:
@@ -104,24 +106,25 @@ working with the system.
 Flags go after `bash -s --`, so the same one-liner works without a checkout:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/acceleratio-cloud/core/main/deploy/install.sh | sudo bash -s -- --dry-run
-curl -fsSL https://raw.githubusercontent.com/acceleratio-cloud/core/main/deploy/install.sh | sudo bash -s -- --config /root/install.env
-curl -fsSL https://raw.githubusercontent.com/acceleratio-cloud/core/main/deploy/install.sh | sudo bash -s -- --reset --yes
-curl -fsSL https://raw.githubusercontent.com/acceleratio-cloud/core/main/deploy/install.sh | sudo bash -s -- --help
+curl -fsSL https://raw.githubusercontent.com/acceleratio-cloud/core/main/scripts/install.sh | sudo bash -s -- --dry-run
+curl -fsSL https://raw.githubusercontent.com/acceleratio-cloud/core/main/scripts/install.sh | sudo bash -s -- --config /root/install.env
+curl -fsSL https://raw.githubusercontent.com/acceleratio-cloud/core/main/scripts/install.sh | sudo bash -s -- --reset --yes
+curl -fsSL https://raw.githubusercontent.com/acceleratio-cloud/core/main/scripts/install.sh | sudo bash -s -- --help
 ```
 
 Or from a checkout:
 
 ```bash
-sudo ./deploy/install.sh
+sudo ./scripts/install.sh
 ```
 
 Useful flags:
 
 ```bash
-sudo ./deploy/install.sh --dry-run                 # preflight and planned actions only
-sudo ./deploy/install.sh --config ./install.env    # override versions and paths
-sudo ./deploy/install.sh --reset --yes             # destructive clean reinstall
+sudo ./scripts/install.sh --dev                     # development server, see below
+sudo ./scripts/install.sh --dry-run                 # preflight and planned actions only
+sudo ./scripts/install.sh --config ./install.env    # override versions and paths
+sudo ./scripts/install.sh --reset --yes             # destructive clean reinstall
 ```
 
 Logs are written to `/var/log/acceleratio/install-<timestamp>.log`; the latest
@@ -208,7 +211,7 @@ Every variable can be set in the environment or in a file passed to
 | `CILIUM_CNI_CONF_PATH` | `/etc/cni/net.d` | CNI config directory used by the container runtime |
 | `CILIUM_CNI_BIN_PATH` | `/opt/cni/bin` | CNI plugin directory used by the container runtime |
 | `HELM_VERSION` | `3.18.0` | Helm binary version |
-| `STORAGE_BACKEND` | `longhorn` | `local-path` uses the k3s local-path provisioner instead (development machines only) |
+| `STORAGE_BACKEND` | `longhorn` | `local-path` uses the k3s local-path provisioner instead, for hosts without iSCSI; no storage profiles |
 | `LONGHORN_CHART_VERSION` | `1.13.0` | Longhorn chart version |
 | `LONGHORN_NAMESPACE` | `longhorn-system` | Longhorn namespace |
 | `LONGHORN_RELEASE` | `longhorn` | Helm release name |
@@ -239,6 +242,9 @@ Every variable can be set in the environment or in a file passed to
 | `POSTGRES_DATA_DIR` | `/var/lib/acceleratio/postgres` | hostPath for the database files |
 | `ACCELERATIO_CONSOLE_NODE_PORT` | `30300` | node port of the console |
 | `ACCELERATIO_API_NODE_PORT` | `30080` | node port of the API |
+| `ACCELERATIO_DEV` | `0` | `1` is the same as `--dev` |
+| `ACCELERATIO_POSTGRES_NODE_PORT` | `30432` | node port of PostgreSQL (`--dev` only) |
+| `RUSTFS_NODE_PORT` | `30900` | node port of RustFS S3 (`--dev` only) |
 | `ACCELERATIO_PUBLIC_HOST` | public IPv4 | host name or IP used in the dashboard URLs |
 | `ACCELERATIO_CONSOLE_URL` | `http://<host>:30300` | full console URL, e.g. behind a domain or reverse proxy |
 | `ACCELERATIO_API_URL` | `http://<host>:30080` | full API URL; the browser must reach it |
@@ -429,7 +435,7 @@ installer their final URLs:
 ```bash
 ACCELERATIO_CONSOLE_URL=https://console.example.com \
 ACCELERATIO_API_URL=https://api.example.com \
-  sudo -E ./deploy/install.sh
+  sudo -E ./scripts/install.sh
 ```
 
 Re-running with different URLs updates the deployments. Keep the console and
@@ -458,7 +464,7 @@ running the installer. Traefik keeps its ACME account and certificates in
 `/var/lib/acceleratio/traefik` on the server.
 
 Installs made before this feature must re-run the installer once
-(`sudo ./deploy/install.sh`) so it adds the Traefik certificate resolver and
+(`sudo ./scripts/install.sh`) so it adds the Traefik certificate resolver and
 passes the server IP to the API; the console refuses to apply a domain until
 then. The installer replaces the `kube-system/traefik` HelmChartConfig; if you
 had your own, it saves a copy next to the manifest first.
@@ -471,6 +477,28 @@ platform does not depend on its own storage layer to start. The database passwor
 session secret are generated once and reused by later runs. Back up
 `/var/lib/acceleratio/postgres` and `/etc/acceleratio/acceleratio.env` together.
 
+## Development server
+
+`sudo ./scripts/install.sh --dev` prepares a server for developing Acceleratio:
+the API and the console run from source on the developer's machine, so the
+installer skips them (and removes them from a server installed without
+`--dev`). Everything else is installed as on a production server, plus two
+NodePort Services for the local API:
+
+- `postgres-external` in `acceleratio`: PostgreSQL on port `30432`
+  (`ACCELERATIO_POSTGRES_NODE_PORT`)
+- `rustfs-external` in `rustfs`: RustFS S3 on port `30900` (`RUSTFS_NODE_PORT`)
+
+The summary prints the `apps/api/.env` values: `DATABASE_URL`,
+`RUSTFS_S3_API_ENDPOINT`, `PLATFORM_STORAGE_CLASS_NAME`, `ACCELERATIO_PUBLIC_IP`
+and the cluster join values. Copy `/etc/acceleratio/kubeconfig.yaml` for
+`KUBECONFIG`. Both ports are protected only by their passwords; allow them and
+`6443/tcp` from the developer's address alone. Use a server only you develop
+on, never a production one.
+
+Run `sudo ./scripts/install.sh --dev` again to update or repair a development
+server; `update.sh` and console updates need the API in the cluster.
+
 ## Update
 
 `update.sh` brings an existing installation to the versions pinned in the
@@ -481,25 +509,25 @@ replaced in place (the pod is recreated; its data stays on the volume).
 Pull the new release, then:
 
 ```bash
-sudo ./deploy/update.sh --dry-run   # print the plan, change nothing
-sudo ./deploy/update.sh             # ask for confirmation, then update
+sudo ./scripts/update.sh --dry-run   # print the plan, change nothing
+sudo ./scripts/update.sh             # ask for confirmation, then update
 ```
 
 Or with the published script:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/acceleratio-cloud/core/main/deploy/update.sh | sudo bash -s -- --yes
+curl -fsSL https://raw.githubusercontent.com/acceleratio-cloud/core/main/scripts/update.sh | sudo bash -s -- --yes
 ```
 
 That one-liner runs whatever is on `main` as root, with nothing to check it
 against. To verify what you run, pin a commit or release you reviewed, take its
 SHA-256 from somewhere you trust (a release note, or `sha256sum
-deploy/update.sh deploy/install.sh` on your own checkout of that commit), and
+scripts/update.sh scripts/install.sh` on your own checkout of that commit), and
 check both files:
 
 ```bash
 REF=<commit-or-tag>
-curl -fsSLO --proto '=https' https://raw.githubusercontent.com/acceleratio-cloud/core/$REF/deploy/update.sh
+curl -fsSLO --proto '=https' https://raw.githubusercontent.com/acceleratio-cloud/core/$REF/scripts/update.sh
 sha256sum update.sh                      # compare with the hash you trust
 sudo bash update.sh --ref "$REF" --sha256 <sha256-of-install.sh>
 ```
@@ -643,13 +671,13 @@ to a new release, prefer [`update.sh`](#update), which also backs up and rolls
 back):
 
 ```bash
-sudo ./deploy/install.sh
+sudo ./scripts/install.sh
 ```
 
 To start from scratch, including etcd and every volume:
 
 ```bash
-sudo ./deploy/install.sh --reset --yes
+sudo ./scripts/install.sh --reset --yes
 ```
 
 `--reset` is destructive. It removes the k3s datastore, Cilium networking,
@@ -661,13 +689,13 @@ k3s cluster; the installer normally refuses that case.
 ## Uninstall
 
 ```bash
-sudo ./deploy/uninstall.sh
+sudo ./scripts/uninstall.sh
 ```
 
 Or with the published script:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/acceleratio-cloud/core/main/deploy/uninstall.sh | sudo bash -s -- --yes
+curl -fsSL https://raw.githubusercontent.com/acceleratio-cloud/core/main/scripts/uninstall.sh | sudo bash -s -- --yes
 ```
 
 The uninstaller removes the Helm releases, detaches Cilium BPF filters from the
@@ -795,6 +823,6 @@ sudo k3s kubectl -n longhorn-system logs ds/longhorn-manager --tail=50
 - PostgreSQL is a single instance on a hostPath, without replication or
   automatic backups.
 - RHEL/Rocky/Alma are not supported by this installer yet.
-- The installer disables the k3s `local-storage` addon. Do not run it on an
+- With Longhorn the installer disables the k3s `local-storage` addon. Do not run it on an
   existing cluster that still uses `local-path` volumes; start from a fresh
   host or migrate those volumes first.

@@ -34,7 +34,7 @@ const REQUEST_TIMEOUT_MS = 15 * 1000;
 const USER_AGENT = 'acceleratio-api (platform update check)';
 
 export const OFFLINE_MESSAGE =
-  'Could not reach GitHub to check for updates. The server may have no internet access; update over SSH with deploy/update.sh instead.';
+  'Could not reach GitHub to check for updates. The server may have no internet access; update over SSH with scripts/update.sh instead.';
 
 export interface ReleaseChecksums {
   updateSha256: string;

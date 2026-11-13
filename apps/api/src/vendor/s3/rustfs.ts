@@ -19,8 +19,8 @@ export const rustfsS3Endpoint = (): string =>
 
 /**
  * The S3 endpoint as the API reaches it. In development the API runs outside
- * the cluster and goes through a port-forward: the API server's service proxy
- * rewrites the path, which breaks the SigV4 signature.
+ * the cluster and uses the development server's RustFS node port, not the API
+ * server's service proxy, which rewrites the path and breaks SigV4 signatures.
  */
 export const rustfsApiEndpoint = (): string =>
   process.env.RUSTFS_S3_API_ENDPOINT?.trim() || rustfsS3Endpoint();

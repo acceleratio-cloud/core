@@ -352,7 +352,7 @@ export const buildJoinConfig = (options: InstallOptions): string => {
 };
 
 /**
- * What Longhorn needs on every node, as `deploy/install.sh` sets it up:
+ * What Longhorn needs on every node, as `scripts/install.sh` sets it up:
  * open-iscsi with a working iscsid, the iscsi_tcp module at boot, and
  * multipathd kept off Longhorn's disks. A host where iscsid cannot reach the
  * kernel (a container) fails the join here.
@@ -376,7 +376,7 @@ export const LONGHORN_HOST_SETUP = [
 ];
 
 /**
- * `configure_ufw` from `deploy/install.sh`: UFW's default deny drops pod
+ * `configure_ufw` from `scripts/install.sh`: UFW's default deny drops pod
  * traffic to the host (no DNS, no API server), so an active UFW gets the pod
  * and service CIDRs allowed, tagged for uninstall.sh. UFW stays on.
  */

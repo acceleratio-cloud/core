@@ -3,10 +3,10 @@
 # Acceleratio uninstaller.
 #
 # Removes the Helm releases, Cilium networking, k3s, Longhorn volumes, RustFS,
-# VictoriaMetrics and VictoriaLogs data that deploy/install.sh created. This is
+# VictoriaMetrics and VictoriaLogs data that scripts/install.sh created. This is
 # destructive.
 #
-# Usage: sudo ./deploy/uninstall.sh [--dry-run] [--yes]
+# Usage: sudo ./scripts/uninstall.sh [--dry-run] [--yes]
 #
 set -Eeuo pipefail
 
@@ -81,7 +81,7 @@ used custom CNI paths. Kubeconfigs in /root/.kube and user home directories
 are kept.
 
 Usage:
-  sudo ./deploy/uninstall.sh [options]
+  sudo ./scripts/uninstall.sh [options]
 
 Options:
   --dry-run   Print planned actions only.
@@ -89,7 +89,7 @@ Options:
   --help, -h  Show this help.
 
 One-liner:
-  curl -fsSL https://raw.githubusercontent.com/acceleratio-cloud/core/main/deploy/uninstall.sh | sudo bash -s -- --yes
+  curl -fsSL https://raw.githubusercontent.com/acceleratio-cloud/core/main/scripts/uninstall.sh | sudo bash -s -- --yes
 EOF
 }
 
@@ -316,7 +316,7 @@ print_summary() {
     printf '\n%s\n' "${C_GREEN}Acceleratio uninstall complete${C_RESET}"
     printf 'Kept: /root/.kube/config and user kubeconfigs\n'
     printf 'Removed: k3s, etcd, Cilium, Acceleratio, Longhorn, RustFS, VictoriaMetrics, VictoriaLogs, %s, %s and %s\n' "$LONGHORN_DATA_DIR" "$VICTORIAMETRICS_DATA_DIR" "$VICTORIALOGS_DATA_DIR"
-    printf 'Reinstall: sudo ./deploy/install.sh\n'
+    printf 'Reinstall: sudo ./scripts/install.sh\n'
   fi
 }
 

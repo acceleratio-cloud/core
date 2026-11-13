@@ -2,7 +2,7 @@
 #
 # Acceleratio updater.
 #
-# Updates an installation made by deploy/install.sh to the versions pinned in
+# Updates an installation made by scripts/install.sh to the versions pinned in
 # the target install.sh: k3s, Helm, Cilium, Longhorn, RustFS (and its rc
 # client), VictoriaMetrics, VictoriaLogs, the CloudNativePG operator and
 # Acceleratio (API and console).
@@ -12,7 +12,7 @@
 # back the Helm releases and the Acceleratio manifests if the update fails.
 # The k3s binary and the database are never rolled back automatically.
 #
-# Usage: sudo ./deploy/update.sh [--ref REF] [--config FILE] [--yes]
+# Usage: sudo ./scripts/update.sh [--ref REF] [--config FILE] [--yes]
 #                                [--dry-run] [--no-backup] [--allow-downgrade]
 #                                [--allow-version-skip] [--allow-config-changes]
 #                                [--sha256 HASH] [--backup-dir DIR]
@@ -174,7 +174,7 @@ usage() {
   cat <<'EOF'
 Acceleratio updater
 
-Updates an installation made by deploy/install.sh to the versions pinned in
+Updates an installation made by scripts/install.sh to the versions pinned in
 the target install.sh: k3s, Helm, Cilium, Longhorn, RustFS (and its rc
 client), VictoriaMetrics, VictoriaLogs, the CloudNativePG operator and
 Acceleratio (API and console).
@@ -186,7 +186,7 @@ The k3s binary and the database are not rolled back automatically; the script
 prints the commands to restore them from the backup.
 
 Usage:
-  sudo ./deploy/update.sh [options]
+  sudo ./scripts/update.sh [options]
 
 Options:
   --ref REF            Git ref (branch, tag or commit) to take install.sh
@@ -232,10 +232,10 @@ The update keeps running if your SSH session drops (SIGHUP is ignored). Ctrl-C
 or SIGTERM stops it and rolls back.
 
 Examples:
-  sudo ./deploy/update.sh
-  sudo ./deploy/update.sh --dry-run
-  sudo ./deploy/update.sh --config /root/install.env --yes
-  curl -fsSL https://raw.githubusercontent.com/acceleratio-cloud/core/main/deploy/update.sh | sudo bash -s -- --yes
+  sudo ./scripts/update.sh
+  sudo ./scripts/update.sh --dry-run
+  sudo ./scripts/update.sh --config /root/install.env --yes
+  curl -fsSL https://raw.githubusercontent.com/acceleratio-cloud/core/main/scripts/update.sh | sudo bash -s -- --yes
 EOF
 }
 
@@ -382,7 +382,7 @@ fetch_target_install() {
     TARGET_INSTALL="${WORK_DIR}/install.sh"
     log_info "Downloading install.sh (${REF})"
     curl -fsSL --proto '=https' --tlsv1.2 --retry 3 \
-      "${REPO_RAW_URL}/${REF}/deploy/install.sh" -o "$TARGET_INSTALL" \
+      "${REPO_RAW_URL}/${REF}/scripts/install.sh" -o "$TARGET_INSTALL" \
       || die "Could not download install.sh for ref ${REF}."
   fi
 
@@ -750,6 +750,9 @@ preflight() {
     || die "The cluster does not answer. Check: systemctl status k3s"
   kubectl get namespace "$NAMESPACE" >/dev/null 2>&1 \
     || die "Namespace ${NAMESPACE} not found. Is Acceleratio installed? Pass the same CONFIG as at install time."
+  # install.sh --dev runs no API and console, which this update checks and rolls back.
+  kubectl -n "$NAMESPACE" get deployment api >/dev/null 2>&1 \
+    || die "This is a development server (install.sh --dev, no API in ${NAMESPACE}). Update it with: sudo ./scripts/install.sh --dev"
 }
 
 # not_ready_nodes: names of the nodes whose Ready condition is not True, one

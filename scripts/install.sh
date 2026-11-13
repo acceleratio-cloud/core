@@ -7,27 +7,29 @@
 # default StorageClass `longhorn`, and RustFS as the S3 object store.
 #
 # It then deploys Acceleratio itself into the `acceleratio` namespace:
-# PostgreSQL, the API and the console, and prints the dashboard URL.
+# PostgreSQL, the API and the console, and prints the dashboard URL. With
+# --dev it skips the API and console and publishes PostgreSQL and RustFS S3
+# on node ports for an API run from source on a developer machine.
 #
 # Works on any Ubuntu/Debian server: bare metal, a private server or any other
 # hardware.
 #
-# Usage: sudo ./deploy/install.sh [--dry-run] [--config FILE] [--reset] [--yes]
+# Usage: sudo ./scripts/install.sh [--dev] [--dry-run] [--config FILE] [--reset] [--yes]
 #
 set -Eeuo pipefail
 
 SCRIPT_NAME="$(basename "${BASH_SOURCE[0]:-$0}")"
 readonly SCRIPT_NAME
-readonly MANAGED_BY="Acceleratio deploy/install.sh"
+readonly MANAGED_BY="Acceleratio scripts/install.sh"
 
 # ---------------------------------------------------------------------------
 # Defaults (override with environment variables or --config FILE).
-# scripts/cluster.sh and deploy/update.sh read the KEY="${KEY:-default}" lines
-# below, so keep that form.
+# scripts/update.sh reads the KEY="${KEY:-default}" lines below, so keep that
+# form.
 # ---------------------------------------------------------------------------
 
 # Empty K3S_VERSION means "latest release from K3S_CHANNEL".
-# scripts/cluster.sh reads this default; keep the KEY="${KEY-default}" form.
+# update.sh reads this default; keep the KEY="${KEY-default}" form.
 K3S_VERSION="${K3S_VERSION-v1.36.5+k3s1}"
 K3S_CHANNEL="${K3S_CHANNEL:-stable}"
 K3S_NODE_NAME="${K3S_NODE_NAME:-}"
@@ -38,15 +40,15 @@ K3S_SERVICE_CIDR="${K3S_SERVICE_CIDR:-10.43.0.0/16}"
 K3S_ETCD_SNAPSHOT_CRON="${K3S_ETCD_SNAPSHOT_CRON-0 3 * * *}"
 K3S_KUBECONFIG="${K3S_KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
 
-# scripts/cluster.sh reads this default; keep the KEY="${KEY:-default}" form.
+# update.sh reads this default; keep the KEY="${KEY:-default}" form.
 CILIUM_VERSION="${CILIUM_VERSION:-1.20.4}"
 CILIUM_CNI_CONF_PATH="${CILIUM_CNI_CONF_PATH:-/etc/cni/net.d}"
 CILIUM_CNI_BIN_PATH="${CILIUM_CNI_BIN_PATH:-/opt/cni/bin}"
 HELM_VERSION="${HELM_VERSION:-3.18.0}"
 
 # longhorn: Longhorn volumes (servers). local-path: the k3s local-path
-# provisioner, for development machines that cannot run Longhorn (OrbStack and
-# other LXC/OpenVZ containers have no working iSCSI).
+# provisioner, for machines that cannot run Longhorn (LXC/OpenVZ containers
+# have no working iSCSI).
 STORAGE_BACKEND="${STORAGE_BACKEND:-longhorn}"
 LONGHORN_CHART_VERSION="${LONGHORN_CHART_VERSION:-1.13.0}"
 LONGHORN_NAMESPACE="${LONGHORN_NAMESPACE:-longhorn-system}"
@@ -65,14 +67,14 @@ RUSTFS_NAMESPACE="${RUSTFS_NAMESPACE:-rustfs}"
 RUSTFS_SIZE="${RUSTFS_SIZE:-50Gi}"
 SITES_BUCKET="${SITES_BUCKET:-acceleratio-sites}"
 
-# scripts/cluster.sh reads this default; keep the KEY="${KEY:-default}" form.
+# update.sh reads this default; keep the KEY="${KEY:-default}" form.
 VICTORIAMETRICS_CHART_VERSION="${VICTORIAMETRICS_CHART_VERSION:-0.50.0}"
 VICTORIAMETRICS_NAMESPACE="${VICTORIAMETRICS_NAMESPACE:-victoria-metrics}"
 VICTORIAMETRICS_RELEASE="${VICTORIAMETRICS_RELEASE:-victoria-metrics}"
 VICTORIAMETRICS_DATA_DIR="${VICTORIAMETRICS_DATA_DIR:-/var/lib/victoria-metrics}"
 VICTORIAMETRICS_RETENTION="${VICTORIAMETRICS_RETENTION:-14d}"
 
-# scripts/cluster.sh reads this default; keep the KEY="${KEY:-default}" form.
+# update.sh reads this default; keep the KEY="${KEY:-default}" form.
 VICTORIALOGS_CHART_VERSION="${VICTORIALOGS_CHART_VERSION:-0.13.11}"
 VICTORIALOGS_NAMESPACE="${VICTORIALOGS_NAMESPACE:-victoria-logs}"
 VICTORIALOGS_RELEASE="${VICTORIALOGS_RELEASE:-victoria-logs}"
@@ -104,6 +106,11 @@ POSTGRES_DATA_DIR="${POSTGRES_DATA_DIR:-${ACCELERATIO_DATA_DIR}/postgres}"
 # The console and API are published on these node ports (30000-32767).
 ACCELERATIO_CONSOLE_NODE_PORT="${ACCELERATIO_CONSOLE_NODE_PORT:-30300}"
 ACCELERATIO_API_NODE_PORT="${ACCELERATIO_API_NODE_PORT:-30080}"
+# Development server (--dev): no API and console in the cluster; a developer
+# runs them from source and reaches PostgreSQL and RustFS S3 on these ports.
+ACCELERATIO_DEV="${ACCELERATIO_DEV:-0}"
+ACCELERATIO_POSTGRES_NODE_PORT="${ACCELERATIO_POSTGRES_NODE_PORT:-30432}"
+RUSTFS_NODE_PORT="${RUSTFS_NODE_PORT:-30900}"
 # Host name or IP users reach the server on (default: the public IPv4), or the
 # full URLs when the console and API sit behind a domain or a reverse proxy.
 ACCELERATIO_PUBLIC_HOST="${ACCELERATIO_PUBLIC_HOST:-}"
@@ -269,8 +276,11 @@ prepull_images() {
   if (( DRY_RUN )); then
     return 0
   fi
-  for image in "$ACCELERATIO_API_IMAGE" "$ACCELERATIO_CONSOLE_IMAGE" \
-    "$POSTGRES_IMAGE" "$REGISTRY_IMAGE" "$RUSTFS_IMAGE" "$RC_IMAGE" busybox:1.36; do
+  local images=("$POSTGRES_IMAGE" "$REGISTRY_IMAGE" "$RUSTFS_IMAGE" "$RC_IMAGE" busybox:1.36)
+  if [ "$ACCELERATIO_DEV" != "1" ]; then
+    images+=("$ACCELERATIO_API_IMAGE" "$ACCELERATIO_CONSOLE_IMAGE")
+  fi
+  for image in "${images[@]}"; do
     k3s crictl pull "$image" >/dev/null 2>&1 &
   done
 }
@@ -283,6 +293,8 @@ setup_logging() {
   mkdir -p "$LOG_DIR"
   LOG_FILE="$LOG_DIR/install-$(date +%Y%m%d-%H%M%S).log"
   ln -sfn "$LOG_FILE" "$LOG_DIR/install.log"
+  # Root only: the --dev summary prints the database password and join token.
+  (umask 077 && : >"$LOG_FILE")
   exec > >(tee -a "$LOG_FILE") 2>&1
   log_info "Log file: $LOG_FILE"
 }
@@ -352,9 +364,12 @@ Installs on any Ubuntu/Debian server (bare metal, private server, any hardware):
     then prints the dashboard URL
 
 Usage:
-  sudo ./deploy/install.sh [options]
+  sudo ./scripts/install.sh [options]
 
 Options:
+  --dev              Development server: everything except the API and
+                     console, which run from source on a developer machine.
+                     PostgreSQL and RustFS S3 are published on node ports.
   --dry-run          Check prerequisites and print planned actions only.
   --config FILE      Load variables from FILE (shell syntax).
   --reset            Remove an existing k3s/Longhorn installation first.
@@ -413,6 +428,9 @@ Common variables (environment or --config):
   POSTGRES_DATA_DIR           default /var/lib/acceleratio/postgres
   ACCELERATIO_CONSOLE_NODE_PORT default 30300
   ACCELERATIO_API_NODE_PORT   default 30080
+  ACCELERATIO_DEV             default 0 (1 is the same as --dev)
+  ACCELERATIO_POSTGRES_NODE_PORT default 30432 (PostgreSQL, --dev only)
+  RUSTFS_NODE_PORT            default 30900 (RustFS S3, --dev only)
   ACCELERATIO_PUBLIC_HOST     default public IPv4; host used in the URLs
   ACCELERATIO_CONSOLE_URL     default http://<host>:<console port>
   ACCELERATIO_API_URL         default http://<host>:<api port>
@@ -422,15 +440,20 @@ Common variables (environment or --config):
   ALLOW_SWAP                  default 0 (kubelet requires swap off)
 
 Examples:
-  sudo ./deploy/install.sh
-  sudo ./deploy/install.sh --dry-run
-  sudo ./deploy/install.sh --config /etc/acceleratio/install.env
+  sudo ./scripts/install.sh
+  sudo ./scripts/install.sh --dry-run
+  sudo ./scripts/install.sh --dev
+  sudo ./scripts/install.sh --config /etc/acceleratio/install.env
 EOF
 }
 
 parse_args() {
   while (($# > 0)); do
     case "$1" in
+      --dev)
+        ACCELERATIO_DEV=1
+        shift
+        ;;
       --dry-run)
         DRY_RUN=1
         shift
@@ -741,7 +764,9 @@ check_warnings() {
   if systemctl is-active --quiet docker 2>/dev/null; then
     log_warn "Docker is active. It can coexist with k3s/Cilium, but its iptables rules are not managed by this installer."
   fi
-  if ufw_active; then
+  if ufw_active && [ "$ACCELERATIO_DEV" = "1" ]; then
+    log_warn "UFW is active. The installer allows traffic from ${K3S_CLUSTER_CIDR} and ${K3S_SERVICE_CIDR} and keeps your other rules. Open 6443/tcp, ${ACCELERATIO_POSTGRES_NODE_PORT}/tcp and ${RUSTFS_NODE_PORT}/tcp to your development machine."
+  elif ufw_active; then
     log_warn "UFW is active. The installer allows traffic from ${K3S_CLUSTER_CIDR} and ${K3S_SERVICE_CIDR} and keeps your other rules. Open ${ACCELERATIO_CONSOLE_NODE_PORT}/tcp and ${ACCELERATIO_API_NODE_PORT}/tcp for the dashboard, and 6443/tcp, 80/tcp, 443/tcp and 8472/udp between cluster nodes if needed."
   fi
   if systemctl is-active --quiet firewalld 2>/dev/null; then
@@ -1014,7 +1039,7 @@ install_packages() {
   fi
 
   cat >/etc/sysctl.d/99-acceleratio.conf <<'EOF'
-# Managed by Acceleratio deploy/install.sh
+# Managed by Acceleratio scripts/install.sh
 net.ipv4.ip_forward = 1
 EOF
   sysctl --system >/dev/null
@@ -1043,7 +1068,7 @@ build_k3s_config() {
     echo "flannel-backend: none"
     echo "disable-network-policy: true"
     echo "disable-kube-proxy: true"
-    # local-path is the development storage; servers use Longhorn only.
+    # Longhorn replaces local-path; STORAGE_BACKEND=local-path keeps it.
     if [ "$STORAGE_BACKEND" = "longhorn" ]; then
       echo "disable:"
       echo "  - local-storage"
@@ -1563,7 +1588,8 @@ rustfs_endpoint() {
 }
 
 write_rustfs_manifest() {
-  write_file "${CONFIG_DIR}/manifests/rustfs.yaml" 0644 <<EOF
+  {
+  cat <<EOF
 # ${MANAGED_BY} - manual edits will be overwritten.
 # Single-node, single-drive RustFS on a volume of the platform StorageClass.
 # The admin keys live in Secret ${RUSTFS_ADMIN_SECRET}, created once.
@@ -1678,6 +1704,29 @@ spec:
       port: 9000
       targetPort: s3
 EOF
+  if [ "$ACCELERATIO_DEV" = "1" ]; then
+    cat <<EOF
+---
+# --dev: the API running on a developer machine reaches S3 here.
+apiVersion: v1
+kind: Service
+metadata:
+  name: rustfs-external
+  namespace: ${RUSTFS_NAMESPACE}
+  labels:
+    app.kubernetes.io/name: rustfs
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: rustfs
+  ports:
+    - name: s3
+      port: 9000
+      targetPort: s3
+      nodePort: ${RUSTFS_NODE_PORT}
+EOF
+  fi
+  } | write_file "${CONFIG_DIR}/manifests/rustfs.yaml" 0644
 }
 
 # ensure_rustfs_secret: random admin keys, generated once and kept across
@@ -1882,9 +1931,7 @@ install_cnpg() {
 # VictoriaLogs and Vector.
 # ---------------------------------------------------------------------------
 
-# Prints the values for the victoria-logs-single chart. scripts/cluster.sh
-# extracts this function to install the same configuration locally, so it
-# must only read the VICTORIALOGS_* variables and print to stdout.
+# Prints the values for the victoria-logs-single chart.
 #
 # Vector runs as a DaemonSet and reads container logs only from project
 # namespaces (labelled app.kubernetes.io/managed-by=acceleratio), never from
@@ -2263,7 +2310,8 @@ write_acceleratio_manifest() {
   fi
 
   ACCELERATIO_MANIFEST="${CONFIG_DIR}/manifests/acceleratio.yaml"
-  write_file "$ACCELERATIO_MANIFEST" 0600 <<EOF
+  {
+  cat <<EOF
 # ${MANAGED_BY} - manual edits will be overwritten. Contains secrets.
 apiVersion: v1
 kind: Namespace
@@ -2374,6 +2422,30 @@ spec:
           hostPath:
             path: ${POSTGRES_DATA_DIR}
             type: DirectoryOrCreate
+EOF
+  if [ "$ACCELERATIO_DEV" = "1" ]; then
+    # --dev: no API and console; the API on a developer machine connects here.
+    cat <<EOF
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-external
+  namespace: ${ns}
+  labels:
+    app.kubernetes.io/name: postgres
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+      nodePort: ${ACCELERATIO_POSTGRES_NODE_PORT}
+EOF
+  else
+    cat <<EOF
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -2571,6 +2643,9 @@ spec:
       port: 3000
       targetPort: http
       nodePort: ${ACCELERATIO_CONSOLE_NODE_PORT}
+EOF
+  fi
+  cat <<EOF
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -2700,6 +2775,7 @@ spec:
       port: 5000
       targetPort: http
 EOF
+  } | write_file "$ACCELERATIO_MANIFEST" 0600
 }
 
 # ---------------------------------------------------------------------------
@@ -2803,16 +2879,35 @@ wait_for_http() {
   die "$2 did not answer at $1."
 }
 
+wait_for_registry() {
+  local ns="$ACCELERATIO_NAMESPACE"
+  log_info "Waiting for the image registry"
+  if ! k3s kubectl -n "$ns" rollout status deployment/registry --timeout=300s; then
+    k3s kubectl -n "$ns" describe pod -l app.kubernetes.io/name=registry || true
+    die "The image registry did not become ready."
+  fi
+  # The address containerd pulls from, checked from the host network.
+  wait_for_http "http://${REGISTRY_CLUSTER_IP}:5000/v2/" "The image registry"
+}
+
 install_acceleratio() {
   local ns="$ACCELERATIO_NAMESPACE"
 
+  if (( DRY_RUN )) && [ "$ACCELERATIO_DEV" = "1" ]; then
+    log_info "DRY-RUN: would install PostgreSQL (node port ${ACCELERATIO_POSTGRES_NODE_PORT}) in namespace ${ns}, without the API and console"
+    return 0
+  fi
   if (( DRY_RUN )); then
     log_info "DRY-RUN: would install PostgreSQL, the API and the console in namespace ${ns}"
     log_info "DRY-RUN: API image ${ACCELERATIO_API_IMAGE}, console image ${ACCELERATIO_CONSOLE_IMAGE}"
     return 0
   fi
 
-  log_info "Installing Acceleratio (PostgreSQL, API, console) in namespace ${ns}"
+  if [ "$ACCELERATIO_DEV" = "1" ]; then
+    log_info "Installing PostgreSQL for development in namespace ${ns} (no API and console)"
+  else
+    log_info "Installing Acceleratio (PostgreSQL, API, console) in namespace ${ns}"
+  fi
   prepare_acceleratio_secrets
   write_acceleratio_manifest
   k3s kubectl apply -f "$ACCELERATIO_MANIFEST"
@@ -2823,6 +2918,17 @@ install_acceleratio() {
     die "PostgreSQL did not become ready."
   fi
 
+  if [ "$ACCELERATIO_DEV" = "1" ]; then
+    # A server installed without --dev before keeps its released API and
+    # console otherwise; they would compete with the ones run from source.
+    k3s kubectl -n "$ns" delete deployment/api deployment/console service/api service/console \
+      serviceaccount/api --ignore-not-found
+    k3s kubectl delete clusterrolebinding acceleratio-api --ignore-not-found
+    wait_for_registry
+    log_ok "PostgreSQL and the image registry are running in namespace ${ns}"
+    return 0
+  fi
+
   # The first start pulls two images and runs the database migrations.
   log_info "Waiting for the API (pulls the image and migrates the database)"
   if ! k3s kubectl -n "$ns" rollout status deployment/api --timeout=600s; then
@@ -2831,13 +2937,7 @@ install_acceleratio() {
     die "The API did not become ready."
   fi
 
-  log_info "Waiting for the image registry"
-  if ! k3s kubectl -n "$ns" rollout status deployment/registry --timeout=300s; then
-    k3s kubectl -n "$ns" describe pod -l app.kubernetes.io/name=registry || true
-    die "The image registry did not become ready."
-  fi
-  # The address containerd pulls from, checked from the host network.
-  wait_for_http "http://${REGISTRY_CLUSTER_IP}:5000/v2/" "The image registry"
+  wait_for_registry
 
   log_info "Waiting for the console"
   if ! k3s kubectl -n "$ns" rollout status deployment/console --timeout=600s; then
@@ -2868,6 +2968,33 @@ save_config() {
 # ---------------------------------------------------------------------------
 # Summary.
 # ---------------------------------------------------------------------------
+
+# print_dev_env BOLD DIM: the apps/api/.env values for an API run from source
+# against this development server.
+print_dev_env() {
+  local bold="$1" dim="$2" host="${ACCELERATIO_PUBLIC_HOST:-$K3S_PUBLIC_IP}"
+  local password="${POSTGRES_PASSWORD:-<POSTGRES_PASSWORD from ${CONFIG_DIR}/acceleratio.env>}"
+  local join_token="<contents of /var/lib/rancher/k3s/server/node-token>"
+  if [ -r /var/lib/rancher/k3s/server/node-token ]; then
+    join_token="$(tr -d '\n' </var/lib/rancher/k3s/server/node-token)"
+  fi
+
+  printf '  %sDevelopment server: add to apps/api/.env%s\n' "$bold" "$C_RESET"
+  printf '    DATABASE_URL=postgresql://acceleratio:%s@%s:%s/acceleratio\n' "$password" "$host" "$ACCELERATIO_POSTGRES_NODE_PORT"
+  printf '    RUSTFS_S3_API_ENDPOINT=http://%s:%s\n' "$host" "$RUSTFS_NODE_PORT"
+  printf '    PLATFORM_STORAGE_CLASS_NAME=%s\n' "$STORAGE_CLASS_NAME"
+  printf '    ACCELERATIO_PUBLIC_IP=%s\n' "$K3S_PUBLIC_IP"
+  printf '    K3S_JOIN_URL=%s\n' "${K3S_JOIN_URL:-https://${K3S_NODE_IP}:6443}"
+  printf '    K3S_JOIN_TOKEN=%s\n' "$join_token"
+  printf '    K3S_CLUSTER_CIDR=%s\n' "$K3S_CLUSTER_CIDR"
+  printf '    K3S_SERVICE_CIDR=%s\n' "$K3S_SERVICE_CIDR"
+  printf '    KUBECONFIG=~/.kube/acceleratio-dev.yaml   %s(scp root@%s:%s/kubeconfig.yaml)%s\n' "$dim" "$K3S_PUBLIC_IP" "$CONFIG_DIR" "$C_RESET"
+  printf '\n'
+  printf '  %sPostgreSQL (%s/tcp) and RustFS S3 (%s/tcp) are open to anyone who can reach this%s\n' \
+    "$dim" "$ACCELERATIO_POSTGRES_NODE_PORT" "$RUSTFS_NODE_PORT" "$C_RESET"
+  printf '  %sserver, behind their passwords. Limit them to your address in the firewall.%s\n' "$dim" "$C_RESET"
+  printf '\n'
+}
 
 print_summary() {
   local k3s_version="unknown"
@@ -2913,18 +3040,26 @@ print_summary() {
   fi
   printf '%s\n\n' "${C_GREEN}${rule}${C_RESET}"
 
-  printf '  %sOpen the dashboard%s\n' "$bold" "$C_RESET"
-  printf '    Console       %s%s%s\n' "${bold}${cyan}" "$ACCELERATIO_CONSOLE_URL" "$C_RESET"
-  printf '    First account %s%s/auth/installation%s\n' "$cyan" "$ACCELERATIO_CONSOLE_URL" "$C_RESET"
-  printf '    API           %s%s%s\n' "$cyan" "$ACCELERATIO_API_URL" "$C_RESET"
-  printf '\n'
-  printf '  %sCreate the first account to get started.%s\n' "$dim" "$C_RESET"
-  printf '  %sOpen TCP ports %s and %s in your firewall if the page does not load.%s\n' \
-    "$dim" "$ACCELERATIO_CONSOLE_NODE_PORT" "$ACCELERATIO_API_NODE_PORT" "$C_RESET"
-  printf '\n'
+  if [ "$ACCELERATIO_DEV" = "1" ]; then
+    print_dev_env "$bold" "$dim"
+  else
+    printf '  %sOpen the dashboard%s\n' "$bold" "$C_RESET"
+    printf '    Console       %s%s%s\n' "${bold}${cyan}" "$ACCELERATIO_CONSOLE_URL" "$C_RESET"
+    printf '    First account %s%s/auth/installation%s\n' "$cyan" "$ACCELERATIO_CONSOLE_URL" "$C_RESET"
+    printf '    API           %s%s%s\n' "$cyan" "$ACCELERATIO_API_URL" "$C_RESET"
+    printf '\n'
+    printf '  %sCreate the first account to get started.%s\n' "$dim" "$C_RESET"
+    printf '  %sOpen TCP ports %s and %s in your firewall if the page does not load.%s\n' \
+      "$dim" "$ACCELERATIO_CONSOLE_NODE_PORT" "$ACCELERATIO_API_NODE_PORT" "$C_RESET"
+    printf '\n'
+  fi
 
   printf '  %sWhat was installed%s\n' "$bold" "$C_RESET"
-  printf '    Namespace     %s (PostgreSQL, API, console)\n' "$ACCELERATIO_NAMESPACE"
+  if [ "$ACCELERATIO_DEV" = "1" ]; then
+    printf '    Namespace     %s (PostgreSQL, image registry; no API and console)\n' "$ACCELERATIO_NAMESPACE"
+  else
+    printf '    Namespace     %s (PostgreSQL, API, console)\n' "$ACCELERATIO_NAMESPACE"
+  fi
   printf '    k3s           %s (embedded etcd)\n' "$k3s_version"
   printf '    Cilium        %s (CNI, kube-proxy replacement)\n' "$CILIUM_VERSION"
   if [ "$STORAGE_BACKEND" = "longhorn" ]; then
@@ -2951,8 +3086,13 @@ print_summary() {
   printf '    k3s kubectl -n %s logs deploy/api\n' "$ACCELERATIO_NAMESPACE"
   printf '    scp root@%s:%s/kubeconfig.yaml .\n' "$K3S_PUBLIC_IP" "$CONFIG_DIR"
   printf '\n'
-  printf '  %sUpdate:%s sudo ./deploy/update.sh    %sRepair:%s sudo ./deploy/install.sh    %sRemove:%s sudo ./deploy/uninstall.sh\n' \
-    "$dim" "$C_RESET" "$dim" "$C_RESET" "$dim" "$C_RESET"
+  if [ "$ACCELERATIO_DEV" = "1" ]; then
+    printf '  %sUpdate or repair:%s sudo ./scripts/install.sh --dev    %sRemove:%s sudo ./scripts/uninstall.sh\n' \
+      "$dim" "$C_RESET" "$dim" "$C_RESET"
+  else
+    printf '  %sUpdate:%s sudo ./scripts/update.sh    %sRepair:%s sudo ./scripts/install.sh    %sRemove:%s sudo ./scripts/uninstall.sh\n' \
+      "$dim" "$C_RESET" "$dim" "$C_RESET" "$dim" "$C_RESET"
+  fi
   printf '%s\n' "${C_GREEN}${rule}${C_RESET}"
 }
 

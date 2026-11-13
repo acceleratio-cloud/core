@@ -7,7 +7,7 @@ import {
 } from '@/vendor/kubernetes/service-proxy';
 
 /**
- * The Service `deploy/install.sh` and `scripts/cluster.sh` create for the
+ * The Service `scripts/install.sh` creates for the
  * single-node VictoriaMetrics release.
  */
 export const DEFAULT_VICTORIAMETRICS_ADDRESS =

@@ -16,12 +16,12 @@ host() {
 dir="${UPDATE_ROOT}/${UPDATE_ID}"
 
 if ! host test -f "${CONFIG_DIR}/manifests/acceleratio.yaml"; then
-  echo "ERROR: $(host hostname) has no installation in ${CONFIG_DIR}. Update from the server the platform was installed on with deploy/update.sh." >&2
+  echo "ERROR: $(host hostname) has no installation in ${CONFIG_DIR}. Update from the server the platform was installed on with scripts/update.sh." >&2
   exit 2
 fi
 
 if ! host sh -c 'command -v systemd-run >/dev/null 2>&1'; then
-  echo "ERROR: systemd-run is not available on $(host hostname). Update over SSH with deploy/update.sh." >&2
+  echo "ERROR: systemd-run is not available on $(host hostname). Update over SSH with scripts/update.sh." >&2
   exit 2
 fi
 

@@ -1,5 +1,5 @@
 /**
- * The in-cluster image registry `deploy/install.sh` runs for services built
+ * The in-cluster image registry `scripts/install.sh` runs for services built
  * from GitHub.
  *
  * Build Jobs push to it through cluster DNS (`BUILD_REGISTRY`). Nodes cannot
@@ -8,7 +8,7 @@
  * to the Service's fixed ClusterIP in `/etc/rancher/k3s/registries.yaml`.
  */
 
-/** Keep in step with REGISTRY_HOST in deploy/install.sh. */
+/** Keep in step with REGISTRY_HOST in scripts/install.sh. */
 export const REGISTRY_PULL_HOST = 'registry.acceleratio.internal';
 export const REGISTRY_PORT = 5000;
 

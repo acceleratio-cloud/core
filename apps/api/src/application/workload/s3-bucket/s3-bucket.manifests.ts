@@ -23,7 +23,7 @@ export const BUCKET_MESSAGE_ANNOTATION = 'acceleratio.io/bucket-message';
 export type BucketPhase = 'provisioning' | 'ready' | 'failed';
 
 export const RC_CONTAINER = 'rc';
-/** Matches RC_IMAGE in deploy/install.sh, which passes it as RUSTFS_RC_IMAGE. */
+/** Matches RC_IMAGE in scripts/install.sh, which passes it as RUSTFS_RC_IMAGE. */
 export const DEFAULT_RUSTFS_RC_IMAGE =
   'rustfs/rc:v0.1.37@sha256:7e93fd410a8fe51514f89373e093392c92095b98dc6140335fcfe956810c4c80';
 

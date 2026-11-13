@@ -8,7 +8,7 @@ import {
 } from '@/vendor/kubernetes/service-proxy';
 
 /**
- * The Service `deploy/install.sh` and `scripts/cluster.sh` create for the
+ * The Service `scripts/install.sh` creates for the
  * single-node VictoriaLogs release.
  */
 export const DEFAULT_VICTORIALOGS_ADDRESS = 'victoria-logs.victoria-logs:9428';

@@ -4,37 +4,24 @@ Acceleratio — an open-source, self-hosted cloud platform. The console lives in
 
 ## Local development
 
-From a fresh clone, `make dev` (or `./scripts/dev.sh`) installs dependencies,
-creates the OrbStack cluster, starts PostgreSQL through Docker Compose, applies Drizzle migrations, and runs
-the API on <http://localhost:8080> and the console on <http://localhost:3000>.
-Create the first account at <http://localhost:3000/auth/installation>. Use
-`make setup` to prepare the environment without starting the servers and
-`make db-up` / `make db-down` to manage PostgreSQL. The manual sequence is in
-[README.md](./README.md).
+The API and console run from source against a personal development server: a
+remote Ubuntu/Debian server installed with `sudo ./scripts/install.sh --dev`.
+It gets the full platform (k3s with embedded etcd, Cilium, Longhorn, RustFS,
+VictoriaMetrics, VictoriaLogs with Vector, CloudNativePG, PostgreSQL, the image
+registry) without the API and console, and publishes PostgreSQL (node port
+30432) and RustFS S3 (30900). The installer prints the `apps/api/.env` values
+(`DATABASE_URL`, `RUSTFS_S3_API_ENDPOINT`, join values, `ACCELERATIO_PUBLIC_IP`);
+`KUBECONFIG` is `/etc/acceleratio/kubeconfig.yaml` copied from the server (the
+shell value wins over `apps/api/.env`; a path or inline YAML). Then
+`bun run db:migrate` and `bun run start:dev` in `apps/api`, `bun run dev` in
+`apps/frontend`; the API is on <http://localhost:8080>, the console on
+<http://localhost:3000>, and the first account is created at
+<http://localhost:3000/auth/installation>. Never point local development at a
+shared or production cluster. The full sequence is in [CONTRIBUTING.md](./CONTRIBUTING.md#development-setup).
 
 API unit tests run with `cd apps/api && bun run test`. The private-network
-checks against a real cluster run with `KUBECONFIG=$(./scripts/cluster.sh kubeconfig)`
-and `cd apps/api && bun run test:cluster` (needs `make cluster-up`).
-
-The API targets the Kubernetes cluster from `KUBECONFIG` (the shell value wins
-over `apps/api/.env`; a path or inline YAML), otherwise the local OrbStack
-cluster, otherwise (with `CLUSTER=0`) the current kubeconfig context
-(`~/.kube/config`). The local cluster is an OrbStack Linux machine named
-`acceleratio` that runs `deploy/install.sh` from this checkout, so it matches a
-server: k3s with embedded etcd, Cilium, RustFS for S3, VictoriaMetrics for the
-project Observability tab and VictoriaLogs with Vector for the Logs tab. Storage
-differs: servers use Longhorn, the OrbStack machine (LXC, no iSCSI) uses the k3s
-local-path provisioner (`STORAGE_BACKEND=local-path`), so storage profiles are
-unavailable in development and Longhorn-specific behaviour is checked on a VM.
-`make dev` port-forwards RustFS for the API (`RUSTFS_S3_API_ENDPOINT`). `make dev`
-and `make setup` create or start it through `scripts/cluster.sh up` (idempotent;
-the released API and console the installer deploys are scaled to zero), write
-`~/.kube/acceleratio-orbstack.yaml` (context `orbstack-acceleratio`) and pass the
-cluster's join values to the API. `make cluster-down` deletes the machine. `make dev`
-validates the effective kubeconfig and refuses non-local contexts unless
-`ALLOW_REMOTE_KUBECONTEXT=1` is set; never point local development at a shared or
-production cluster.
-See the Kubernetes section in [README.md](./README.md).
+checks against a real cluster run with `cd apps/api && bun run test:cluster`
+and `KUBECONFIG` set to the development server's kubeconfig.
 
 ## Documentation
 
@@ -42,4 +29,3 @@ See the Kubernetes section in [README.md](./README.md).
 - [DESIGN.md](./docs/DESIGN.md) — the visual system: palette, type, layout, components, and the rules the console is held to.
 - [FILE_STRUCTURE.md](./docs/FILE_STRUCTURE.md) — folder conventions for the frontend (routes, API modules, domain modules, styling, accessibility) and the API (submodules, schemas, services, code style).
 - [DATABASE.md](./docs/DATABASE.md) — the PostgreSQL data model, table and enum reference, and the Drizzle migration workflow.
-- [ILLUSTRATIONS.md](./docs/ILLUSTRATIONS.md) — how to generate the auth datacenter imagery: composition, lighting, prompt recipe, and the asset ledger.

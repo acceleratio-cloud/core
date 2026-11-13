@@ -63,9 +63,9 @@ const HISTORY_LIMIT = 20;
 
 export const UPDATE_IN_PROGRESS_MESSAGE = 'An update is already running';
 export const DEV_BUILD_MESSAGE =
-  'This API does not report a release version (development build). Updates from the console need an installation made with deploy/install.sh.';
+  'This API does not report a release version (development build). Updates from the console need an installation made with scripts/install.sh.';
 export const OUT_OF_CLUSTER_MESSAGE =
-  'The API does not run inside the cluster it manages, so it cannot update it. Use deploy/update.sh on the server.';
+  'The API does not run inside the cluster it manages, so it cannot update it. Use scripts/update.sh on the server.';
 export const UPDATES_DISABLED_MESSAGE =
   'Updates from the console are turned off on this installation (PLATFORM_UPDATES_ENABLED=0).';
 export const UNKNOWN_RELEASE_MESSAGE =

@@ -533,8 +533,7 @@ export const LogsView = ({ active }: { active: boolean }) => {
             Vector collects them from every project. Install both with:
           </p>
           <ul className="mt-2 flex flex-col gap-1 font-mono text-fg-primary">
-            <li>make cluster-up</li>
-            <li>sudo ./deploy/install.sh</li>
+            <li>sudo ./scripts/install.sh</li>
           </ul>
         </div>
       </LogsMessage>

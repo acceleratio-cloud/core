@@ -34,7 +34,7 @@ Do not include real credentials, kubeconfigs or customer data.
 ## Scope
 
 In scope: the API, the console, the shared package, and the installer, updater
-and uninstaller in `deploy/`.
+and uninstaller in `scripts/`.
 
 Out of scope: vulnerabilities in third-party components (k3s, Cilium,
 Longhorn, RustFS, Traefik, VictoriaMetrics, PostgreSQL) unless Acceleratio configures

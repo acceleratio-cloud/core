@@ -6,7 +6,7 @@ name: Release
 #   2. runs the full CI workflow,
 #   3. builds and pushes the multi-arch API and console images to GHCR with
 #      provenance attestations,
-#   4. bumps the default ACCELERATIO_VERSION in deploy/, commits it to main,
+#   4. bumps the default ACCELERATIO_VERSION in scripts/, commits it to main,
 #      tags vX.Y.Z and creates the GitHub Release with the installer scripts.
 #
 # A pre-release publishes versioned images only: no `latest` tag and no change
@@ -155,19 +155,19 @@ jobs:
         if: ${{ !inputs.prerelease }}
         run: |
           set -euo pipefail
-          current="$(sed -nE 's/^ACCELERATIO_VERSION="\$\{ACCELERATIO_VERSION:-([^}]+)\}"$/\1/p' deploy/install.sh)"
+          current="$(sed -nE 's/^ACCELERATIO_VERSION="\$\{ACCELERATIO_VERSION:-([^}]+)\}"$/\1/p' scripts/install.sh)"
           if [[ -z "$current" ]]; then
-            echo "::error::Could not read the current ACCELERATIO_VERSION from deploy/install.sh."
+            echo "::error::Could not read the current ACCELERATIO_VERSION from scripts/install.sh."
             exit 1
           fi
           if [[ "$current" != "$VERSION" ]]; then
             export CURRENT="$current" NEXT="$VERSION"
             # Replace only whole version tokens (not 10.1.2 or 0.1.25).
             perl -pi -e 's/(?<![\d.])\Q$ENV{CURRENT}\E(?![\d.])/$ENV{NEXT}/g' \
-              deploy/install.sh deploy/install.env.example deploy/README.md
+              scripts/install.sh scripts/install.env.example scripts/README.md
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add deploy/install.sh deploy/install.env.example deploy/README.md
+            git add scripts/install.sh scripts/install.env.example scripts/README.md
             git commit -m "Release ${VERSION}"
             git push origin HEAD:refs/heads/main
           fi
@@ -185,7 +185,7 @@ jobs:
           set -euo pipefail
           owner="$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
           mkdir -p dist
-          cp deploy/install.sh deploy/update.sh deploy/uninstall.sh deploy/install.env.example dist/
+          cp scripts/install.sh scripts/update.sh scripts/uninstall.sh scripts/install.env.example dist/
           (cd dist && sha256sum * > SHA256SUMS)
           {
             echo "## Images"

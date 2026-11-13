@@ -331,7 +331,7 @@ export class ProjectIsolationService {
               {
                 matchLabels: {
                   [NAMESPACE_LABEL]: rustfsNamespace(),
-                  // The pod label of deploy/install.sh's RustFS Deployment.
+                  // The pod label of scripts/install.sh's RustFS Deployment.
                   'app.kubernetes.io/name': 'rustfs',
                 },
               },

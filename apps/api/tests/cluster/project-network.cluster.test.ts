@@ -2,7 +2,8 @@
  * Private network between the services of a project, against a real cluster.
  *
  * Runs only with CLUSTER_E2E=1 and a KUBECONFIG that points at a disposable
- * cluster with Cilium (`make cluster-up`, then `bun run test:cluster`). It uses
+ * cluster with Cilium (a `scripts/install.sh --dev` server, then
+ * `bun run test:cluster`). It uses
  * the API's own isolation, DNS and Service code, never a copy of it:
  *
  * - project A runs PostgreSQL as `db` (plus a plain TCP listener on 9000, a

@@ -19,7 +19,7 @@ export const KEY_MISSING_MESSAGE =
 export const getEncryptionKey = (
   value = process.env.INTEGRATIONS_ENCRYPTION_KEY ?? '',
 ): Buffer => {
-  // deploy/install.sh writes 64 hex characters; scripts/dev.sh writes base64.
+  // scripts/install.sh writes 64 hex characters; `openssl rand -base64 32` gives base64.
   const key = /^[0-9a-f]{64}$/i.test(value)
     ? Buffer.from(value, 'hex')
     : Buffer.from(value, 'base64');
