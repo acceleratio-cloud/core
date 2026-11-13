@@ -4,8 +4,6 @@
 
 .git
 .gitignore
-.factory
-.impeccable
 
 **/node_modules
 **/.next

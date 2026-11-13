@@ -16,11 +16,5 @@ coverage/
 # misc
 .DS_Store
 
-# superpowers visual companion session files
-.superpowers/
-
-# local agent tooling
-.opencode/
-
 # local Claude Code state
 .claude/
