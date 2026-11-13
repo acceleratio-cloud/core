@@ -97,15 +97,24 @@ export interface WorkloadEnv {
 export type S3BucketConfig = Record<string, never>;
 
 /**
+ * Railpack overrides of the detected commands, each a shell line. Ignored
+ * when the repository has a Dockerfile. Absent means Railpack's default.
+ */
+export interface RailpackCommands {
+  install_command?: string;
+  build_command?: string;
+  start_command?: string;
+}
+
+/**
  * A service built from a repository branch read through a GitHub App of the
  * integration. It runs like a Docker service and has the same settings; a
  * deploy builds the branch's `Dockerfile` and fills `docker_image` and
  * `commit_sha`. The App and repository are fixed after creation; the branch can be changed and the next deploy builds its head.
  */
-export interface GithubWorkloadConfig extends Omit<
-  DockerWorkloadConfig,
-  'docker_image'
-> {
+export interface GithubWorkloadConfig
+  extends Omit<DockerWorkloadConfig, 'docker_image'>,
+    RailpackCommands {
   /** `GithubApp.id` the repository is read through. */
   github_app_id: string;
   /** `owner/name`. */
@@ -115,6 +124,11 @@ export interface GithubWorkloadConfig extends Omit<
   docker_image?: string;
   /** Commit `docker_image` was built from. Set by the API. */
   commit_sha?: string;
+  /**
+   * The Railpack commands `docker_image` was built with, or `dockerfile`
+   * when the repository's Dockerfile built it. Set by the API.
+   */
+  built_commands?: RailpackCommands | 'dockerfile';
 }
 
 /**

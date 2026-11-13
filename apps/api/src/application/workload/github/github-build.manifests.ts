@@ -1,4 +1,5 @@
 import type { V1Job, V1Namespace, V1Secret } from '@kubernetes/client-node';
+import type { RailpackCommands } from '@acceleratio/shared';
 import { buildRegistry } from '@/common/registry';
 import {
   MANAGED_BY_LABEL,
@@ -38,7 +39,38 @@ export interface BuildManifestInput {
   commitSha: string;
   /** `imageRepository(...)`. */
   imageRepository: string;
+  /** Railpack overrides; only the set ones reach the build. */
+  commands?: RailpackCommands;
 }
+
+/** The env Railpack reads each override from. */
+export const RAILPACK_COMMAND_ENV = {
+  install_command: 'RAILPACK_INSTALL_CMD',
+  build_command: 'RAILPACK_BUILD_CMD',
+  start_command: 'RAILPACK_START_CMD',
+} as const satisfies Record<keyof RailpackCommands, string>;
+
+const COMMAND_ENV_NAMES = Object.values(RAILPACK_COMMAND_ENV);
+/** Written after the digest to the termination message by a Dockerfile build. */
+export const DOCKERFILE_BUILDER = 'dockerfile';
+
+/** The overrides a build Job was created with, read back from its env. */
+export const buildCommandsOf = (job: V1Job): RailpackCommands => {
+  const env = job.spec?.template.spec?.containers.find(
+    (container) => container.name === BUILD_CONTAINER,
+  )?.env;
+  const commands: RailpackCommands = {};
+
+  for (const [key, name] of Object.entries(RAILPACK_COMMAND_ENV)) {
+    const value = env?.find((item) => item.name === name)?.value;
+
+    if (value) {
+      commands[key as keyof RailpackCommands] = value;
+    }
+  }
+
+  return commands;
+};
 
 const labels = (input: BuildManifestInput) => ({
   [MANAGED_BY_LABEL]: MANAGED_BY_VALUE,
@@ -53,13 +85,14 @@ export const RAILPACK_FRONTEND = `ghcr.io/railwayapp/railpack-frontend:${RAILPAC
 
 /**
  * Builds the commit and pushes it: the `Dockerfile` at the repository root
- * when there is one, otherwise a Railpack plan. The commit and its submodules
- * (as BuildKit's git source fetched them) are fetched with the token in a
+ * when there is one, otherwise a Railpack plan, with the install, build and
+ * start commands from `RAILPACK_*_CMD` when the Job sets them. The commit and
+ * its submodules (as BuildKit's git source fetched them) are fetched with the token in a
  * one-off header sent only to github.com, so it is never written to disk, and
  * `.git` is removed before BuildKit sees the source; `RUN` steps never see
  * the token.
- * The image digest is written to the termination message, where the API
- * reads it.
+ * The image digest, followed by `dockerfile` for a Dockerfile build, is
+ * written to the termination message, where the API reads it.
  */
 export const buildScript = (): string =>
   [
@@ -73,8 +106,10 @@ export const buildScript = (): string =>
     'git -C src -c advice.detachedHead=false checkout -q FETCH_HEAD',
     'git -C src -c "$auth" submodule update -q --init --recursive --depth 1',
     'rm -rf src/.git',
+    'builder=railpack',
     'if [ -f src/Dockerfile ]; then',
     '  echo "Building the Dockerfile"',
+    `  builder=${DOCKERFILE_BUILDER}`,
     '  set -- --frontend dockerfile.v0 --local context=src --local dockerfile=src',
     'else',
     `  echo "No Dockerfile: building with Railpack ${RAILPACK_VERSION}"`,
@@ -89,15 +124,22 @@ export const buildScript = (): string =>
     '  echo "$sha  railpack.tar.gz" | sha256sum -c -s || { echo "error: the Railpack download does not match its checksum" >&2; exit 1; }',
     '  tar -xzf railpack.tar.gz railpack',
     '  mkdir plan',
-    '  ./railpack prepare src --plan-out plan/railpack-plan.json',
+    // A bare --env reads the variable when it is set and skips it otherwise.
+    `  ./railpack prepare src --plan-out plan/railpack-plan.json${COMMAND_ENV_NAMES.map((name) => ` --env ${name}`).join('')}`,
     `  set -- --frontend gateway.v0 --opt source=${RAILPACK_FRONTEND} --local context=src --local dockerfile=plan`,
+    // The plan lists every --env as a secret the frontend requires.
+    ...COMMAND_ENV_NAMES.map(
+      (name) =>
+        `  if [ -n "\${${name}+x}" ]; then set -- "$@" --secret id=${name},env=${name}; fi`,
+    ),
     'fi',
     'buildctl-daemonless.sh build "$@" \\',
     '  --output type=image,name="$BUILD_IMAGE",push=true,registry.insecure=true \\',
     '  --import-cache type=registry,ref="$BUILD_CACHE",registry.insecure=true \\',
     '  --export-cache type=registry,ref="$BUILD_CACHE",mode=max,registry.insecure=true,ignore-error=true \\',
     '  --metadata-file /tmp/metadata.json',
-    `grep -o '"containerimage.digest": *"sha256:[0-9a-f]*"' /tmp/metadata.json | grep -o 'sha256:[0-9a-f]*' > /dev/termination-log`,
+    `digest="$(grep -o '"containerimage.digest": *"sha256:[0-9a-f]*"' /tmp/metadata.json | grep -o 'sha256:[0-9a-f]*')"`,
+    'echo "$digest $builder" > /dev/termination-log',
   ].join('\n');
 
 export const buildBuildNamespace = (name: string): V1Namespace => ({
@@ -144,6 +186,14 @@ export const buildJob = (input: BuildManifestInput): V1Job => {
                   value: `${push}:${input.commitSha}`,
                 },
                 { name: 'BUILD_CACHE', value: `${push}:buildcache` },
+                ...Object.entries(RAILPACK_COMMAND_ENV).flatMap(
+                  ([key, name]) => {
+                    const value =
+                      input.commands?.[key as keyof RailpackCommands];
+
+                    return value ? [{ name, value }] : [];
+                  },
+                ),
                 {
                   name: 'BUILDKITD_FLAGS',
                   value: '--oci-worker-no-process-sandbox',

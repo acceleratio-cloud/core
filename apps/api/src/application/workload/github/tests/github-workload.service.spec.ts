@@ -1,7 +1,9 @@
 import { BadRequestException } from '@nestjs/common';
 import { DockerWorkloadService } from '../../docker/docker-workload.service';
 import {
+  RAILPACK_COMMAND_ENV,
   RAILPACK_FRONTEND,
+  buildCommandsOf,
   buildJob,
   buildPolicy,
   buildScript,
@@ -104,6 +106,34 @@ describe('GithubWorkloadService config', () => {
     ).toEqual(source);
   });
 
+  it('keeps trimmed Railpack commands and drops empty ones', () => {
+    const { internals } = build();
+
+    expect(
+      internals.normalizeConfig({
+        ...source,
+        install_command: ' bun install ',
+        build_command: '',
+        start_command: 'bun run start',
+      }),
+    ).toEqual({
+      ...source,
+      install_command: 'bun install',
+      start_command: 'bun run start',
+    });
+  });
+
+  it('refuses a command that is not one line', () => {
+    const { internals } = build();
+
+    expect(() =>
+      internals.normalizeConfig({ ...source, build_command: 'a\nb' }),
+    ).toThrow(BadRequestException);
+    expect(() =>
+      internals.normalizeConfig({ ...source, start_command: 42 }),
+    ).toThrow(BadRequestException);
+  });
+
   it('requires the source', () => {
     const { internals } = build();
 
@@ -164,6 +194,56 @@ describe('GithubWorkloadService config', () => {
     });
   });
 
+  it('keeps the image and what built it when a command changes', async () => {
+    const { service, internals } = build();
+    const update = jest
+      .spyOn(DockerWorkloadService.prototype, 'update')
+      .mockResolvedValue({ id: 'w1' } as never);
+    const built = {
+      docker_image: image,
+      commit_sha: 'c1',
+      built_commands: { start_command: 'bun start' },
+    };
+
+    internals.findRow = jest.fn().mockResolvedValue({
+      id: 'w1',
+      draft_config: { ...source, ...built, start_command: 'bun start' },
+    });
+
+    await service.update('p1', 'w1', {
+      config: {
+        ...source,
+        start_command: 'node server.js',
+        built_commands: 'dockerfile',
+      },
+    });
+
+    expect(update.mock.calls[0][2].config).toEqual({
+      ...source,
+      ...built,
+      start_command: 'node server.js',
+    });
+  });
+
+  it('keeps what built the image only while there is an image', () => {
+    const { internals } = build();
+
+    expect(
+      internals.normalizeConfig({ ...source, built_commands: 'dockerfile' }),
+    ).toEqual(source);
+    expect(
+      internals.normalizeConfig({
+        ...source,
+        docker_image: image,
+        built_commands: { start_command: ' bun start ' },
+      }),
+    ).toEqual({
+      ...source,
+      docker_image: image,
+      built_commands: { start_command: 'bun start' },
+    });
+  });
+
   it('refuses a branch the repository does not have', async () => {
     const { service, internals } = build({
       branches: jest.fn().mockResolvedValue(['main']),
@@ -204,6 +284,51 @@ describe('GithubWorkloadService.deploy', () => {
     expect(deploy).toHaveBeenCalledWith('p1', 'w1', null);
   });
 
+  it.each([
+    ['the image was built with them', { start_command: 'bun start' }, false],
+    ['a Dockerfile built the image', 'dockerfile', false],
+    ['they changed since the build', { start_command: 'node a.js' }, true],
+    ['the image predates them', undefined, true],
+  ])(
+    'builds the same commit again only when the commands are not built: %s',
+    async (_case, built, rebuilds) => {
+      const checkout = jest
+        .fn()
+        .mockResolvedValue({ token: 't', sha: 'c1', message: 'm' });
+      const { service, internals } = build({ checkout });
+      const startJob = jest.fn(() => {
+        throw new Error('started');
+      });
+      const deploy = jest
+        .spyOn(DockerWorkloadService.prototype, 'deploy')
+        .mockResolvedValue({ id: 'w1' } as never);
+
+      Object.assign(service, { db: { insert: startJob } });
+      internals.findRow = jest.fn().mockResolvedValue({
+        id: 'w1',
+        project_id: 'p1',
+        draft_config: {
+          ...source,
+          docker_image: image,
+          commit_sha: 'c1',
+          built_commands: built,
+          start_command: 'bun start',
+        },
+      });
+
+      const result = service.deploy('p1', 'w1', null);
+
+      if (rebuilds) {
+        await expect(result).rejects.toThrow('started');
+        expect(deploy).not.toHaveBeenCalled();
+      } else {
+        await result;
+        expect(startJob).not.toHaveBeenCalled();
+        expect(deploy).toHaveBeenCalled();
+      }
+    },
+  );
+
   it('refuses a second build while one runs', async () => {
     const { service, internals } = build();
 
@@ -242,6 +367,43 @@ describe('build manifests', () => {
     // The token reaches BuildKit only as a secret, never as a value.
     expect(env.GIT_AUTH_TOKEN.value).toBeUndefined();
     expect(env.GIT_AUTH_TOKEN.valueFrom?.secretKeyRef?.name).toBe('build-b1');
+  });
+
+  it('passes only the set Railpack commands to the build', () => {
+    const job = buildJob({
+      ...input,
+      commands: { install_command: 'bun install', start_command: 'bun start' },
+    });
+    const env = Object.fromEntries(
+      job.spec!.template.spec!.containers[0].env!.map((item) => [
+        item.name,
+        item.value,
+      ]),
+    );
+
+    expect(env.RAILPACK_INSTALL_CMD).toBe('bun install');
+    expect(env.RAILPACK_START_CMD).toBe('bun start');
+    expect('RAILPACK_BUILD_CMD' in env).toBe(false);
+    expect(buildCommandsOf(job)).toEqual({
+      install_command: 'bun install',
+      start_command: 'bun start',
+    });
+
+    const script = buildScript();
+
+    for (const name of Object.values(RAILPACK_COMMAND_ENV)) {
+      expect(script).toContain(` --env ${name}`);
+      // A shell test, not a binary the builder image may lack.
+      expect(script).toContain(
+        `if [ -n "\${${name}+x}" ]; then set -- "$@" --secret id=${name},env=${name}; fi`,
+      );
+    }
+  });
+
+  it('marks a Dockerfile build in the termination message', () => {
+    expect(buildScript()).toContain(
+      'echo "$digest $builder" > /dev/termination-log',
+    );
   });
 
   it('writes the image digest to the termination message', () => {
@@ -440,6 +602,119 @@ describe('GithubWorkloadService.pollBuild', () => {
 
     await expect(service.pollBuild('b1')).resolves.toBe(true);
     expect(deployImage).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [true, 'dockerfile'],
+    [false, { start_command: 'bun start' }],
+  ])(
+    'records what built the image (Dockerfile %s)',
+    async (dockerfile, built) => {
+      const { service } = build();
+      const digest = `sha256:${'b'.repeat(64)}`;
+      const deployImage = jest.fn();
+
+      Object.assign(service, {
+        db: queuedDb(
+          [
+            {
+              id: 'b1',
+              workload_id: 'w1',
+              status: 'building',
+              external_name: 'build-b1',
+              created_at: new Date(),
+            },
+          ],
+          [{ project_id: 'p1' }],
+        ),
+        kubernetes: {
+          batchV1: {
+            readNamespacedJob: jest.fn().mockResolvedValue({
+              ...buildJob({
+                buildId: 'b1',
+                workloadId: 'w1',
+                name: 'build-b1',
+                namespace: 'acceleratio-builds',
+                repository: 'acme/api',
+                commitSha: 'c1',
+                imageRepository: 'p1/w1',
+                commands: { start_command: 'bun start' },
+              }),
+              status: { succeeded: 1 },
+            }),
+          },
+        },
+        readPod: jest
+          .fn()
+          .mockResolvedValue({ log: 'done', digest, dockerfile }),
+        finishBuild: jest.fn().mockResolvedValue(true),
+        deployImage,
+      });
+
+      await service.pollBuild('b1');
+
+      expect(deployImage).toHaveBeenCalledWith(
+        'p1',
+        expect.anything(),
+        expect.any(String),
+        built,
+      );
+    },
+  );
+});
+
+describe('GithubWorkloadService.deployImage', () => {
+  const run = async (startCommand: string) => {
+    const { service, internals } = build();
+    const set = jest.fn(() => ({ where: jest.fn() }));
+    const dockerDeploy = jest
+      .spyOn(DockerWorkloadService.prototype, 'deploy')
+      .mockResolvedValue({ id: 'w1' } as never);
+    const rebuild = jest
+      .spyOn(service, 'deploy')
+      .mockResolvedValue({ id: 'w1' } as never);
+
+    Object.assign(service, { db: { update: () => ({ set }) } });
+    internals.findRow = jest.fn().mockResolvedValue({
+      id: 'w1',
+      draft_config: { ...source, start_command: startCommand },
+    });
+
+    await (
+      service as unknown as {
+        deployImage: (...args: unknown[]) => Promise<void>;
+      }
+    ).deployImage(
+      'p1',
+      { workload_id: 'w1', commit_sha: 'c1', author: null },
+      image,
+      { start_command: 'bun start' },
+    );
+
+    return { set, dockerDeploy, rebuild };
+  };
+
+  it('deploys an image built with the current commands', async () => {
+    const { set, dockerDeploy, rebuild } = await run('bun start');
+
+    expect(set.mock.calls[0]).toMatchObject([
+      {
+        draft_config: {
+          docker_image: image,
+          commit_sha: 'c1',
+          built_commands: { start_command: 'bun start' },
+        },
+      },
+    ]);
+    expect(dockerDeploy).toHaveBeenCalledWith('p1', 'w1', null);
+    expect(rebuild).not.toHaveBeenCalled();
+  });
+
+  it('builds again when a command changed during the build', async () => {
+    const { dockerDeploy, rebuild } = await run('node server.js');
+
+    expect(rebuild).toHaveBeenCalledWith('p1', 'w1', null);
+    expect(dockerDeploy).not.toHaveBeenCalled();
   });
 });
 

@@ -57,6 +57,9 @@ interface DockerConfigForm {
   dockerImage: string;
   /** GitHub services only; empty for Docker services. */
   branch: string;
+  installCommand: string;
+  buildCommand: string;
+  startCommand: string;
   entrypoint: string;
   command: string;
   cpuLimited: boolean;
@@ -68,19 +71,26 @@ interface DockerConfigForm {
 }
 
 /** Absent limits show the default; null limits show the switch off. */
-const toForm = (config: DockerWorkloadConfig): DockerConfigForm => ({
-  // A GitHub service has no image until its first build.
-  dockerImage: config.docker_image ?? '',
-  branch: (config as Partial<GithubWorkloadConfig>).branch ?? '',
-  entrypoint: formatShellArgs(config.entrypoint),
-  command: formatShellArgs(config.command),
-  cpuLimited: config.cpu_max !== null,
-  cpuMax: config.cpu_max ?? DEFAULT_CPU_MAX,
-  ramLimited: config.ram_max !== null,
-  ramMax: config.ram_max ?? DEFAULT_RAM_MAX,
-  replicas: config.replicas ?? DEFAULT_REPLICAS,
-  nodeSelector: formatSelector(config.node_selector ?? {}),
-});
+const toForm = (config: DockerWorkloadConfig): DockerConfigForm => {
+  const github = config as Partial<GithubWorkloadConfig>;
+
+  return {
+    // A GitHub service has no image until its first build.
+    dockerImage: config.docker_image ?? '',
+    branch: github.branch ?? '',
+    installCommand: github.install_command ?? '',
+    buildCommand: github.build_command ?? '',
+    startCommand: github.start_command ?? '',
+    entrypoint: formatShellArgs(config.entrypoint),
+    command: formatShellArgs(config.command),
+    cpuLimited: config.cpu_max !== null,
+    cpuMax: config.cpu_max ?? DEFAULT_CPU_MAX,
+    ramLimited: config.ram_max !== null,
+    ramMax: config.ram_max ?? DEFAULT_RAM_MAX,
+    replicas: config.replicas ?? DEFAULT_REPLICAS,
+    nodeSelector: formatSelector(config.node_selector ?? {}),
+  };
+};
 
 /**
  * A limit left at the default on a config that never set one stays absent,
@@ -107,9 +117,28 @@ const toConfig = (
     docker_image: form.dockerImage.trim(),
   };
 
+  const github = config as Partial<GithubWorkloadConfig>;
+
   // The API keeps the App and repository; the branch is the one it takes.
   if (form.branch) {
-    (config as Partial<GithubWorkloadConfig>).branch = form.branch;
+    github.branch = form.branch;
+  }
+
+  // Empty commands stay absent: Railpack's defaults.
+  const install = form.installCommand.trim();
+  const build = form.buildCommand.trim();
+  const start = form.startCommand.trim();
+
+  if (install) {
+    github.install_command = install;
+  }
+
+  if (build) {
+    github.build_command = build;
+  }
+
+  if (start) {
+    github.start_command = start;
   }
   const entrypoint = parseShellArgs(form.entrypoint);
   const command = parseShellArgs(form.command);
@@ -644,6 +673,40 @@ export const EditDockerWorkloadConfig = () => {
             </div>
           </DetailSection>
         )}
+
+        {source ? (
+          <DetailSection
+            title="Build"
+            description="Railpack commands, each a shell line. Ignored when the repository has a Dockerfile. Changing one rebuilds on the next deploy."
+          >
+            <div className="divide-y divide-edge-subtle">
+              {(
+                [
+                  ['installCommand', 'Install', 'npm ci'],
+                  ['buildCommand', 'Build', 'npm run build'],
+                  ['startCommand', 'Start', 'npm run start'],
+                ] as const
+              ).map(([name, label, example]) => (
+                <SettingRow
+                  key={name}
+                  label={label}
+                  htmlFor={`workload-config-${name}`}
+                  hint={`For example ${example}.`}
+                >
+                  <Input
+                    id={`workload-config-${name}`}
+                    autoComplete="off"
+                    spellCheck={false}
+                    placeholder="Railpack default"
+                    maxLength={4096}
+                    className="font-mono"
+                    {...register(name)}
+                  />
+                </SettingRow>
+              ))}
+            </div>
+          </DetailSection>
+        ) : null}
 
         <DockerWorkloadPrivateNetwork />
 

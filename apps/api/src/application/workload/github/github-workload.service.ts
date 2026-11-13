@@ -12,6 +12,7 @@ import type {
   CreateWorkloadPayload,
   DockerWorkloadConfig,
   GithubWorkloadConfig,
+  RailpackCommands,
   UpdateWorkloadPayload,
   Workload,
   WorkloadBuild,
@@ -50,7 +51,10 @@ import {
 import {
   BUILD_CONTAINER,
   BUILD_DEADLINE_SECONDS,
+  DOCKERFILE_BUILDER,
+  RAILPACK_COMMAND_ENV,
   buildBuildNamespace,
+  buildCommandsOf,
   buildJob,
   buildJobName,
   buildNamespace,
@@ -72,7 +76,12 @@ const SOURCE_KEYS = [
   'branch',
   'docker_image',
   'commit_sha',
+  'built_commands',
 ] as const;
+const COMMAND_KEYS = Object.keys(RAILPACK_COMMAND_ENV) as Array<
+  keyof RailpackCommands
+>;
+const COMMAND_MAX_LENGTH = 4096;
 
 /** The fields of a GitHub `push` delivery this service reads. */
 export interface GithubPushPayload {
@@ -99,11 +108,55 @@ const sourceOf = (config: WorkloadConfig | null | undefined) => {
     const value = (config as Partial<GithubWorkloadConfig> | null)?.[key];
 
     if (value) {
-      source[key] = value;
+      (source as Record<string, unknown>)[key] = value;
     }
   }
 
   return source;
+};
+
+/** The set overrides, trimmed; a line break or NUL would not survive the env. */
+const commandsOf = (config: unknown): RailpackCommands => {
+  const commands: RailpackCommands = {};
+
+  for (const key of COMMAND_KEYS) {
+    const value = (config as RailpackCommands | null)?.[key];
+
+    if (value === undefined || value === null) {
+      continue;
+    }
+
+    if (typeof value !== 'string') {
+      throw new BadRequestException(`${key} must be a string`);
+    }
+
+    const command = value.trim();
+
+    if (command.length > COMMAND_MAX_LENGTH || /[\0\r\n]/.test(command)) {
+      throw new BadRequestException(
+        `${key} must be one line of at most ${COMMAND_MAX_LENGTH} characters`,
+      );
+    }
+
+    if (command) {
+      commands[key] = command;
+    }
+  }
+
+  return commands;
+};
+
+/** The image runs the configured commands; a Dockerfile build ignores them. */
+const commandsBuilt = (config: Partial<GithubWorkloadConfig>): boolean => {
+  const built = config.built_commands;
+
+  if (built === DOCKERFILE_BUILDER) {
+    return true;
+  }
+
+  const wanted = commandsOf(config);
+
+  return COMMAND_KEYS.every((key) => built?.[key] === wanted[key]);
 };
 
 const tail = (log: string): string =>
@@ -273,6 +326,7 @@ export class GithubWorkloadService extends DockerWorkloadService {
         // Only builds set these.
         docker_image: undefined,
         commit_sha: undefined,
+        built_commands: undefined,
         github_app_id: appId,
         repository: found.full_name,
         branch,
@@ -329,6 +383,7 @@ export class GithubWorkloadService extends DockerWorkloadService {
           ...payload.config,
           docker_image: undefined,
           commit_sha: undefined,
+          built_commands: undefined,
           ...source,
         },
       }),
@@ -542,6 +597,7 @@ export class GithubWorkloadService extends DockerWorkloadService {
 
     const image = text(input?.docker_image);
     const commit = text(input?.commit_sha);
+    const built = input?.built_commands;
     // The Docker rules validate every other field; a service that was never
     // built has no image yet.
     const settings: Partial<DockerWorkloadConfig> = normalizeDockerConfig({
@@ -558,8 +614,15 @@ export class GithubWorkloadService extends DockerWorkloadService {
     return {
       ...settings,
       ...source,
+      ...commandsOf(input),
       ...(image ? { docker_image: image } : {}),
       ...(commit ? { commit_sha: commit } : {}),
+      ...(image && built
+        ? {
+            built_commands:
+              built === DOCKERFILE_BUILDER ? built : commandsOf(built),
+          }
+        : {}),
     } as DockerWorkloadConfig;
   }
 
@@ -595,7 +658,11 @@ export class GithubWorkloadService extends DockerWorkloadService {
       config.branch,
     );
 
-    if (config.docker_image && config.commit_sha === head.sha) {
+    if (
+      config.docker_image &&
+      config.commit_sha === head.sha &&
+      commandsBuilt(config)
+    ) {
       return false;
     }
 
@@ -608,6 +675,7 @@ export class GithubWorkloadService extends DockerWorkloadService {
       repository: config.repository,
       commitSha: head.sha,
       imageRepository: imageRepository(row.project_id, row.id),
+      commands: commandsOf(config),
     };
     const [build] = await this.db
       .insert(workloadBuild)
@@ -712,7 +780,12 @@ export class GithubWorkloadService extends DockerWorkloadService {
 
       // A cancelled build is not deployed, even when it got this far.
       if (won && owner) {
-        await this.deployImage(owner.project_id, build, image);
+        await this.deployImage(
+          owner.project_id,
+          build,
+          image,
+          pod.dockerfile ? DOCKERFILE_BUILDER : buildCommandsOf(job),
+        );
       }
 
       return true;
@@ -733,14 +806,18 @@ export class GithubWorkloadService extends DockerWorkloadService {
     return true;
   }
 
-  /** Records the built image as the draft's and deploys it as its author. */
+  /**
+   * Records the built image as the draft's and deploys it as its author.
+   * When the commands changed while it was building, it builds again instead.
+   */
   private async deployImage(
     projectId: string,
     build: WorkloadBuildRow,
     image: string,
+    builtCommands: GithubWorkloadConfig['built_commands'],
   ): Promise<void> {
     try {
-      await this.exclusive(build.workload_id, async () => {
+      const upToDate = await this.exclusive(build.workload_id, async () => {
         const row = await this.findRow(projectId, build.workload_id);
         const current =
           row.draft_config ?? (await this.activeVersion(row))?.config;
@@ -748,14 +825,22 @@ export class GithubWorkloadService extends DockerWorkloadService {
           ...current,
           docker_image: image,
           commit_sha: build.commit_sha,
+          built_commands: builtCommands,
         });
 
         await this.db
           .update(workload)
           .set({ draft_config: draft })
           .where(eq(workload.id, row.id));
+
+        return commandsBuilt(draft);
       });
-      await super.deploy(projectId, build.workload_id, build.author);
+
+      if (upToDate) {
+        await super.deploy(projectId, build.workload_id, build.author);
+      } else {
+        await this.deploy(projectId, build.workload_id, build.author);
+      }
     } catch (error) {
       if (error instanceof NotFoundException) {
         return;
@@ -965,9 +1050,11 @@ export class GithubWorkloadService extends DockerWorkloadService {
   }
 
   /** The builder's output and the digest it wrote to its termination message. */
-  private async readPod(
-    jobName: string,
-  ): Promise<{ log: string | null; digest: string | null }> {
+  private async readPod(jobName: string): Promise<{
+    log: string | null;
+    digest: string | null;
+    dockerfile?: boolean;
+  }> {
     const namespace = buildNamespace();
 
     try {
@@ -981,17 +1068,18 @@ export class GithubWorkloadService extends DockerWorkloadService {
         return { log: null, digest: null };
       }
 
-      const digest =
+      const [digest = null, builder] =
         pod.status?.containerStatuses
           ?.find((status) => status.name === BUILD_CONTAINER)
-          ?.state?.terminated?.message?.trim() ?? null;
+          ?.state?.terminated?.message?.trim()
+          .split(/\s+/) ?? [];
       const log = await this.kubernetes.coreV1.readNamespacedPodLog({
         name: pod.metadata.name,
         namespace,
         container: BUILD_CONTAINER,
       });
 
-      return { log, digest };
+      return { log, digest, dockerfile: builder === DOCKERFILE_BUILDER };
     } catch (error) {
       // 400 while the container is still being created: no log yet.
       if (getKubernetesStatusCode(error) !== 400) {
