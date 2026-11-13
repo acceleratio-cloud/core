@@ -8,10 +8,17 @@ export const TEST_ORDER: { name: StorageBenchmarkTestName; label: string }[] = [
   { name: 'sequential-read', label: 'Sequential read' },
   { name: 'random-write', label: 'Random 4 KiB write' },
   { name: 'random-read', label: 'Random 4 KiB read' },
+  { name: 'random-write-latency', label: 'Single 4 KiB write latency' },
+  { name: 'random-read-latency', label: 'Single 4 KiB read latency' },
 ];
+
+/** Method 1 (buffered I/O, before Longhorn) ran only the first four tests. */
+export const testsForMethod = (method: number) =>
+  method === 1 ? TEST_ORDER.slice(0, 4) : TEST_ORDER;
 
 const STEP_LABELS: Record<string, string> = {
   install: 'Installing fio',
+  prepare: 'Writing the test file',
   provision: 'Provisioning the test volume',
   start: 'Starting the benchmark',
   results: 'Reading the results',
@@ -46,8 +53,25 @@ const level = (
         ? 'moderate'
         : 'slow';
 
+/** Like `level`, for values where lower is better. */
+const levelBelow = (
+  value: number,
+  [excellent, good, moderate]: [number, number, number],
+): VerdictLevel =>
+  value <= excellent
+    ? 'excellent'
+    : value <= good
+      ? 'good'
+      : value <= moderate
+        ? 'moderate'
+        : 'slow';
+
 const MEANING: Record<
-  'random-read' | 'random-write' | 'sequential',
+  | 'random-read'
+  | 'random-write'
+  | 'sequential'
+  | 'read-latency'
+  | 'write-latency',
   Record<VerdictLevel, string>
 > = {
   'random-read': {
@@ -61,6 +85,18 @@ const MEANING: Record<
     good: 'Good small writes for most databases and queues.',
     moderate: 'Enough for light write loads.',
     slow: 'Slow small writes; databases will wait on disk.',
+  },
+  'read-latency': {
+    excellent: 'Local-disk-class reads; queries rarely wait on storage.',
+    good: 'Fast enough for most databases.',
+    moderate: 'Noticeable on queries that read many rows from disk.',
+    slow: 'Every uncached read waits; avoid for databases.',
+  },
+  'write-latency': {
+    excellent: 'Commits barely wait on storage.',
+    good: 'Fine for most databases; each commit waits about this long.',
+    moderate: 'Commit-heavy apps will feel it.',
+    slow: 'Every commit waits this long; avoid for databases.',
   },
   sequential: {
     excellent: 'Moves large files very quickly.',
@@ -78,6 +114,20 @@ export const testVerdict = (test: StorageBenchmarkTest): Verdict => {
     return {
       level: value,
       text: `${LEVEL_WORDS[value]}. ${MEANING.sequential[value]}`,
+    };
+  }
+
+  // One request at a time: the latency is the result, not the IOPS.
+  if (test.parameters.io_depth === 1) {
+    const kind = test.direction === 'read' ? 'read-latency' : 'write-latency';
+    const value =
+      test.direction === 'read'
+        ? levelBelow(test.latency_ms.mean, [0.2, 1, 5])
+        : levelBelow(test.latency_ms.mean, [0.5, 2, 10]);
+
+    return {
+      level: value,
+      text: `${LEVEL_WORDS[value]}. ${MEANING[kind][value]}`,
     };
   }
 

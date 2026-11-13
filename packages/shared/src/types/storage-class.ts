@@ -100,13 +100,21 @@ export interface StorageBenchmarkResults {
   random_write_iops: number;
   sequential_read_mbps: number;
   sequential_write_mbps: number;
-  /** Mean completion latency of the random tests, in milliseconds. */
+  /**
+   * Mean latency of single small reads and writes, in milliseconds: the
+   * queue-depth-1 tests since method 2, the random tests before.
+   */
   random_read_latency_ms: number;
   random_write_latency_ms: number;
 }
 
 export type StorageBenchmarkTestName =
-  'sequential-write' | 'sequential-read' | 'random-write' | 'random-read';
+  | 'sequential-write'
+  | 'sequential-read'
+  | 'random-write'
+  | 'random-read'
+  | 'random-write-latency'
+  | 'random-read-latency';
 
 /** One point of a test's progress, averaged over about a second. */
 export interface StorageBenchmarkPoint {
@@ -125,6 +133,8 @@ export interface StorageBenchmarkTest {
   parameters: {
     block_size: string;
     jobs: number;
+    /** Requests in flight per job; absent for runs before method 2. */
+    io_depth?: number;
     engine: string;
     direct: boolean;
     file_size: string;
@@ -168,6 +178,12 @@ export interface StorageBenchmarkEnvironment {
   nodes: number | null;
   storage_nodes: number | null;
   kubernetes_version: string | null;
+  /** How the run measured; absent for method 1 (buffered I/O, SeaweedFS era). */
+  method?: number;
+  /** Server the test pod ran on, read when the run ended. */
+  pod_node?: string | null;
+  /** Servers holding Longhorn copies of the test volume when the run ended. */
+  replica_nodes?: string[] | null;
 }
 
 export interface StorageBenchmark {
@@ -179,6 +195,8 @@ export interface StorageBenchmark {
   status: StorageBenchmarkStatus;
   status_message: string | null;
   results: StorageBenchmarkResults | null;
+  /** Measurement method; results compare only within one method. */
+  method: number;
   /** Step that failed: install, provision, start, or a test name. */
   failed_step: string | null;
   /** Test-by-test progress; null for runs recorded before reports. */

@@ -25,7 +25,7 @@ import { settingsSectionHref } from '../sections';
 import {
   formatLatency,
   stepLabel,
-  TEST_ORDER,
+  testsForMethod,
 } from '../utils/benchmark-report';
 import {
   formatChange,
@@ -207,7 +207,8 @@ export const BenchmarkReportView = ({ id }: { id: string }) => {
   const started = report.started_at ?? report.created_at;
   const duration = formatDuration(report.started_at, report.finished_at);
   const completed = report.progress?.completed ?? report.tests.length;
-  const total = report.progress?.total ?? TEST_ORDER.length;
+  const tests = testsForMethod(report.method);
+  const total = report.progress?.total ?? tests.length;
   const snapshot = report.profile_snapshot;
 
   return (
@@ -267,15 +268,15 @@ export const BenchmarkReportView = ({ id }: { id: string }) => {
               {report.progress?.current_test
                 ? `${stepLabel(report.progress.current_test)} running`
                 : completed === 0
-                  ? 'Preparing the test volume and installing fio'
+                  ? 'Preparing the test volume, installing fio and writing the test file'
                   : 'Collecting results'}
             </span>
             <span className="text-muted-foreground tabular-nums">
               {completed} of {total} tests done
             </span>
           </div>
-          <div aria-hidden="true" className="mt-3 grid h-2 grid-cols-4 gap-0.5">
-            {TEST_ORDER.map((test, index) => (
+          <div aria-hidden="true" className="mt-3 grid h-2 grid-cols-6 gap-0.5">
+            {tests.map((test, index) => (
               <span
                 key={test.name}
                 className={cn(
@@ -291,7 +292,7 @@ export const BenchmarkReportView = ({ id }: { id: string }) => {
           </div>
           <p className="mt-2 text-[12px] text-muted-foreground">
             Each finished test appears below as soon as it is done. A run takes
-            about 2 minutes.
+            about 3 minutes.
           </p>
         </section>
       ) : null}
@@ -380,7 +381,7 @@ export const BenchmarkReportView = ({ id }: { id: string }) => {
       ) : null}
 
       <div className="mt-6 flex flex-col gap-4">
-        {TEST_ORDER.map(({ name, label }) => (
+        {tests.map(({ name, label }) => (
           <BenchmarkTestCard
             key={name}
             label={label}
@@ -430,8 +431,34 @@ export const BenchmarkReportView = ({ id }: { id: string }) => {
         <div className="panel-lit rounded-lg px-5 py-4">
           <h2 className="text-sm font-medium text-foreground">How it ran</h2>
           <dl className="mt-2 divide-y divide-border">
-            <Row label="Test volume" value="2 GiB, deleted afterwards" />
-            <Row label="Tool" value="fio, buffered I/O (psync)" />
+            <Row
+              label="Test volume"
+              value={`${report.method === 1 ? '2' : '4'} GiB, deleted afterwards`}
+            />
+            <Row
+              label="Tool"
+              value={
+                report.method === 1
+                  ? 'fio, buffered I/O (psync), before Longhorn'
+                  : 'fio, direct I/O (libaio)'
+              }
+            />
+            {report.environment?.pod_node ? (
+              <Row label="Test ran on" value={report.environment.pod_node} />
+            ) : null}
+            {report.environment?.replica_nodes?.length ? (
+              <Row
+                label="Copies on"
+                value={`${report.environment.replica_nodes.join(', ')}${
+                  report.environment.pod_node &&
+                  report.environment.replica_nodes.includes(
+                    report.environment.pod_node,
+                  )
+                    ? ' (one on the same server)'
+                    : ' (none on the same server)'
+                }`}
+              />
+            ) : null}
             {report.environment?.nodes != null ? (
               <Row
                 label="Cluster nodes"

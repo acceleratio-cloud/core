@@ -109,6 +109,8 @@ const fullLog = [
   testOutput('sequential-read', true, 300, 314_572_800),
   testOutput('random-write', false, 1234.6, 5_000_000, 4),
   testOutput('random-read', true, 5678.4, 23_000_000, 4),
+  testOutput('random-write-latency', false, 900, 3_600_000),
+  testOutput('random-read-latency', true, 2000, 8_000_000),
 ].join('\n');
 
 describe('benchmark manifests', () => {
@@ -120,7 +122,7 @@ describe('benchmark manifests', () => {
     const claim = buildBenchmarkClaim(input);
 
     expect(claim.spec?.storageClassName).toBe('sc-fast-7c1d2e3f');
-    expect(claim.spec?.resources?.requests?.storage).toBe('2Gi');
+    expect(claim.spec?.resources?.requests?.storage).toBe('4Gi');
     expect(claim.metadata?.labels).toMatchObject({
       'app.kubernetes.io/managed-by': 'acceleratio',
       'acceleratio.io/storage-benchmark-id': benchmarkId,
@@ -141,18 +143,23 @@ describe('benchmark manifests', () => {
     expect(pod?.volumes?.[0].persistentVolumeClaim?.claimName).toBe(input.name);
   });
 
-  it('bounds writes by bytes and logs per-second averages', () => {
+  it('uses direct I/O, timed tests and logs per-second averages', () => {
     const file = fioJobFile();
     const section = (name: string) =>
       file.split(/\n(?=\[)/).find((part) => part.startsWith(`[${name}]`)) ?? '';
 
-    // A run fits its 2 GiB claim on any driver.
-    expect(section('sequential-write')).not.toContain('time_based');
-    expect(section('random-write')).toContain('io_size=64m');
-    expect(section('random-write')).not.toContain('time_based');
-    expect(section('random-read')).toContain('time_based=1');
+    // No page cache in the pod: the numbers are the volume's.
+    expect(section('global')).toContain('direct=1');
+    expect(section('global')).toContain('lat_percentiles=1');
+    expect(section('global')).toContain('ioengine=libaio');
+    // The file is written once in full, so reads never hit thin holes.
+    expect(section('prepare')).toContain('rw=write');
+    expect(section('prepare')).not.toContain('time_based');
+    expect(section('random-write')).toContain('iodepth=16');
+    expect(section('random-write-latency')).toContain('iodepth=1\n');
     expect(file).toContain('log_avg_msec=1000');
     for (const test of BENCHMARK_TESTS) {
+      expect(section(test.name)).toContain('time_based=1');
       expect(section(test.name)).toContain(
         `write_iops_log=/tmp/logs/${test.name}`,
       );
@@ -164,6 +171,10 @@ describe('benchmark manifests', () => {
 
     expect(script).toContain('apk add --no-cache fio');
     expect(script).toContain('BENCHMARK_ERROR[install]');
+    // The file is laid out before the first test starts.
+    expect(script.indexOf('--section=prepare')).toBeLessThan(
+      script.indexOf('---TEST-START sequential-write---'),
+    );
     for (const test of BENCHMARK_TESTS) {
       expect(script).toContain(`--section=${test.name}`);
       expect(script).toContain(`---TEST-START ${test.name}---`);
@@ -182,6 +193,8 @@ describe('parseBenchmarkLog', () => {
       'sequential-read',
       'random-write',
       'random-read',
+      'random-write-latency',
+      'random-read-latency',
     ]);
     expect(parsed.currentTest).toBeNull();
     expect(parsed.error).toBeNull();
@@ -195,7 +208,14 @@ describe('parseBenchmarkLog', () => {
       bandwidth_mbps: 23,
       runtime_seconds: 15,
       error_code: 0,
-      parameters: { block_size: '4 KiB', jobs: 4, engine: 'psync' },
+      parameters: {
+        block_size: '4 KiB',
+        jobs: 4,
+        io_depth: 16,
+        engine: 'libaio',
+        direct: true,
+        file_size: '2 GiB',
+      },
       latency_ms: { mean: 1, p50: 0.7, p95: 2, p99: 4, p999: 8, max: 9 },
     });
     // Four jobs: IOPS and bandwidth add up, latency averages.
@@ -205,7 +225,7 @@ describe('parseBenchmarkLog', () => {
     ]);
   });
 
-  it('summarizes the four headline numbers', () => {
+  it('summarizes the headline numbers, latency from the single-request tests', () => {
     expect(summarizeTests(parseBenchmarkLog(fullLog).tests)).toEqual({
       random_read_iops: 5678,
       random_write_iops: 1235,

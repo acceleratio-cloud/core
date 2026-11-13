@@ -32,7 +32,11 @@ interface FioSide {
   bw?: number;
   runtime?: number;
   io_bytes?: number;
-  lat_ns?: { mean?: number; max?: number };
+  lat_ns?: {
+    mean?: number;
+    max?: number;
+    percentile?: Record<string, number>;
+  };
   clat_ns?: {
     mean?: number;
     max?: number;
@@ -63,15 +67,17 @@ const megabytesPerSecond = (side: FioSide | undefined): number => {
   return round(bytes / 1_000_000, 1);
 };
 
+/** Full-latency percentiles since method 2; completion latency before. */
 const percentile = (side: FioSide | undefined, key: string) =>
-  nsToMs(side?.clat_ns?.percentile?.[key]);
+  nsToMs(side?.lat_ns?.percentile?.[key] ?? side?.clat_ns?.percentile?.[key]);
 
-const blockLabel = (blockSize: string) =>
-  blockSize.endsWith('k')
-    ? `${blockSize.slice(0, -1)} KiB`
-    : blockSize.endsWith('m')
-      ? `${blockSize.slice(0, -1)} MiB`
-      : blockSize;
+const UNITS: Record<string, string> = { k: 'KiB', m: 'MiB', g: 'GiB' };
+
+const blockLabel = (blockSize: string) => {
+  const unit = UNITS[blockSize.slice(-1)];
+
+  return unit ? `${blockSize.slice(0, -1)} ${unit}` : blockSize;
+};
 
 /** Marker lines: `---TEST-START random-read---` → `random-read`. */
 const markerValue = (line: string, prefix: string) =>
@@ -215,8 +221,9 @@ const toTest = (
     parameters: {
       block_size: blockLabel(definition.blockSize),
       jobs: definition.jobs,
+      io_depth: definition.ioDepth,
       engine: BENCHMARK_ENGINE,
-      direct: false,
+      direct: true,
       file_size: blockLabel(TEST_FILE_SIZE),
       limit: definition.limit,
     },
@@ -331,27 +338,30 @@ export const parseBenchmarkLog = (log: string): ParsedBenchmarkLog => {
   return { tests, currentTest, failedStep, error };
 };
 
-/** The four headline numbers, once every test has a result. */
+/** The headline numbers, once every test has a result. */
 export const summarizeTests = (
   tests: StorageBenchmarkTest[],
 ): StorageBenchmarkResults | null => {
   const byName = new Map(tests.map((test) => [test.name, test]));
-  const randomRead = byName.get('random-read');
-  const randomWrite = byName.get('random-write');
-  const sequentialRead = byName.get('sequential-read');
-  const sequentialWrite = byName.get('sequential-write');
 
-  if (!randomRead || !randomWrite || !sequentialRead || !sequentialWrite) {
+  if (BENCHMARK_TESTS.some((definition) => !byName.has(definition.name))) {
     return null;
   }
+
+  const get = (name: StorageBenchmarkTestName) =>
+    byName.get(name) as StorageBenchmarkTest;
+  const randomRead = get('random-read');
+  const randomWrite = get('random-write');
+  const sequentialRead = get('sequential-read');
+  const sequentialWrite = get('sequential-write');
 
   return {
     random_read_iops: randomRead.iops,
     random_write_iops: randomWrite.iops,
     sequential_read_mbps: sequentialRead.bandwidth_mbps,
     sequential_write_mbps: sequentialWrite.bandwidth_mbps,
-    random_read_latency_ms: randomRead.latency_ms.mean,
-    random_write_latency_ms: randomWrite.latency_ms.mean,
+    random_read_latency_ms: get('random-read-latency').latency_ms.mean,
+    random_write_latency_ms: get('random-write-latency').latency_ms.mean,
   };
 };
 
@@ -375,6 +385,11 @@ export const benchmarkFailureMessage = (
     : message;
 };
 
+/** Runs before the method was recorded used method 1. */
+export const benchmarkMethod = (
+  row: Pick<StorageBenchmarkRow, 'environment'>,
+) => row.environment?.method ?? 1;
+
 const progressOf = (
   row: StorageBenchmarkRow,
 ): StorageBenchmarkProgress | null =>
@@ -395,6 +410,7 @@ export const toStorageBenchmark = (
   status: row.status,
   status_message: row.status_message,
   results: row.results,
+  method: benchmarkMethod(row),
   failed_step: row.failed_step,
   progress: progressOf(row),
   started_at: row.started_at?.toISOString() ?? null,

@@ -18,9 +18,18 @@ export const DEFAULT_BENCHMARK_NAMESPACE = 'acceleratio-benchmarks';
 export const DEFAULT_BENCHMARK_IMAGE =
   'alpine:3.23@sha256:ff7f0c727dd796aa36787bfcd9a64bf35a6ce72a73451b3359fde849b6703d63';
 
-export const VOLUME_SIZE = '2Gi';
-export const TEST_FILE_SIZE = '512m';
+/**
+ * How a run measures. Results compare only within one method. 1 was
+ * buffered psync I/O for SeaweedFS's FUSE mount; 2 is direct libaio I/O on
+ * Longhorn block volumes with separate queue-depth-1 latency tests.
+ */
+export const BENCHMARK_METHOD = 2;
+
+export const VOLUME_SIZE = '4Gi';
+/** Large enough that a run does not settle in a replica server's cache. */
+export const TEST_FILE_SIZE = '2g';
 export const RUNTIME_SECONDS = 15;
+export const RAMP_SECONDS = 2;
 /** The Job is killed after this; the API gives up a little later. */
 export const ACTIVE_DEADLINE_SECONDS = 600;
 
@@ -32,8 +41,8 @@ export const TEST_LOG = '---TEST-LOG';
 export const TEST_END = '---TEST-END';
 /** fio averages its bandwidth, IOPS and latency logs over this window. */
 export const LOG_AVERAGE_MS = 1000;
-/** Bytes each random-write job may write; four jobs run in parallel. */
-export const RANDOM_WRITE_BYTES_PER_JOB = '64m';
+/** Writes the whole test file before the tests; not reported. */
+export const PREPARE_SECTION = 'prepare';
 
 export interface BenchmarkTestDefinition {
   name: StorageBenchmarkTestName;
@@ -43,22 +52,23 @@ export interface BenchmarkTestDefinition {
   rw: string;
   blockSize: string;
   jobs: number;
-  /** fio options that end the test. */
-  options: string[];
+  ioDepth: number;
   limit: string;
 }
 
+const LIMIT = `${RUNTIME_SECONDS} s`;
+
 /**
- * The four tests, run one after another as separate fio invocations so the
- * API can follow progress test by test. Sequential write lays out the test
- * file once; the other tests reuse it.
+ * The six tests, run one after another as separate fio invocations so the
+ * API can follow progress test by test.
  *
- * Write tests are bounded by bytes (the file once, then `io_size` per random
- * writer, about 768 MiB in all) so a run fits its 2 GiB claim on any driver,
- * while read tests run for a fixed time. Buffered I/O is used with the page
- * cache dropped before each test (`invalidate`) and an fsync at the end of
- * each write test, so results compare across drivers that differ in
- * O_DIRECT support.
+ * Longhorn volumes are block devices, so I/O is direct (no page cache in the
+ * pod) through libaio, and every test runs for a fixed time; overwrites take
+ * no new space. The file is written in full first, because reads from
+ * never-written parts of a thin Longhorn volume return zeros without
+ * touching a disk. Throughput tests keep many requests in flight, as
+ * Longhorn's engine needs; the latency tests send one request at a time,
+ * which is what a database's commit waits on.
  */
 export const BENCHMARK_TESTS: BenchmarkTestDefinition[] = [
   {
@@ -69,8 +79,8 @@ export const BENCHMARK_TESTS: BenchmarkTestDefinition[] = [
     rw: 'write',
     blockSize: '1m',
     jobs: 1,
-    options: [],
-    limit: `Writes the ${TEST_FILE_SIZE.replace('m', ' MiB')} file once`,
+    ioDepth: 16,
+    limit: LIMIT,
   },
   {
     name: 'sequential-read',
@@ -80,8 +90,8 @@ export const BENCHMARK_TESTS: BenchmarkTestDefinition[] = [
     rw: 'read',
     blockSize: '1m',
     jobs: 1,
-    options: ['time_based=1', 'ramp_time=2'],
-    limit: `${RUNTIME_SECONDS} s`,
+    ioDepth: 16,
+    limit: LIMIT,
   },
   {
     name: 'random-write',
@@ -91,8 +101,8 @@ export const BENCHMARK_TESTS: BenchmarkTestDefinition[] = [
     rw: 'randwrite',
     blockSize: '4k',
     jobs: 4,
-    options: [`io_size=${RANDOM_WRITE_BYTES_PER_JOB}`],
-    limit: `${RANDOM_WRITE_BYTES_PER_JOB.replace('m', ' MiB')} per job, at most ${RUNTIME_SECONDS} s`,
+    ioDepth: 16,
+    limit: LIMIT,
   },
   {
     name: 'random-read',
@@ -102,12 +112,34 @@ export const BENCHMARK_TESTS: BenchmarkTestDefinition[] = [
     rw: 'randread',
     blockSize: '4k',
     jobs: 4,
-    options: ['time_based=1', 'ramp_time=2'],
-    limit: `${RUNTIME_SECONDS} s`,
+    ioDepth: 16,
+    limit: LIMIT,
+  },
+  {
+    name: 'random-write-latency',
+    label: 'Single 4 KiB write latency',
+    pattern: 'random',
+    direction: 'write',
+    rw: 'randwrite',
+    blockSize: '4k',
+    jobs: 1,
+    ioDepth: 1,
+    limit: LIMIT,
+  },
+  {
+    name: 'random-read-latency',
+    label: 'Single 4 KiB read latency',
+    pattern: 'random',
+    direction: 'read',
+    rw: 'randread',
+    blockSize: '4k',
+    jobs: 1,
+    ioDepth: 1,
+    limit: LIMIT,
   },
 ];
 
-export const BENCHMARK_ENGINE = 'psync';
+export const BENCHMARK_ENGINE = 'libaio';
 
 export const fioJobFile = (): string =>
   [
@@ -116,19 +148,26 @@ export const fioJobFile = (): string =>
     'filename=fio-benchmark.dat',
     `size=${TEST_FILE_SIZE}`,
     `ioengine=${BENCHMARK_ENGINE}`,
-    'direct=0',
-    'invalidate=1',
-    `runtime=${RUNTIME_SECONDS}`,
-    'end_fsync=1',
+    'direct=1',
+    // Percentiles of the full latency: with libaio much of it is submission.
+    'lat_percentiles=1',
     'group_reporting=1',
     `log_avg_msec=${LOG_AVERAGE_MS}`,
+    '',
+    `[${PREPARE_SECTION}]`,
+    'rw=write',
+    'bs=1m',
+    'iodepth=16',
     '',
     ...BENCHMARK_TESTS.flatMap((test) => [
       `[${test.name}]`,
       `rw=${test.rw}`,
       `bs=${test.blockSize}`,
+      `iodepth=${test.ioDepth}`,
       ...(test.jobs > 1 ? [`numjobs=${test.jobs}`] : []),
-      ...test.options,
+      'time_based=1',
+      `runtime=${RUNTIME_SECONDS}`,
+      `ramp_time=${RAMP_SECONDS}`,
       // Per-second averages for the progress charts, in /tmp/logs.
       `write_bw_log=/tmp/logs/${test.name}`,
       `write_iops_log=/tmp/logs/${test.name}`,
@@ -158,6 +197,7 @@ export const benchmarkScript = (): string =>
     "cat > /tmp/benchmark.fio <<'FIO'",
     fioJobFile(),
     'FIO',
+    `fio --section=${PREPARE_SECTION} --output=/dev/null /tmp/benchmark.fio 2>/tmp/${PREPARE_SECTION}.err || { echo "${BENCHMARK_ERROR_PREFIX}[${PREPARE_SECTION}]: Could not write the test file: $(grep -m 1 'fio:' /tmp/${PREPARE_SECTION}.err | cut -c 1-200)"; exit 3; }`,
     ...BENCHMARK_TESTS.map((test) => runTest(test.name)),
   ].join('\n');
 

@@ -83,6 +83,8 @@ const fullLog = [
   'sequential-read',
   'random-write',
   'random-read',
+  'random-write-latency',
+  'random-read-latency',
 ]
   .map((jobname) => testSection(jobname))
   .join('\n');
@@ -121,9 +123,11 @@ const createService = (rows: StorageBenchmarkRow[] = []) => {
       .mockResolvedValue({ spec: { volumeName: 'pvc-123' } }),
     deleteNamespacedPersistentVolumeClaim: jest.fn().mockResolvedValue({}),
     patchPersistentVolume: jest.fn().mockResolvedValue({}),
-    listNamespacedPod: jest
-      .fn()
-      .mockResolvedValue({ items: [{ metadata: { name: `${name}-abcde` } }] }),
+    listNamespacedPod: jest.fn().mockResolvedValue({
+      items: [
+        { metadata: { name: `${name}-abcde` }, spec: { nodeName: 'n1' } },
+      ],
+    }),
     readNamespacedPodLog: jest.fn(),
     listNode: jest.fn().mockResolvedValue({
       items: [{ status: { nodeInfo: { kubeletVersion: 'v1.34.1+k3s1' } } }],
@@ -140,9 +144,18 @@ const createService = (rows: StorageBenchmarkRow[] = []) => {
       .fn()
       .mockResolvedValue({ csi_driver_installed: true, storage_nodes: 1 }),
   };
+  const customObjects = {
+    listNamespacedCustomObject: jest.fn().mockResolvedValue({
+      items: [
+        { spec: { volumeName: 'pvc-123', nodeID: 'n2' } },
+        { spec: { volumeName: 'pvc-123', nodeID: 'n1' } },
+        { spec: { volumeName: 'pvc-other', nodeID: 'n3' } },
+      ],
+    }),
+  };
   const service = new StorageBenchmarkService(
     { select, insert, update, execute } as unknown as Database,
-    { coreV1, batchV1 } as unknown as KubernetesService,
+    { coreV1, batchV1, customObjects } as unknown as KubernetesService,
     storageClasses as unknown as StorageClassService,
   );
 
@@ -202,6 +215,7 @@ describe('StorageBenchmarkService.start', () => {
           nodes: 1,
           storage_nodes: 1,
           kubernetes_version: 'v1.34.1+k3s1',
+          method: 2,
         },
       }),
     );
@@ -328,7 +342,17 @@ describe('StorageBenchmarkService.poll', () => {
       'sequential-read',
       'random-write',
       'random-read',
+      'random-write-latency',
+      'random-read-latency',
     ]);
+    // Where the pod ran and where the copies were, read before cleanup.
+    expect(set).toHaveBeenCalledWith({
+      environment: expect.objectContaining({
+        method: 1,
+        pod_node: 'n1',
+        replica_nodes: ['n1', 'n2'],
+      }) as unknown,
+    });
     // Retain profiles must not keep the test data: the volume is switched to
     // Delete before its claim goes.
     expect(coreV1.patchPersistentVolume).toHaveBeenCalledWith({

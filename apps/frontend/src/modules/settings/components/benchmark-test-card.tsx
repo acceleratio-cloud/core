@@ -70,10 +70,7 @@ export const BenchmarkTestCard = ({
 }: BenchmarkTestCardProps) => {
   if (!test) {
     return (
-      <section
-        aria-label={label}
-        className="panel-lit rounded-lg px-5 py-4"
-      >
+      <section aria-label={label} className="panel-lit rounded-lg px-5 py-4">
         <div className="flex items-center justify-between gap-3">
           <h3 className="text-sm font-medium text-foreground">{label}</h3>
           <span
@@ -115,16 +112,16 @@ export const BenchmarkTestCard = ({
     .map((point) => ({ t: point.t, value: point.latency_ms }));
 
   return (
-    <section
-      aria-label={label}
-      className="panel-lit rounded-lg"
-    >
+    <section aria-label={label} className="panel-lit rounded-lg">
       <header className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-5 py-4">
         <div className="min-w-0">
           <h3 className="text-sm font-medium text-foreground">{test.label}</h3>
           <p className="mt-1 text-[12px] text-muted-foreground">
             {test.parameters.block_size} blocks · {test.parameters.jobs}{' '}
             {test.parameters.jobs === 1 ? 'job' : 'parallel jobs'} ·{' '}
+            {test.parameters.io_depth !== undefined
+              ? `${test.parameters.io_depth} in flight per job · `
+              : null}
             {test.parameters.engine},{' '}
             {test.parameters.direct ? 'direct' : 'buffered'} I/O ·{' '}
             {test.parameters.file_size} file · {test.parameters.limit}

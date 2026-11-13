@@ -34,6 +34,7 @@ import {
 } from '@/vendor/kubernetes/kubernetes-error';
 import { jobOutcome } from '@/vendor/kubernetes/job-outcome';
 import { KubernetesService } from '@/vendor/kubernetes/kubernetes.service';
+import { listLonghorn } from '@/vendor/kubernetes/longhorn';
 import {
   storageBenchmark,
   type StorageBenchmarkRow,
@@ -42,6 +43,7 @@ import { StorageClassService } from '../storage-class.service';
 import {
   ACTIVE_DEADLINE_SECONDS,
   BENCHMARK_CONTAINER,
+  BENCHMARK_METHOD,
   benchmarkExternalName,
   buildBenchmarkClaim,
   buildBenchmarkJob,
@@ -51,12 +53,17 @@ import {
 } from './storage-benchmark.manifests';
 import {
   benchmarkFailureMessage,
+  benchmarkMethod,
   parseBenchmarkLog,
   summarizeTests,
   toStorageBenchmark,
   toStorageBenchmarkReport,
   type ParsedBenchmarkLog,
 } from './storage-benchmark.results';
+
+interface LonghornReplica {
+  spec?: { volumeName?: string; nodeID?: string };
+}
 
 const UNIQUE_VIOLATION = '23505';
 const ACTIVE_CONSTRAINT = 'storage_benchmark_active_unique';
@@ -266,6 +273,8 @@ export class StorageBenchmarkService
             eq(storageBenchmark.storage_class_id, row.storage_class_id),
             eq(storageBenchmark.status, 'succeeded'),
             isNotNull(storageBenchmark.results),
+            // Results of different methods do not compare.
+            sql`coalesce((${storageBenchmark.environment}->>'method')::int, 1) = ${benchmarkMethod(row)}`,
             lt(storageBenchmark.created_at, row.created_at),
           ),
         )
@@ -406,6 +415,8 @@ export class StorageBenchmarkService
     const parsed = log ? parseBenchmarkLog(log) : null;
     const tests = parsed?.tests ?? row.tests ?? null;
 
+    await this.recordPlacement(row);
+
     if (outcome === 'succeeded') {
       const results = tests ? summarizeTests(tests) : null;
 
@@ -490,8 +501,59 @@ export class StorageBenchmarkService
       );
   }
 
+  /**
+   * Where the pod ran and where Longhorn kept copies, read before cleanup:
+   * a local copy or a remote one changes the numbers. Best effort.
+   */
+  private async recordPlacement(row: StorageBenchmarkRow): Promise<void> {
+    try {
+      const [pods, claim] = await Promise.all([
+        this.kubernetes.coreV1.listNamespacedPod({
+          namespace: this.namespace,
+          labelSelector: `job-name=${row.external_name}`,
+        }),
+        this.kubernetes.coreV1.readNamespacedPersistentVolumeClaim({
+          name: row.external_name,
+          namespace: this.namespace,
+        }),
+      ]);
+      const volume = claim.spec?.volumeName;
+      const replicas = volume
+        ? await listLonghorn<LonghornReplica>(this.kubernetes, 'replicas')
+        : null;
+
+      await this.db
+        .update(storageBenchmark)
+        .set({
+          environment: {
+            nodes: null,
+            storage_nodes: null,
+            kubernetes_version: null,
+            ...row.environment,
+            method: benchmarkMethod(row),
+            pod_node: pods.items[0]?.spec?.nodeName ?? null,
+            replica_nodes: replicas
+              ? [
+                  ...new Set(
+                    replicas
+                      .filter((replica) => replica.spec?.volumeName === volume)
+                      .map((replica) => replica.spec?.nodeID)
+                      .filter((node): node is string => Boolean(node)),
+                  ),
+                ].sort()
+              : null,
+          },
+        })
+        .where(eq(storageBenchmark.id, row.id));
+    } catch (error) {
+      this.logger.warn(
+        `Failed to read benchmark placement ${row.external_name}: ${(error as Error).message}`,
+      );
+    }
+  }
+
   /** Best-effort cluster context for the report. */
-  private async readEnvironment(): Promise<StorageBenchmarkEnvironment | null> {
+  private async readEnvironment(): Promise<StorageBenchmarkEnvironment> {
     try {
       const [nodes, environment] = await Promise.all([
         this.kubernetes.coreV1.listNode(),
@@ -503,9 +565,15 @@ export class StorageBenchmarkService
         storage_nodes: environment.storage_nodes,
         kubernetes_version:
           nodes.items[0]?.status?.nodeInfo?.kubeletVersion ?? null,
+        method: BENCHMARK_METHOD,
       };
     } catch {
-      return null;
+      return {
+        nodes: null,
+        storage_nodes: null,
+        kubernetes_version: null,
+        method: BENCHMARK_METHOD,
+      };
     }
   }
 

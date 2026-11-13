@@ -39,6 +39,7 @@ const previousRuns = (runs: StorageBenchmark[]) => {
         (candidate) =>
           candidate.status === 'succeeded' &&
           candidate.results &&
+          candidate.method === run.method &&
           profileKey(candidate) === profileKey(run),
       );
 
