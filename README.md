@@ -87,9 +87,9 @@ its own PostgreSQL.
 
 ## Status
 
-Acceleratio is in early development. The verified setup is a single server on
-Ubuntu 22.04, Ubuntu 24.04 or Debian 12; clusters of several servers can be
-built from the console but are not yet verified. See
+Acceleratio is in early development. It runs on Ubuntu 22.04, Ubuntu 24.04 or
+Debian 12, on a single server or a cluster of several built from the console.
+See
 [docs/PRODUCT.md](./docs/PRODUCT.md) for what is shipped and what is not.
 
 ## Documentation
