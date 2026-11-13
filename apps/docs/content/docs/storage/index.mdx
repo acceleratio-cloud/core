@@ -1,0 +1,17 @@
+---
+title: Storage
+description: Where services keep their data.
+---
+
+| Storage | Built on | Used for |
+| --- | --- | --- |
+| [Volumes](/storage/volumes) | [Longhorn](https://longhorn.io) | Files of Docker services, PostgreSQL disks |
+| [S3 buckets](/storage/s3-buckets) | [RustFS](https://rustfs.com) | Project buckets, database backups, static site files |
+
+How many copies of a volume are kept, and on which disks and servers, is set
+by its [storage profile](/storage/storage-profiles).
+
+<Callout type="warn">
+  Longhorn does not flush the disk cache on `fsync`. Production data needs
+  disks with power-loss protection or a battery-backed controller.
+</Callout>

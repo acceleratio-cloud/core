@@ -1,0 +1,12 @@
+{
+  "title": "Workloads",
+  "pages": [
+    
+    "docker",
+    "github",
+    "postgres",
+    "static-sites",
+    "marketplace",
+    "logs-and-metrics"
+  ]
+}

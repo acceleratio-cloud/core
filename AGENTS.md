@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Acceleratio — an open-source, self-hosted cloud platform. The console lives in `apps/frontend`.
+Acceleratio — an open-source, self-hosted cloud platform. The console lives in `apps/frontend`, the public documentation site (Fumadocs) in `apps/docs`.
 
 ## Local development
 

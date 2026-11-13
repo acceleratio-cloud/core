@@ -1,0 +1,40 @@
+---
+title: Private network
+description: Services of a project reach each other by name.
+---
+
+Every project is one private network. Each service has a private name,
+`<hostname>.internal`, that every service of the same project reaches on any
+port, for example `api.internal`. The hostname is the slug of the
+service's name and can be changed.
+
+![The Private network section of api: api.internal, with an edit button](/screenshots/private-network.png)
+
+<Mermaid
+  title="Services reach each other by name inside a project, never across projects"
+  chart={`
+flowchart TB
+  subgraph shop["Project: storefront"]
+    direction TB
+    web["web"] -->|"api.internal:8080"| api["api"]
+    api -->|"cache.internal:6379"| cache["cache"]
+  end
+  subgraph blog["Project: blog"]
+    ghost["ghost"]
+  end
+  ghost -. "dropped" .-x api
+`}
+/>
+
+## Isolation
+
+- A private name never resolves in another project.
+- Traffic between projects is dropped, even by cluster IP or full DNS name.
+- The private network is always on and cannot be turned off.
+
+Separate networks inside one project are not offered.
+
+## Clients that cache addresses
+
+A private name resolves to the service's current instances. A client that
+caches the address must resolve the name again after the service restarts.

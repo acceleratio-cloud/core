@@ -1,0 +1,32 @@
+---
+title: GitHub integration
+description: Connect GitHub to deploy repositories.
+---
+
+**Settings → Integrations → GitHub** connects GitHub through GitHub Apps that
+you own. Their keys are kept encrypted in the platform's database. Several
+Apps can coexist, for example one per organization.
+
+![The GitHub settings page with one App, its owner and its installation](/screenshots/github-apps.png)
+
+## Create an App
+
+1. Choose **Add GitHub App**. The name is filled in for you and can be
+   changed; GitHub App names are unique across all of GitHub.
+2. Enter an organization, or leave it empty to create the App on your own
+   account. An App installs only on the account that owns it.
+3. Confirm the App on github.com. You come back to the console.
+4. Install the App on the repositories you want to deploy.
+
+The App asks for read access to repository contents and metadata, and for
+push events.
+
+## Webhooks
+
+GitHub delivers webhooks (pushes, uninstall and suspend events) only to an
+HTTPS address. Without a [control plane URL](/settings/control-plane-url)
+the App is created with its webhook off, and services deploy only by hand.
+
+## Not supported
+
+GitHub Enterprise Server, and entering an existing App's credentials by hand.

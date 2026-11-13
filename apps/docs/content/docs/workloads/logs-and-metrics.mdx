@@ -1,0 +1,39 @@
+---
+title: Logs and metrics
+description: Follow what your services do.
+---
+
+## Logs
+
+A project's **Logs** tab shows the output (stdout and stderr) of all its
+services in one time-ordered list.
+
+- Narrow it by service, instance, level and text.
+- **Live** mode keeps following across deploys and restarts.
+- Download the loaded lines.
+
+![The Logs tab: filters by level, service and pod, a chart of lines over time, and worker log lines with warnings](/screenshots/logs.png)
+
+Logs are kept 7 days or up to 2 GiB, whichever comes first, on the server's
+own disk. A service that writes more than 2,000 lines per second is throttled.
+
+## Metrics
+
+A project's **Usage Metrics** tab shows, over a selected time range:
+
+- CPU, memory, network and disk I/O per service;
+- the fill level of volumes;
+- for projects with databases: connections, transactions per second, cache hit
+  ratio and database size.
+
+Metrics are kept 14 days on the server's own disk.
+
+![Usage Metrics: CPU, memory, disk, network and pods ready, with cluster saturation gauges](/screenshots/usage-metrics.png)
+
+## Audit log
+
+The **Audit Trail** tab lists who changed what in the project and its services, from
+where, and when: deploys, setting changes, revealed secrets and opened
+terminals.
+
+![The Audit Trail: deploys, setting changes and a revealed environment, each with actor, IP address and result](/screenshots/audit-trail.png)

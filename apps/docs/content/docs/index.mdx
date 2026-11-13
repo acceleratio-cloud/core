@@ -1,0 +1,44 @@
+---
+title: Introduction
+description: An open-source cloud platform for servers you own.
+---
+
+Acceleratio is an open-source, self-hosted alternative to Railway, Render,
+Northflank and Vercel. One command turns a server you own into a private cloud
+with a web console for deploying and running apps, databases and sites. The
+control plane, the workloads and the data stay on your infrastructure: no
+vendor account, no hosted service.
+
+## Features
+
+- **Apps from an image or a repository.** Run any Docker image, or connect
+  GitHub and deploy a branch: it builds from a `Dockerfile` or detects the
+  stack, and redeploys on every push.
+- **PostgreSQL databases.** Create, back up continuously, restore to any moment
+  of the last 7 days, import and export dumps.
+- **Static sites** uploaded as a folder, with versions and rollback.
+- **One-click apps** from a catalog: n8n, Grafana, Gitea, Nextcloud, Outline,
+  Plausible, Vaultwarden and more.
+- **Domains with automatic HTTPS.** A generated domain for every service, and
+  custom domains with Let's Encrypt certificates.
+- **Private networking.** Services of a project reach each other by name
+  (`api.internal`); projects are isolated from each other.
+- **Storage.** Persistent volumes and S3-compatible buckets.
+- **Logs and metrics** per project, with live tail and search, and a terminal
+  into running containers.
+- **Servers and updates from the console.** Add servers to the cluster and
+  update the platform without SSH.
+
+## Status
+
+Acceleratio is in early development. It runs on Ubuntu 22.04, Ubuntu 24.04 or
+Debian 12, on a single server or a cluster of several built from the console.
+
+<Cards>
+  <Card title="Installation" href="/installation" />
+  <Card title="Workloads" href="/workloads" />
+  <Card title="Servers" href="/servers" />
+  <Card title="Networking" href="/networking" />
+  <Card title="Storage" href="/storage" />
+  <Card title="Platform settings" href="/settings" />
+</Cards>

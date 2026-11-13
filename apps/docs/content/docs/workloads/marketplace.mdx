@@ -1,0 +1,26 @@
+---
+title: Marketplace
+description: Deploy ready-made apps in one step.
+---
+
+The **Marketplace** deploys a ready-made app into a project. Each app is one or
+more services with their images, volumes, environment and, for the public one,
+a generated HTTPS domain.
+
+![The Marketplace: Directus, Ghost, Gitea, Grafana, Keycloak and Mattermost, filtered by category](/screenshots/marketplace.png)
+
+The catalog includes Directus, Ghost, Gitea, Grafana, Keycloak, Mattermost,
+Meilisearch, Metabase, n8n, NATS, Nextcloud, Open WebUI, Outline, Plausible,
+Umami, Uptime Kuma and Vaultwarden.
+
+Some apps ask for values, such as an admin email, in the deploy dialog. Secrets
+and database passwords are generated for you.
+
+After deploy, every service of the app is an ordinary service you can
+configure, update and remove.
+
+## Add an app
+
+Apps are YAML templates in the
+[`templates`](https://github.com/acceleratio-cloud/core/tree/main/templates)
+folder of the repository. Its README describes the format.

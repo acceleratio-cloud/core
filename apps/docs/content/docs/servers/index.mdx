@@ -1,0 +1,35 @@
+---
+title: Servers
+description: The servers of your cluster.
+---
+
+The installer starts a cluster of one server. The console's **Servers** page
+lists every server of the cluster and manages them: add servers, stop new work
+on one, move its work away and remove it.
+
+![The Servers page with one control-plane server and its menu: Cordon, Drain, Labels and taints, Remove server](/screenshots/servers.png)
+
+## Roles
+
+| Role | What it does |
+| --- | --- |
+| Worker | Runs workloads |
+| Control plane | Also joins etcd for high availability |
+
+## Labels and taints
+
+**Labels and taints**, in the server's menu, are edited per server. A service can be pinned to servers
+with matching labels through its **Node selector**
+(Configuration → Placement), for example `pool=gpu`.
+
+## Cordon and uncordon
+
+**Cordon** stops new instances from being scheduled on a server. Running ones
+stay. **Uncordon** resumes scheduling.
+
+## Operations
+
+Every operation (add, drain, remove) is saved with the account that started
+it, its steps and its log. Only one operation runs per server at a time. An
+operation interrupted by an API restart is marked failed; check the server and
+start it again.

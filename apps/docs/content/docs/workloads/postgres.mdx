@@ -1,0 +1,101 @@
+---
+title: PostgreSQL
+description: Databases with continuous backups and point-in-time restore.
+---
+
+Create a database with a **version** (16 or 17), a **disk size** and a
+[storage profile](/storage/storage-profiles). It runs as one
+[CloudNativePG](https://cloudnative-pg.io) instance.
+
+![The Create PostgreSQL dialog: name postgres, PostgreSQL 17, 10 GiB](/screenshots/create-postgres.png)
+
+<Callout type="warn">
+  A database is a single instance without automatic failover. Its disk has one
+  copy on one server unless its storage profile keeps more.
+</Callout>
+
+## Connect
+
+![The PostgreSQL overview: connections, database size, cache hits, transactions and the connection string](/screenshots/postgres-overview.png)
+
+The overview shows the in-project connection address and, on request, the
+password. Services of the same project connect over the
+[private network](/networking/private-network); a database needs no
+public domain.
+
+The overview also shows the server's state and load, and the tables of the
+`app` database with their indexes and a read-only, paged view of their rows.
+
+### Access from outside the cluster
+
+The database port is closed to the outside by default. **Settings** can open
+it as a node port (30000–32767) on the server that runs the database, limited
+to listed addresses or networks, or explicitly to everyone.
+
+- Connections from outside must use TLS (`sslmode=require`). The certificate is
+  the cluster's own, so clients cannot verify it yet.
+- The address follows the server, so it can change when the database moves.
+
+## Manage
+
+- **Stop** (hibernate), **start** and **restart** the database.
+- **Grow the disk** from Settings, without a restart, when the storage profile
+  allows volume expansion. A disk cannot shrink.
+- **Regenerate the password** after a confirmation. The database switches to
+  it within seconds without touching data; update services that use the old
+  password by hand.
+- **Delete** the database, which deletes its disk, its data and its backups.
+
+The canvas card shows the used and free space of the disk, with a warning from
+85%.
+
+## Backups
+
+Every database is backed up continuously:
+
+- its WAL is archived as it is written, and sent when a segment fills or every
+  5 minutes;
+- a base backup runs daily at 03:00 UTC, and on demand from the **Backups**
+  tab;
+- backups and WAL are kept 7 days, in a bucket only this database's keys can
+  reach.
+
+<Mermaid
+  title="Continuous backups and point-in-time restore"
+  chart={`
+flowchart TB
+  db[("Database")] -->|"WAL, every change"| bucket[("Backup bucket<br/>kept 7 days")]
+  db -->|"base backup, daily 03:00 UTC"| bucket
+  bucket -->|"restore to any moment"| copy[("New database<br/>same project")]
+`}
+/>
+
+![The Backups tab: backups on, point-in-time recovery active with 7 days retention, a completed base backup, export and import](/screenshots/postgres-backups.png)
+
+**Restore** creates a new database in the same project from any moment since
+the first backup, with a new password. The source keeps running.
+
+<Callout type="warn">
+  Backups are stored on the same servers as the database. They protect against
+  mistakes such as a dropped table, not against losing the servers' disks. A
+  restore after losing the server can miss the last few minutes.
+</Callout>
+
+Backups are on by default. Turning them off, after a confirmation, stops
+archiving and deletes every backup. Turning them on again starts from a new
+base backup.
+
+## Export and import
+
+- **Export** downloads the `app` database as it is now, as a `pg_dump`
+  custom-format file. Restore it with `pg_restore` of the same PostgreSQL
+  version or newer.
+- **Import** loads a dump as the `app` user, all or nothing in one transaction.
+  A custom-format archive replaces the objects it contains. A SQL file runs as
+  written, so make it with `pg_dump --no-owner --no-acl`.
+
+## Not supported yet
+
+Backups to an external S3 store, a custom backup schedule or retention,
+restoring over the existing database, replicas, failover and connection
+pooling.

@@ -1,0 +1,43 @@
+---
+title: How it works
+description: The open-source components Acceleratio runs on.
+---
+
+The installer sets up a single-node Kubernetes cluster from open components and
+runs Acceleratio on it. Everything can be inspected with standard Kubernetes
+tools.
+
+<Mermaid
+  title="One Acceleratio server: what serves a request and where data lives"
+  chart={`
+flowchart TB
+  user([Browser]) -->|":30300 / :30080"| console["Console and API"]
+  user -->|"HTTPS :443"| traefik["Traefik<br/>domains and certificates"]
+  subgraph cluster["k3s cluster · Cilium network"]
+    console
+    traefik --> services["Your services"]
+    services --> pg[("PostgreSQL<br/>CloudNativePG")]
+    services --> vol[("Volumes<br/>Longhorn")]
+    services --> s3[("S3 buckets<br/>RustFS")]
+    pg -->|"backups"| s3
+    services -.->|"logs"| vector["Vector"] --> vlogs[("VictoriaLogs")]
+    services -.->|"metrics"| vmetrics[("VictoriaMetrics")]
+  end
+`}
+/>
+
+| Component | Role |
+| --- | --- |
+| [k3s](https://k3s.io) | Kubernetes with embedded etcd |
+| [Cilium](https://cilium.io) | networking and project isolation |
+| [Longhorn](https://longhorn.io) | persistent volumes |
+| [RustFS](https://rustfs.com) | S3 object storage, backups, site files |
+| [CloudNativePG](https://cloudnative-pg.io) | PostgreSQL databases |
+| [Traefik](https://traefik.io) | ingress and Let's Encrypt certificates |
+| [VictoriaMetrics](https://victoriametrics.com), [VictoriaLogs](https://docs.victoriametrics.com/victorialogs/) and [Vector](https://vector.dev) | metrics and logs |
+| [BuildKit](https://github.com/moby/buildkit) | builds from GitHub |
+| [Helm](https://helm.sh) | releases |
+
+Acceleratio itself is a NestJS API, a Next.js console and a typed contract
+between them, with its own PostgreSQL. The source is on
+[GitHub](https://github.com/acceleratio-cloud/core).

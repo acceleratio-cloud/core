@@ -1,0 +1,40 @@
+---
+title: S3 buckets
+description: S3-compatible object storage for your services.
+---
+
+An S3 bucket is a service in a project with its own access keys. Create one
+with a name: 3–63 lowercase letters, digits and hyphens. Names are unique
+across the whole platform and cannot change later.
+
+## Access
+
+![The overview of the storefront-media bucket: endpoint, bucket, region, access key ID and the Secret it is stored in](/screenshots/s3-bucket.png)
+
+The bucket's **Overview** shows its endpoint, bucket name, region, access key
+ID and, on request, the secret access key. The keys reach only this bucket.
+
+A Kubernetes Secret in the project holds the keys under the names AWS SDKs
+read: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_ENDPOINT_URL` and
+`AWS_REGION`, plus `S3_BUCKET` with the bucket name. The endpoint is reachable from services in this cluster only.
+
+## Regenerate keys
+
+**Settings → Regenerate keys** replaces both keys, and the current ones stop
+working immediately. Services that read the keys from the Secret keep the old
+ones until they restart, so restart them. Tools configured by hand need the new
+keys too.
+
+## Files
+
+The **Explore** tab browses the bucket's files, creates folders and uploads
+files.
+
+Deleting a bucket deletes every object in it and its access keys.
+
+## Object storage
+
+Every bucket, PostgreSQL backup and static site file is stored in one
+[RustFS](https://rustfs.com) instance on a Longhorn volume. While it restarts,
+buckets and backups are unavailable, and new static site instances cannot
+start.

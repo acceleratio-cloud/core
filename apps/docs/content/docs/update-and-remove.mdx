@@ -1,0 +1,29 @@
+---
+title: Update and remove
+description: Install new releases and uninstall the platform.
+---
+
+## Update
+
+**Settings → System** in the console shows the installed release and tells you
+when a new one is out. Install it from there, or on the server:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/acceleratio-cloud/core/main/scripts/update.sh | sudo bash
+```
+
+Either way, the updater backs up first and rolls back if the new version does
+not come up.
+
+## Uninstall
+
+<Callout type="warn">
+  This removes the cluster, the database and all stored data.
+</Callout>
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/acceleratio-cloud/core/main/scripts/uninstall.sh | sudo bash -s -- --yes
+```
+
+SSH and host networking keep working without a reboot. There is no account to
+close.

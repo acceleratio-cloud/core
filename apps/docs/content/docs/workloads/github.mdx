@@ -1,0 +1,71 @@
+---
+title: GitHub services
+description: Build and deploy a repository branch.
+---
+
+A GitHub service follows one branch of a repository. Deploy builds the
+branch's latest commit and runs it like a [Docker service](/workloads/docker),
+with the same environment variables, volumes, domains, versions and logs.
+
+Connect GitHub first in **Settings → Integrations**
+(see [GitHub integration](/settings/github)).
+
+## Create a service
+
+Pick a repository the GitHub App is installed on, then a branch. The branch
+can be changed later in the service's settings; the next deploy builds the new
+branch's latest commit.
+
+## How it builds
+
+<Mermaid
+  title="From a push to a running service"
+  chart={`
+flowchart TB
+  push(["git push"]) -->|"webhook"| api["Acceleratio API"]
+  api --> build{"Dockerfile<br/>at the root?"}
+  build -->|"yes"| docker["Build the Dockerfile"]
+  build -->|"no"| railpack["Railpack detects<br/>the stack"]
+  docker --> bk["BuildKit<br/>in the cluster"]
+  railpack --> bk
+  bk --> registry[("Platform registry")]
+  registry --> deploy["Deploy a new version"]
+`}
+/>
+
+- With a `Dockerfile` at the root of the branch, it builds that file.
+- Without one, [Railpack](https://railpack.com) detects the stack and builds
+  it. The app must listen on its domain's port, for example through a `PORT`
+  variable set on the service.
+
+Builds run with rootless BuildKit inside the cluster, and images are pushed to
+the platform's own registry. The service overview lists builds with their log.
+A build can be cancelled from the console.
+
+### Build commands
+
+The **Build** section of **Configuration** overrides Railpack's install, build
+and start commands, for example `npm ci`, `npm run build` and `npm run start`.
+A `Dockerfile` build ignores them. Changing one rebuilds on the next deploy.
+
+A deploy whose image already comes from the branch's latest commit, built with
+the current commands, skips the build.
+
+## Deploy on push
+
+A push to the branch deploys a service that was deployed before. Turn off
+**Deploy on push** in the service's settings to deploy only by hand. A push
+during a build cancels that build.
+
+<Callout type="warn">
+  GitHub sends pushes only to an HTTPS address, so push deploys need a
+  [control plane URL](/settings/control-plane-url). Apps created before
+  push deploys must have the **Push** event turned on once in their settings
+  on github.com.
+</Callout>
+
+## Not supported yet
+
+- A `Dockerfile` path or build context other than the repository root
+- Build arguments, and build-time variables for Railpack builds
+- GitHub Enterprise Server

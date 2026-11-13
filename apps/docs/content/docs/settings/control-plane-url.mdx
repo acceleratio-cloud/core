@@ -1,0 +1,25 @@
+---
+title: Control plane URL
+description: Move the console to your own domain with HTTPS.
+---
+
+By default the console is opened at `http://<server-ip>:30300`. The control
+plane URL moves it to your own domain with an automatic Let's Encrypt
+certificate.
+
+![The Control plane URL setting, served at https://cloud.example.com](/screenshots/control-plane-url.png)
+
+1. Create a DNS `A` record for the domain, for example `cloud.example.com`,
+   pointing to the server's public IPv4. The console shows the address it
+   expects.
+2. Open `80/tcp` and `443/tcp` to the internet. Let's Encrypt validates the
+   domain over HTTP on port 80, and the console is served on 443.
+3. In **Settings → System**, enter the new URL, wait for the DNS check to pass
+   and apply the change.
+
+The console is then served at `https://<domain>` and the API at
+`https://<domain>/api`. The old `http://<server-ip>:30300` and `:30080`
+addresses keep working as a fallback.
+
+An HTTPS address is also what GitHub needs to send
+[push events](/workloads/github#deploy-on-push) to the platform.

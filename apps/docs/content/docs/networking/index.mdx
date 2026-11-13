@@ -1,0 +1,23 @@
+---
+title: Networking
+description: How services are reached, inside and outside the cluster.
+---
+
+- Inside a project, services reach each other by name on the
+  [private network](/networking/private-network).
+- From the internet, services are reached on HTTPS [domains](/networking/domains).
+- A [PostgreSQL database](/workloads/postgres#access-from-outside-the-cluster)
+  can open its port outside the cluster.
+
+## Ports
+
+Open these ports on the server's firewall:
+
+| Port | Use |
+| --- | --- |
+| `30300/tcp` | Console, from the browsers that use it |
+| `30080/tcp` | API, from the browsers that use the console |
+| `80/tcp`, `443/tcp` | Domains and HTTPS certificates, from the internet |
+
+Servers of a cluster need [more ports](/servers/add-server#before-you-start)
+between them.

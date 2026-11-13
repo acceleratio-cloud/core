@@ -1,0 +1,4 @@
+{
+  "title": "Storage",
+  "pages": [ "volumes", "storage-profiles", "s3-buckets"]
+}

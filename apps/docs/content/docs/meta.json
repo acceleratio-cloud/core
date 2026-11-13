@@ -1,0 +1,13 @@
+{
+  "pages": [
+    "index",
+    "installation",
+    "update-and-remove",
+    "architecture",
+    "workloads",
+    "servers",
+    "networking",
+    "storage",
+    "settings"
+  ]
+}

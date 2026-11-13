@@ -1,0 +1,70 @@
+@import 'tailwindcss';
+@import 'fumadocs-ui/css/neutral.css';
+@import 'fumadocs-ui/css/preset.css';
+@import 'fumadocs-ui/components/image-zoom.css';
+
+html {
+  scrollbar-gutter: stable;
+}
+
+html > body[data-scroll-locked] {
+  margin-right: 0px !important;
+  --removed-body-scroll-bar-size: 0px !important;
+}
+
+/* Brand: the palette and type of acceleratio.cloud. Dark only. */
+@theme inline {
+  --font-sans: var(--font-hanken), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, monospace;
+  --font-display: var(--font-funnel), var(--font-hanken), sans-serif;
+}
+
+.dark {
+  --color-fd-background: #070707;
+  --color-fd-foreground: #f2f2f2;
+  --color-fd-muted: #181818;
+  --color-fd-muted-foreground: #b7b7b7;
+  --color-fd-popover: #151515;
+  --color-fd-popover-foreground: #f2f2f2;
+  --color-fd-card: #0e0e0e;
+  --color-fd-card-foreground: #f2f2f2;
+  --color-fd-border: #262626;
+  --color-fd-primary: #52a9fe;
+  --color-fd-primary-foreground: #070707;
+  --color-fd-secondary: #181818;
+  --color-fd-secondary-foreground: #f2f2f2;
+  --color-fd-accent: #ffffff1a;
+  --color-fd-accent-foreground: #f2f2f2;
+  --color-fd-ring: #52a9fe;
+  --color-fd-info: #52a9fe;
+  --color-fd-success: #62c37a;
+}
+
+.dark #nd-sidebar {
+  --color-fd-muted: #181818;
+  --color-fd-secondary: #181818;
+  --color-fd-muted-foreground: #b7b7b7;
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--font-display);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+
+h1 {
+  letter-spacing: -0.035em;
+}
+
+::selection {
+  background: #52a9fe40;
+}
+
+/* Console screenshots: framed like the landing page's product shots. */
+.prose img {
+  border: 1px solid #262626;
+  border-radius: 12px;
+  margin-inline: auto;
+}

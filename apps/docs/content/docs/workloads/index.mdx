@@ -1,0 +1,65 @@
+---
+title: Projects and services
+description: How work is organized in the console.
+---
+
+A **project** groups the services of one application: its apps, databases,
+sites and buckets. Every project is one private network, isolated from other
+projects (see [Private network](/networking/private-network)).
+
+![The storefront project on the Architecture tab: web, api and worker Docker services, a PostgreSQL database and an S3 bucket](/screenshots/project-canvas.png)
+
+## Add a service
+
+On a project's **Architecture** tab, choose **Create service** and pick a kind:
+
+![The Create service dialog with Docker, GitHub, Static site, PostgreSQL and S3 bucket](/screenshots/create-service.png)
+
+<Cards>
+  <Card title="Docker service" href="/workloads/docker">
+    Run any container image.
+  </Card>
+  <Card title="GitHub service" href="/workloads/github">
+    Build and deploy a repository branch, and redeploy on every push.
+  </Card>
+  <Card title="PostgreSQL database" href="/workloads/postgres">
+    A database with continuous backups and point-in-time restore.
+  </Card>
+  <Card title="Static site" href="/workloads/static-sites">
+    Serve an uploaded folder over HTTPS.
+  </Card>
+  <Card title="S3 bucket" href="/storage/s3-buckets">
+    S3-compatible object storage with its own access keys.
+  </Card>
+  <Card title="Marketplace app" href="/workloads/marketplace">
+    A ready-made app such as n8n, Grafana or Gitea.
+  </Card>
+</Cards>
+
+## Deploys and versions
+
+Changes to a service's configuration are saved as **pending changes**.
+**Apply changes** shows what the next version changes, and which changes
+restart the service, then deploys it. The first deploy creates `v1`.
+
+![Apply changes: CPU, memory and replicas changed, four environment variables added, each marked Restarts pods](/screenshots/apply-changes.png)
+
+The **Versions** tab lists every version. Open one to compare it, or
+**Roll back** to it. A rollback restores the image, command, resources and
+environment; volumes and their data stay as they are.
+
+![The Versions tab of web: v2 is active, v1 can be compared or rolled back to](/screenshots/versions.png)
+
+Domain changes are the exception: they apply at once, without a deploy.
+
+A service can be **stopped**, **started** and **restarted** from its menu.
+
+## Project tabs
+
+| Tab | What it shows |
+| --- | --- |
+| Architecture | The services of the project on a canvas |
+| Usage Metrics | CPU, memory, network, disk and database metrics. See [Logs and metrics](/workloads/logs-and-metrics) |
+| Logs | The output of every service in one list |
+| Audit Trail | Who changed what in the project, from where, and how it ended |
+| Settings | The project's own settings |

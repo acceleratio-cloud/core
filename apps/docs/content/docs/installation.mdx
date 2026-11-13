@@ -1,0 +1,52 @@
+---
+title: Installation
+description: Turn a fresh Ubuntu or Debian server into an Acceleratio cloud.
+---
+
+## Requirements
+
+- Ubuntu 22.04/24.04 or Debian 12, amd64 or arm64
+- a VM or bare metal; LXC and OpenVZ containers cannot run the block storage
+- root access
+- 2 vCPU, 4 GiB RAM and 20 GiB of free disk
+- Linux kernel 5.10 or newer
+- swap disabled
+- ports `30300/tcp` (console) and `30080/tcp` (API) reachable from your
+  browser; `80/tcp` and `443/tcp` open to the internet for custom domains
+
+The [installer README](https://github.com/acceleratio-cloud/core/blob/main/scripts/README.md#requirements)
+lists every requirement.
+
+## Install
+
+On the server, run:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/acceleratio-cloud/core/main/scripts/install.sh | sudo bash
+```
+
+The script checks the machine, installs k3s, Cilium, Longhorn and RustFS,
+verifies storage and DNS, then starts Acceleratio. Running it again updates
+instead of starting over. To read the script before running it, download it
+with `curl -fsSLO` instead.
+
+When it finishes, it prints the dashboard address:
+
+```
+  Open the dashboard
+    Console       http://203.0.113.10:30300
+    First account http://203.0.113.10:30300/auth/installation
+    API           http://203.0.113.10:30080
+```
+
+Versions, addresses, domains and TLS are configured with environment variables
+or an [`install.env`](https://github.com/acceleratio-cloud/core/blob/main/scripts/install.env.example)
+file.
+
+## Create the first account
+
+Open the **First account** link (`/auth/installation` on the console address).
+The first account becomes the operator, with no seeded credentials to change.
+Then you land on your projects.
+
+If the page does not load, open TCP ports `30300` and `30080` in the firewall.

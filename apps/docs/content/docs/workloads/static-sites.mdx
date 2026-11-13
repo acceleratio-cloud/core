@@ -1,0 +1,34 @@
+---
+title: Static sites
+description: Serve an uploaded folder over HTTPS.
+---
+
+A static site serves uploaded files on the same
+[domains](/networking/domains) as other services. Create one with a name,
+then upload a folder.
+
+## Upload
+
+An upload is a whole folder, or a set of files, with `index.html` at its top
+level. Each upload:
+
+- replaces every file of the site;
+- becomes a new version, deployed as a rolling update, so the old files keep
+  being served until the new ones are ready;
+- can be rolled back to from **Versions**.
+
+A `404.html` at the top level answers for missing paths.
+
+Hidden files and folders such as `.env` or `.git/` are dropped on upload and
+never served. `.well-known/` at the top level is kept.
+
+## Storage
+
+Files are stored in the platform's object storage. Each site copies its files
+before it starts serving, so a bigger site starts slower. Running sites keep
+serving while the object storage restarts.
+
+## Not supported yet
+
+Changing a single file, a single-page-app fallback to `index.html`, redirects,
+custom headers and a size limit.

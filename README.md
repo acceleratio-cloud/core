@@ -94,6 +94,7 @@ built from the console but are not yet verified. See
 
 ## Documentation
 
+- [Public documentation site](./apps/docs) (source)
 - [Installer, updater and uninstaller](./scripts/README.md)
 - [Product scope](./docs/PRODUCT.md)
 - [Design system](./docs/DESIGN.md)

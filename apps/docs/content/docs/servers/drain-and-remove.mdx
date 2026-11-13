@@ -1,0 +1,38 @@
+---
+title: Drain and remove
+description: Move work off a server and take it out of the cluster.
+---
+
+## Drain
+
+**Drain** moves the instances on a server to other servers. Before it starts,
+it shows what will happen:
+
+- instances that move;
+- instances that stay, such as per-server system pods;
+- instances protected by a disruption budget;
+- instances that would lose data.
+
+Services with several replicas keep serving during a drain. A service with one
+replica restarts on another server.
+
+Volumes are copied to another server before their last copy leaves, so the
+drain waits for that copy. With a single server there is nowhere to copy to,
+and the drain cannot finish. Instances still on the server after the timeout
+(5 minutes by default) are listed and the drain fails.
+
+## Remove
+
+**Remove** drains the server and deletes it from the cluster. With SSH access,
+it also uninstalls k3s from the server. You type the server's name to confirm.
+
+A server that is not Ready, such as a dead machine, can still be removed;
+leave SSH access off for it.
+
+Removal is refused for:
+
+- the only server in the cluster;
+- the last control-plane server;
+- a server that holds the only copy of local data.
+
+After removing a control-plane server, check the health of etcd.
