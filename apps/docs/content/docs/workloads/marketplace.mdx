@@ -13,6 +13,11 @@ The catalog includes Directus, Ghost, Gitea, Grafana, Keycloak, Mattermost,
 Meilisearch, Metabase, n8n, NATS, Nextcloud, Open WebUI, Outline, Plausible,
 Umami, Uptime Kuma and Vaultwarden.
 
+Services keep the names from the app, such as `nats` and `dashboard`. An
+optional **Service prefix** names them `<prefix>-<service>` instead. If a
+project already has a service with one of those names, the console adds a
+generated prefix and tells you.
+
 Some apps ask for values, such as an admin email, in the deploy dialog. Secrets
 and database passwords are generated for you.
 

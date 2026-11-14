@@ -142,7 +142,7 @@ const setup = () => {
 };
 
 const payload = (extra: Record<string, unknown> = {}) =>
-  ({ name: 'demo', inputs: { EMAIL: 'me@example.com' }, ...extra }) as never;
+  ({ inputs: { EMAIL: 'me@example.com' }, ...extra }) as never;
 
 describe('MarketplaceDeployService', () => {
   it('creates, wires and deploys every service of a new project', async () => {
@@ -158,12 +158,13 @@ describe('MarketplaceDeployService', () => {
       project_id: PROJECT,
       workload_ids: ['w1', 'w2', 'w3'],
       url: 'https://demo-1-2-3-4.sslip.io',
+      generated_prefix: null,
     });
     expect(projects.create).toHaveBeenCalledWith({ name: 'Demo' });
     expect(workloads.create.mock.calls.map((call) => call[1])).toEqual([
       expect.objectContaining({ name: 'demo', type: 'docker' }),
       {
-        name: 'demo-postgres',
+        name: 'postgres',
         type: 'postgres',
         config: {
           postgres_version: '17',
@@ -172,7 +173,7 @@ describe('MarketplaceDeployService', () => {
         },
       },
       expect.objectContaining({
-        name: 'demo-redis',
+        name: 'redis',
         type: 'docker',
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         config: expect.objectContaining({
@@ -205,7 +206,7 @@ describe('MarketplaceDeployService', () => {
     ]);
     expect(env(1).REDIS_PASSWORD).toMatch(/^[A-Za-z0-9]{32}$/);
     expect(env(0)).toEqual({
-      DATABASE_URL: 'postgres://app:pg-secret@demo-postgres-rw/app',
+      DATABASE_URL: 'postgres://app:pg-secret@postgres-rw/app',
       URL: 'https://demo-1-2-3-4.sslip.io',
       EMAIL: 'me@example.com',
     });
@@ -243,14 +244,53 @@ describe('MarketplaceDeployService', () => {
     expect(workloads.create).not.toHaveBeenCalled();
   });
 
-  it('refuses names already used in the project before creating anything', async () => {
+  it('names services with the prefix asked for', async () => {
+    const { service, workloads } = setup();
+
+    await service.deploy(
+      'demo',
+      payload({ project_name: 'Demo', prefix: ' my ' }),
+      null,
+    );
+
+    expect(workloads.create.mock.calls.map((call) => call[1].name)).toEqual([
+      'my-demo',
+      'my-postgres',
+      'my-redis',
+    ]);
+  });
+
+  it('refuses a prefix whose names are taken before creating anything', async () => {
     const { service, workloads, existingNames } = setup();
-    existingNames.push({ name: 'Demo-Postgres' });
+    existingNames.push({ name: 'My-Postgres' });
 
     await expect(
-      service.deploy('demo', payload({ project_id: EXISTING }), null),
-    ).rejects.toThrow('already has a service named "demo-postgres"');
+      service.deploy(
+        'demo',
+        payload({ project_id: EXISTING, prefix: 'my' }),
+        null,
+      ),
+    ).rejects.toThrow('already has a service named "my-postgres"');
     expect(workloads.create).not.toHaveBeenCalled();
+  });
+
+  it('generates a prefix when the plain names are taken', async () => {
+    const { service, workloads, existingNames } = setup();
+    existingNames.push({ name: 'Postgres' });
+
+    const result = await service.deploy(
+      'demo',
+      payload({ project_id: EXISTING }),
+      null,
+    );
+
+    expect(result.generated_prefix).toMatch(/^[a-z][0-9a-f]{3}$/);
+    const prefix = result.generated_prefix!;
+    expect(workloads.create.mock.calls.map((call) => call[1].name)).toEqual([
+      `${prefix}-demo`,
+      `${prefix}-postgres`,
+      `${prefix}-redis`,
+    ]);
   });
 
   it('runs deploys into one project one after another', async () => {
@@ -273,8 +313,16 @@ describe('MarketplaceDeployService', () => {
     );
 
     const results = await Promise.allSettled([
-      service.deploy('demo', payload({ project_id: EXISTING }), null),
-      service.deploy('demo', payload({ project_id: EXISTING }), null),
+      service.deploy(
+        'demo',
+        payload({ project_id: EXISTING, prefix: 'my' }),
+        null,
+      ),
+      service.deploy(
+        'demo',
+        payload({ project_id: EXISTING, prefix: 'my' }),
+        null,
+      ),
     ]);
 
     expect(results[0].status).toBe('fulfilled');
@@ -303,13 +351,14 @@ describe('MarketplaceDeployService', () => {
     await fails(payload({ project_id: 'not-a-uuid' }), NotFoundException);
     await fails(payload({ project_name: 7 }), /project_name must be text/);
     await fails(
-      payload({ project_name: 'Demo', name: 'x'.repeat(250) }),
+      payload({ project_name: 'Demo', prefix: 'x'.repeat(250) }),
       /would be named/,
     );
     await fails(
-      { name: 'demo', project_name: 'Demo', inputs: {} },
-      /Email is required/,
+      payload({ project_name: 'Demo', prefix: 7 }),
+      /prefix must be text/,
     );
+    await fails({ project_name: 'Demo', inputs: {} }, /Email is required/);
     await expect(
       service.deploy('nope', payload({ project_name: 'Demo' }), null),
     ).rejects.toThrow(NotFoundException);

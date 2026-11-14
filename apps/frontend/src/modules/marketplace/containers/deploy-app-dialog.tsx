@@ -115,7 +115,7 @@ const DeployAppForm = ({
   const [target, setTarget] = useState<Target>('new');
   const [projectId, setProjectId] = useState<string | null>(null);
   const [projectName, setProjectName] = useState(app.name);
-  const [name, setName] = useState(app.slug);
+  const [prefix, setPrefix] = useState('');
   const [inputs, setInputs] = useState<Record<string, string>>(() =>
     Object.fromEntries(
       app.inputs.map((input) => [input.name, input.default ?? '']),
@@ -144,7 +144,6 @@ const DeployAppForm = ({
   );
   const ready =
     !pending &&
-    !!name.trim() &&
     !missing &&
     (target === 'new' ? !!projectName.trim() : !!projectId);
 
@@ -156,7 +155,7 @@ const DeployAppForm = ({
         ...(target === 'new'
           ? { project_name: projectName.trim() }
           : { project_id: projectId! }),
-        name: name.trim(),
+        ...(prefix.trim() ? { prefix: prefix.trim() } : {}),
         inputs,
       });
       sileo.success({
@@ -165,6 +164,12 @@ const DeployAppForm = ({
           ? `It will answer at ${deployment.url} once it starts.`
           : undefined,
       });
+      if (deployment.generated_prefix) {
+        sileo.warning({
+          title: 'Service names were taken',
+          description: `The project already had services with these names, so they got the prefix "${deployment.generated_prefix}-".`,
+        });
+      }
       onDeployed();
       router.push(`/project/${deployment.project_id}`);
     } catch (caught) {
@@ -258,26 +263,33 @@ const DeployAppForm = ({
             )}
 
             <Field>
-              <FieldLabel htmlFor="deploy-name">Service name</FieldLabel>
+              <FieldLabel htmlFor="deploy-prefix">
+                Service prefix
+                <span className="font-normal text-muted-foreground">
+                  {' '}
+                  (optional)
+                </span>
+              </FieldLabel>
               <Input
-                id="deploy-name"
+                id="deploy-prefix"
                 autoComplete="off"
                 spellCheck={false}
-                value={name}
-                onChange={(event) => setName(event.target.value)}
+                value={prefix}
+                onChange={(event) => setPrefix(event.target.value)}
               />
-              {app.services.length > 1 ? (
-                <FieldDescription>
-                  The other services are named{' '}
-                  {app.services
-                    .slice(1)
-                    .map(
-                      (service) => `${name.trim() || app.slug}-${service.name}`,
-                    )
-                    .join(', ')}
-                  .
-                </FieldDescription>
-              ) : null}
+              <FieldDescription>
+                {app.services.length === 1
+                  ? 'The service is named'
+                  : 'The services are named'}{' '}
+                {app.services
+                  .map((service) =>
+                    prefix.trim()
+                      ? `${prefix.trim()}-${service.name}`
+                      : service.name,
+                  )
+                  .join(', ')}
+                .
+              </FieldDescription>
             </Field>
 
             {app.inputs.map((input) => (

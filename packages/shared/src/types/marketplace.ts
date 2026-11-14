@@ -66,8 +66,11 @@ export interface MarketplaceApp {
 export interface DeployMarketplaceAppPayload {
   project_id?: string;
   project_name?: string;
-  /** Name of the main service; the others are `<name>-<service>`. */
-  name: string;
+  /**
+   * Services are named `<prefix>-<service>`, or just `<service>` without one.
+   * Without one, taken names get a generated prefix instead.
+   */
+  prefix?: string;
   /** Values for the template's inputs, by input name. */
   inputs?: Record<string, string>;
 }
@@ -78,4 +81,6 @@ export interface MarketplaceDeployment {
   workload_ids: string[];
   /** `https://…` of the public service; null when the app has none. */
   url: string | null;
+  /** The prefix picked because the template's service names were taken. */
+  generated_prefix: string | null;
 }

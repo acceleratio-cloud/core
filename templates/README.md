@@ -65,7 +65,7 @@ checked when the template loads and filled in when the app is deployed:
 | `hex.<id>` | 64 random hex characters (32 bytes) |
 | `base64.<id>` | 64 random base64 characters (48 bytes) |
 | `input.<NAME>` | what the user entered for that input |
-| `service.<name>.host` | private hostname of a template service, such as `umami-postgres.internal` |
+| `service.<name>.host` | private hostname of a template service, such as `postgres.internal` |
 | `service.<name>.user`, `.database`, `.password` | login of a `type: postgres` service |
 | `app.url` | `https://` URL of the public service |
 | `app.host` | hostname of the public service |
@@ -78,8 +78,10 @@ and change the values afterwards in the service's Environment tab.
 
 `POST /marketplace/apps/<slug>/deploy` with a `project_id` (an existing project)
 or a `project_name` (a new one). The API creates one service per template
-service (the first named as the user chose, the others `<name>-<service>`),
-gives the public service a generated sslip.io domain, fills the placeholders and
+service, named as in the template, or `<prefix>-<service>` when the request
+has a `prefix`. Without a prefix, if a name is already taken in the project, the
+API picks a random 4-character prefix starting with a letter for all of them and returns it as
+`generated_prefix`. It gives the public service a generated sslip.io domain, fills the placeholders and
 deploys every service. If any step fails, it removes what it created, the project
 too when it was new; the error says when something could not be removed. If the
 API itself stops in the middle of a deploy, nothing is rolled back: remove the

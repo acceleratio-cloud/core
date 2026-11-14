@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomInt } from 'node:crypto';
 import {
   BadRequestException,
   ConflictException,
@@ -34,6 +34,14 @@ import { readInputs, render, type RenderContext } from './marketplace-values';
 import { MarketplaceService } from './marketplace.service';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Optional: missing or blank means the services keep their template names. */
+const readPrefix = (prefix: unknown): string | null => {
+  if (prefix === undefined || prefix === null) return null;
+  if (typeof prefix !== 'string')
+    throw new BadRequestException('prefix must be text');
+  return prefix.trim() ? normalizeName(prefix) : null;
+};
 /**
  * Turns a template into services of one project: creates them, gives
  * the public one a generated domain, fills the env placeholders and deploys.
@@ -63,17 +71,19 @@ export class MarketplaceDeployService {
     const template = this.marketplace.find(slug);
     if (!template) throw new NotFoundException('App not found');
 
-    const name = normalizeName(payload?.name);
+    const prefix = readPrefix(payload?.prefix);
     const inputs = readInputs(template, payload?.inputs);
-    const names = template.services.map((service, index) => {
-      const full = index === 0 ? name : `${name}-${service.name}`;
-      if (full.length > NAME_MAX_LENGTH) {
-        throw new BadRequestException(
-          `The ${service.name} service would be named "${full}", over ${NAME_MAX_LENGTH} characters; choose a shorter name`,
-        );
-      }
-      return full;
-    });
+    const namesFor = (prefix: string | null) =>
+      template.services.map((service) => {
+        const full = prefix ? `${prefix}-${service.name}` : service.name;
+        if (full.length > NAME_MAX_LENGTH) {
+          throw new BadRequestException(
+            `The ${service.name} service would be named "${full}", over ${NAME_MAX_LENGTH} characters; choose a shorter prefix`,
+          );
+        }
+        return full;
+      });
+    const names = namesFor(prefix);
     const existingId = await this.existingProject(payload);
 
     // Checked before anything is created, so a failure leaves nothing to undo.
@@ -85,13 +95,49 @@ export class MarketplaceDeployService {
     }
     if (existingId) {
       return this.serialized(existingId, async () => {
-        await this.assertNamesFree(existingId, names);
-        return this.install(template, existingId, false, names, inputs, author);
+        const taken = await this.takenNames(existingId);
+        const isTaken = (name: string) => taken.has(name.toLowerCase());
+        const clash = names.find(isTaken);
+        let used = names;
+        let generated: string | null = null;
+        if (clash) {
+          if (prefix)
+            throw new ConflictException(
+              `This project already has a service named "${clash}"; choose another prefix`,
+            );
+          // No prefix asked for and the plain names are taken: pick a free one.
+          for (let attempt = 0; attempt < 5 && !generated; attempt++) {
+            // A leading letter keeps the private hostname free of a `w-` marker.
+            const candidate = `${'abcdefghijklmnopqrstuvwxyz'[randomInt(26)]}${randomBytes(2).toString('hex').slice(1)}`;
+            const prefixed = namesFor(candidate);
+            if (prefixed.some(isTaken)) continue;
+            used = prefixed;
+            generated = candidate;
+          }
+          if (!generated)
+            throw new ConflictException(
+              `This project already has a service named "${clash}"; choose a prefix`,
+            );
+        }
+        return {
+          ...(await this.install(
+            template,
+            existingId,
+            false,
+            used,
+            inputs,
+            author,
+          )),
+          generated_prefix: generated,
+        };
       });
     }
 
     const { id } = await this.projects.create({ name: payload.project_name! });
-    return this.install(template, id, true, names, inputs, author);
+    return {
+      ...(await this.install(template, id, true, names, inputs, author)),
+      generated_prefix: null,
+    };
   }
 
   /**
@@ -110,19 +156,13 @@ export class MarketplaceDeployService {
     }
   }
 
-  /** Names compare without case, as people read them on the canvas. */
-  private async assertNamesFree(projectId: string, names: string[]) {
+  /** Lower-cased: names compare without case, as people read them on the canvas. */
+  private async takenNames(projectId: string) {
     const rows = await this.db
       .select({ name: workload.name })
       .from(workload)
       .where(eq(workload.project_id, projectId));
-    const taken = new Set(rows.map((row) => row.name.toLowerCase()));
-    const clash = names.find((candidate) => taken.has(candidate.toLowerCase()));
-    if (clash) {
-      throw new ConflictException(
-        `This project already has a service named "${clash}"; choose another name`,
-      );
-    }
+    return new Set(rows.map((row) => row.name.toLowerCase()));
   }
 
   private async install(
@@ -132,7 +172,7 @@ export class MarketplaceDeployService {
     names: string[],
     inputs: Record<string, string>,
     author: VersionAuthorInput | null,
-  ): Promise<MarketplaceDeployment> {
+  ): Promise<Omit<MarketplaceDeployment, 'generated_prefix'>> {
     const created: Workload[] = [];
 
     try {
