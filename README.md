@@ -89,14 +89,13 @@ its own PostgreSQL.
 
 Acceleratio is in early development. It runs on Ubuntu 22.04, Ubuntu 24.04 or
 Debian 12, on a single server or a cluster of several built from the console.
-See
-[docs/PRODUCT.md](./docs/PRODUCT.md) for what is shipped and what is not.
+See the
+[documentation](https://docs.acceleratio.cloud) for what is shipped and what is not.
 
 ## Documentation
 
 - [Public documentation site](./apps/docs) (source)
 - [Installer, updater and uninstaller](./scripts/README.md)
-- [Product scope](./docs/PRODUCT.md)
 - [Design system](./docs/DESIGN.md)
 - [Code structure](./docs/FILE_STRUCTURE.md)
 - [Database](./docs/DATABASE.md)

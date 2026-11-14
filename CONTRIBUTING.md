@@ -15,9 +15,8 @@ vulnerability, do not open a public issue: follow [SECURITY.md](./SECURITY.md).
 - For anything larger than a small fix, open an issue first and describe the
   problem and your proposed approach. It saves you from building something we
   cannot merge.
-- Check [docs/PRODUCT.md](./docs/PRODUCT.md) for what the product is and what is
-  not shipped yet. We show only what ships: a change must not present planned
-  work as a capability.
+- We show only what ships: a change must not present planned work as a
+  capability.
 - Look for existing issues before filing a new one.
 
 ## Development setup
