@@ -48,7 +48,9 @@ export const MarketplaceAppView = ({
       ? [service.size_gib ?? 0]
       : (service.volumes ?? []).map((volume) => volume.size_gib);
   const volumes = app.services.flatMap(diskGib);
-  const publicService = app.services.find((service) => service.public);
+  const publicPorts = app.services
+    .filter((service) => service.public)
+    .map((service) => service.port);
 
   return (
     <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6">
@@ -167,9 +169,13 @@ export const MarketplaceAppView = ({
               </Detail>
               <Detail term="Services">{app.services.length}</Detail>
               <Detail term="Volumes">{volumes.length}</Detail>
-              {publicService ? (
-                <Detail term="Public port">
-                  <span className="font-mono">{publicService.port}</span>
+              {publicPorts.length > 0 ? (
+                <Detail
+                  term={
+                    publicPorts.length === 1 ? 'Public port' : 'Public ports'
+                  }
+                >
+                  <span className="font-mono">{publicPorts.join(', ')}</span>
                 </Detail>
               ) : (
                 <Detail term="Network">Private only</Detail>

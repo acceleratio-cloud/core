@@ -36,10 +36,19 @@ const disksOf = (service: MarketplaceService) =>
     ? [{ path: 'Data', size_gib: service.size_gib ?? 0 }]
     : (service.volumes ?? []);
 
-type ServiceNodeType = Node<{ service: MarketplaceService }, 'service'>;
+type ServiceNodeType = Node<
+  { service: MarketplaceService; ownDomain?: boolean },
+  'service'
+>;
 
-/** A service as the project canvas will show it once deployed. */
-const ServiceNode = ({ data: { service } }: NodeProps<ServiceNodeType>) => {
+/**
+ * A service as the project canvas will show it once deployed. A public
+ * service other than the first shows its domain in the card, since only the
+ * first has a domain node.
+ */
+const ServiceNode = ({
+  data: { service, ownDomain },
+}: NodeProps<ServiceNodeType>) => {
   const disks = disksOf(service);
 
   return (
@@ -68,6 +77,17 @@ const ServiceNode = ({ data: { service } }: NodeProps<ServiceNodeType>) => {
           </dd>
         </dl>
       ) : null}
+      {ownDomain ? (
+        <dl className="my-1 flex h-7 items-center gap-3 px-3">
+          <dt className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Globe aria-hidden="true" strokeWidth={1.75} className="size-3.5" />
+            Domain
+          </dt>
+          <dd className="ml-auto font-mono text-xs text-foreground">
+            https://your-domain
+          </dd>
+        </dl>
+      ) : null}
       {disks.length > 0 ? (
         <ul aria-label="Disks" className="mx-3 mb-3 flex flex-col gap-1.5">
           {disks.map((disk) => (
@@ -92,16 +112,38 @@ const DomainNode = () => (
   </div>
 );
 
-const nodeTypes = { service: ServiceNode, domain: DomainNode };
+/** The frame that holds the dependencies when there are too many for one column. */
+const NetworkNode = () => (
+  <div className="relative size-full rounded-2xl border border-dashed border-edge-strong bg-surface-sunken/40">
+    <Handles source={false} />
+    <span className="absolute -top-7 left-1 font-mono text-xs text-muted-foreground">
+      Private network
+    </span>
+  </div>
+);
+
+const nodeTypes = {
+  service: ServiceNode,
+  domain: DomainNode,
+  network: NetworkNode,
+};
 
 const COLUMN_GAP = 120;
 const CARD_WIDTH = 264;
 const DOMAIN_WIDTH = 170;
 const ROW_GAP = 32;
+/** Up to this many dependencies stand in one column, each with its own edge. */
+const MAX_COLUMN = 3;
+const GRID_GAP = 24;
+const GRID_PADDING = 24;
 
 /** Rough card height, for the first layout only; fitView uses the measured size. */
 const estimateHeight = (service: MarketplaceService) =>
-  60 + (service.port ? 36 : 0) + disksOf(service).length * 34 + 12;
+  60 +
+  (service.port ? 36 : 0) +
+  (service.public ? 36 : 0) +
+  disksOf(service).length * 34 +
+  12;
 
 const labelProps = {
   labelStyle: {
@@ -113,14 +155,49 @@ const labelProps = {
   labelBgPadding: [4, 2] as [number, number],
 };
 
+/**
+ * Dependencies in a grid inside a frame, taller than wide: with the app and
+ * its domain on the left fills the wide canvas; one edge goes to the frame.
+ */
+const gridLayout = (deps: MarketplaceService[]) => {
+  const columns = Math.ceil(Math.sqrt(deps.length / 2));
+  const rows: number[] = [];
+  deps.forEach((service, index) => {
+    const row = Math.floor(index / columns);
+    rows[row] = Math.max(rows[row] ?? 0, estimateHeight(service));
+  });
+  const positions = deps.map((_, index) => {
+    const row = Math.floor(index / columns);
+    return {
+      x: GRID_PADDING + (index % columns) * (CARD_WIDTH + GRID_GAP),
+      y:
+        GRID_PADDING +
+        rows.slice(0, row).reduce((sum, h) => sum + h + GRID_GAP, 0),
+    };
+  });
+  return {
+    positions,
+    width:
+      GRID_PADDING * 2 +
+      Math.min(columns, deps.length) * (CARD_WIDTH + GRID_GAP) -
+      GRID_GAP,
+    height:
+      GRID_PADDING * 2 +
+      rows.reduce((sum, h) => sum + h + GRID_GAP, 0) -
+      GRID_GAP,
+  };
+};
+
 /** Domain → app → dependencies, left to right, the column centred on the app. */
 const layout = (app: MarketplaceApp) => {
   const [main, ...deps] = app.services;
   const nodes: Node[] = [];
   const edges: Edge[] = [];
+  const grid = deps.length > MAX_COLUMN ? gridLayout(deps) : null;
   const heights = deps.map(estimateHeight);
-  const column =
-    heights.reduce((sum, h) => sum + h, 0) + ROW_GAP * (deps.length - 1);
+  const column = grid
+    ? grid.height
+    : heights.reduce((sum, h) => sum + h, 0) + ROW_GAP * (deps.length - 1);
   const mainY = Math.max(column / 2 - estimateHeight(main) / 2, 0);
   const mainX = main.public ? DOMAIN_WIDTH + COLUMN_GAP : 0;
 
@@ -147,12 +224,41 @@ const layout = (app: MarketplaceApp) => {
   });
 
   let y = Math.max(estimateHeight(main) / 2 - column / 2, 0);
+  const depsX = mainX + CARD_WIDTH + COLUMN_GAP;
+
+  if (grid) {
+    nodes.push({
+      id: 'network',
+      type: 'network',
+      position: { x: depsX, y },
+      style: { width: grid.width, height: grid.height },
+      data: {},
+    });
+    edges.push({
+      id: `${main.name}-network`,
+      source: main.name,
+      target: 'network',
+      type: 'smoothstep',
+    });
+    deps.forEach((service, index) =>
+      nodes.push({
+        id: service.name,
+        type: 'service',
+        parentId: 'network',
+        extent: 'parent',
+        position: grid.positions[index],
+        data: { service, ownDomain: service.public },
+      }),
+    );
+    return { nodes, edges };
+  }
+
   deps.forEach((service, index) => {
     nodes.push({
       id: service.name,
       type: 'service',
-      position: { x: mainX + CARD_WIDTH + COLUMN_GAP, y },
-      data: { service },
+      position: { x: depsX, y },
+      data: { service, ownDomain: service.public },
     });
     edges.push({
       id: `${main.name}-${service.name}`,
