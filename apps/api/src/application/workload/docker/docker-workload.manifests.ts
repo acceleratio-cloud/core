@@ -10,6 +10,7 @@ import type {
   DockerWorkloadConfig,
   DockerWorkloadVolume,
 } from '@acceleratio/shared';
+import { ALPINE_IMAGE } from '@/common/images';
 import { projectNamespace } from '@/common/naming';
 import {
   DEFAULT_CPU_MAX,
@@ -136,6 +137,19 @@ export interface WorkloadManifestInput {
 
 /** Pod volume name of `WorkloadManifestInput.files`. */
 export const FILES_VOLUME_NAME = 'files';
+
+/** Runs the shell below; VOLUME_PERMISSIONS_IMAGE replaces it where Docker Hub is out of reach. */
+export const volumePermissionsImage = (): string =>
+  process.env.VOLUME_PERMISSIONS_IMAGE?.trim() || ALPINE_IMAGE;
+
+/*
+  A new disk's root is root-owned 755, so an image that runs as another user
+  (n8n, Elasticsearch, Redpanda) cannot write to it. While a volume is still
+  fresh (root-owned and empty but for lost+found) its root is opened like /tmp;
+  once the app has written to it, or chown'd it, it is left alone.
+*/
+const OPEN_FRESH_VOLUMES =
+  'for d; do [ "$(stat -c %u "$d")" = 0 ] && [ -z "$(ls -A "$d" | grep -vx lost+found)" ] && chmod 1777 "$d"; done; true';
 
 export interface DeploymentOptions {
   /** Overrides the config's pod count. */
@@ -289,6 +303,38 @@ export const buildDeployment = (
     ...(files ? [{ name: FILES_VOLUME_NAME, emptyDir: {} }] : []),
   ];
 
+  const initContainers: V1Container[] = [
+    ...(volumes.length > 0
+      ? [
+          {
+            name: 'volume-permissions',
+            image: volumePermissionsImage(),
+            command: [
+              'sh',
+              '-c',
+              OPEN_FRESH_VOLUMES,
+              'sh',
+              ...volumes.map((volume) => volume.mount_path),
+            ],
+            securityContext: { runAsUser: 0 },
+            volumeMounts: container.volumeMounts!.filter(
+              (mount) => mount.name !== FILES_VOLUME_NAME,
+            ),
+          },
+        ]
+      : []),
+    ...(files
+      ? [
+          {
+            ...files.init,
+            volumeMounts: [
+              { name: FILES_VOLUME_NAME, mountPath: files.mount_path },
+            ],
+          },
+        ]
+      : []),
+  ];
+
   const annotations: Record<string, string> = {
     [WORKLOAD_NAME_ANNOTATION]: input.name,
   };
@@ -336,18 +382,7 @@ export const buildDeployment = (
           // project: names users pick would otherwise override app settings
           // such as N8N_PORT or REDIS_PORT. Services are reached by DNS.
           enableServiceLinks: false,
-          ...(files
-            ? {
-                initContainers: [
-                  {
-                    ...files.init,
-                    volumeMounts: [
-                      { name: FILES_VOLUME_NAME, mountPath: files.mount_path },
-                    ],
-                  },
-                ],
-              }
-            : {}),
+          ...(initContainers.length > 0 ? { initContainers } : {}),
           containers: [container],
           ...(podVolumes.length > 0 ? { volumes: podVolumes } : {}),
           ...(input.config.node_selector

@@ -302,4 +302,31 @@ describe('deployment strategy', () => {
       type: 'Recreate',
     });
   });
+
+  it('opens fresh volumes to the image user before the app starts', () => {
+    const pod = buildDeployment(withVolume).spec!.template.spec!;
+    expect(pod.initContainers).toEqual([
+      expect.objectContaining({
+        name: 'volume-permissions',
+        securityContext: { runAsUser: 0 },
+        volumeMounts: pod.containers[0].volumeMounts,
+      }),
+    ]);
+    expect(pod.initContainers![0].command!.slice(-2)).toEqual(['sh', '/data']);
+    expect(buildDeployment(input).spec!.template.spec!.initContainers).toBe(
+      undefined,
+    );
+  });
+
+  it('takes the volume-permissions image from VOLUME_PERMISSIONS_IMAGE', () => {
+    process.env.VOLUME_PERMISSIONS_IMAGE = 'mirror.local/alpine:3.23';
+    try {
+      expect(
+        buildDeployment(withVolume).spec!.template.spec!.initContainers![0]
+          .image,
+      ).toBe('mirror.local/alpine:3.23');
+    } finally {
+      delete process.env.VOLUME_PERMISSIONS_IMAGE;
+    }
+  });
 });

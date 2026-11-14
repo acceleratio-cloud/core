@@ -4,6 +4,7 @@ import type {
   V1PersistentVolumeClaim,
 } from '@kubernetes/client-node';
 import type { StorageBenchmarkTestName } from '@acceleratio/shared';
+import { ALPINE_IMAGE } from '@/common/images';
 import { MANAGED_BY_LABEL, MANAGED_BY_VALUE } from '../storage-class.manifests';
 
 export const BENCHMARK_ID_LABEL = 'acceleratio.io/storage-benchmark-id';
@@ -11,12 +12,11 @@ export const BENCHMARK_CLASS_LABEL = 'acceleratio.io/storage-class-id';
 export const BENCHMARK_CONTAINER = 'fio';
 export const DEFAULT_BENCHMARK_NAMESPACE = 'acceleratio-benchmarks';
 /**
- * Alpine 3.23 pinned by index digest. fio comes from Alpine's signed
- * package repository when the Job starts, so the cluster needs outbound
- * access to the Alpine mirror. Override with BENCHMARK_IMAGE.
+ * Alpine pinned by digest. fio comes from Alpine's signed package repository
+ * when the Job starts, so the cluster needs outbound access to the Alpine
+ * mirror. Override with BENCHMARK_IMAGE.
  */
-export const DEFAULT_BENCHMARK_IMAGE =
-  'alpine:3.23@sha256:ff7f0c727dd796aa36787bfcd9a64bf35a6ce72a73451b3359fde849b6703d63';
+export const DEFAULT_BENCHMARK_IMAGE = ALPINE_IMAGE;
 
 /**
  * How a run measures. Results compare only within one method. 1 was

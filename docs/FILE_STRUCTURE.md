@@ -323,6 +323,11 @@ Adding a workload type:
    generate the migration
 4) add the service and deriver to `application.module.ts` providers
 
+A Docker service with volumes gets a `volume-permissions` init container (`VOLUME_PERMISSIONS_IMAGE`,
+default Alpine pinned by digest) that runs as root and opens each volume's root like `/tmp` while the
+volume is still fresh: root-owned and empty but for `lost+found`. Images that run as another user can
+then write to a new disk; a volume the app has written to or chown'd is left alone.
+
 ### Docker service private network
 
 Every project is one private network: its namespace plus the `CiliumNetworkPolicy` from
@@ -823,6 +828,7 @@ SSH, with the scripts and requirement checks in `node-join-script.ts`. SSH goes 
   Platform updates read `ACCELERATIO_VERSION`, `PLATFORM_UPDATES_ENABLED`,
   `PLATFORM_UPDATE_CHECK_INTERVAL_MS`, `ACCELERATIO_RELEASE_REPOSITORY`, `ACCELERATIO_CONFIG_DIR`
   (default `/etc/acceleratio`) and `PLATFORM_UPDATE_ROOT` (default `/var/lib/acceleratio/updates`).
+  `VOLUME_PERMISSIONS_IMAGE` replaces the Alpine image of the volume-permissions init container.
 - Every new variable is listed in `apps/api/.env.example`.
 
 ## Auth and errors
