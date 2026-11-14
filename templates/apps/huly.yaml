@@ -1,0 +1,295 @@
+schema_version: 1
+name: Huly
+icon: huly
+category: Productivity
+tagline: Project tracking, team chat, documents and a CRM in one workspace.
+description: |
+  An all-in-one workspace in the spirit of Linear, Slack and Notion: issues
+  and sprints, chat, documents, a planner and a CRM.
+
+  Open the URL and sign up: the first account creates a workspace. The first
+  start takes a few minutes while the services set up their storage. Video
+  calls, AI and mail integrations are not included.
+features:
+  - Issues, projects and sprints
+  - Channels and direct messages
+  - Documents and knowledge base
+  - Planner, recruiting and CRM
+license: EPL-2.0
+repository: https://github.com/hcengineering/platform
+website: https://huly.io
+resources:
+  cpu: 2
+  memory_mib: 4096
+services:
+  - name: huly
+    image: caddy:2.11.9-alpine
+    icon: huly
+    port: 80
+    public: true
+    # The routes of Huly's own nginx config.
+    entrypoint:
+      - sh
+      - -c
+    command:
+      - |
+        cat > /etc/caddy/Caddyfile <<'CADDY'
+        {
+        	admin off
+        	auto_https off
+        	servers {
+        		trusted_proxies static private_ranges
+        	}
+        }
+        :80 {
+        	handle_path /_accounts* {
+        		reverse_proxy {$ACCOUNT_HOST}:3000
+        	}
+        	handle_path /_collaborator* {
+        		reverse_proxy {$COLLABORATOR_HOST}:3078
+        	}
+        	handle_path /_transactor* {
+        		reverse_proxy {$TRANSACTOR_HOST}:3333
+        	}
+        	@token path_regexp ^/eyJ
+        	handle @token {
+        		reverse_proxy {$TRANSACTOR_HOST}:3333
+        	}
+        	handle_path /_rekoni* {
+        		reverse_proxy {$REKONI_HOST}:4004
+        	}
+        	handle_path /_stats* {
+        		reverse_proxy {$STATS_HOST}:4900
+        	}
+        	handle {
+        		reverse_proxy {$FRONT_HOST}:8080
+        	}
+        }
+        CADDY
+        exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+    env:
+      FRONT_HOST: '${{ service.front.host }}'
+      ACCOUNT_HOST: '${{ service.account.host }}'
+      COLLABORATOR_HOST: '${{ service.collaborator.host }}'
+      TRANSACTOR_HOST: '${{ service.transactor.host }}'
+      REKONI_HOST: '${{ service.rekoni.host }}'
+      STATS_HOST: '${{ service.stats.host }}'
+  - name: front
+    image: hardcoreeng/front:v0.7.432
+    icon: huly
+    port: 8080
+    env:
+      SERVER_PORT: 8080
+      SERVER_SECRET: '${{ hex.secret }}'
+      ACCOUNTS_URL: '${{ app.url }}/_accounts'
+      ACCOUNTS_URL_INTERNAL: 'http://${{ service.account.host }}:3000'
+      REKONI_URL: '${{ app.url }}/_rekoni'
+      STATS_URL: '${{ app.url }}/_stats'
+      # Integrations this template does not run; front refuses to start without them.
+      LOVE_ENDPOINT: '${{ app.url }}/_love'
+      CALENDAR_URL: '${{ app.url }}/_calendar'
+      GMAIL_URL: '${{ app.url }}/_gmail'
+      TELEGRAM_URL: '${{ app.url }}/_telegram'
+      UPLOAD_URL: /files
+      ELASTIC_URL: 'http://${{ service.elastic.host }}:9200'
+      COLLABORATOR_URL: 'wss://${{ app.host }}/_collaborator'
+      STORAGE_CONFIG: 'minio|${{ service.minio.host }}?accessKey=huly&secretKey=${{ password.minio }}'
+      TITLE: Huly
+      DEFAULT_LANGUAGE: en
+      LAST_NAME_FIRST: true
+      DISABLED_FEATURES: auto-translate,mailboxes
+  - name: account
+    image: hardcoreeng/account:v0.7.432
+    icon: huly
+    port: 3000
+    # A private hostname resolves only once its pod runs, and the Kafka
+    # client gives up for good if the broker is missing when it starts.
+    entrypoint:
+      - sh
+      - -c
+    command:
+      - until getent hosts "${QUEUE_CONFIG%%:*}" >/dev/null; do sleep 2; done; exec node bundle.js
+    env:
+      SERVER_PORT: 3000
+      ACCOUNT_PORT: 3000
+      SERVER_SECRET: '${{ hex.secret }}'
+      DB_URL: 'postgres://selfhost:${{ password.cockroach }}@${{ service.cockroach.host }}:26257/defaultdb'
+      TRANSACTOR_URL: 'ws://${{ service.transactor.host }}:3333;wss://${{ app.host }}/_transactor'
+      STORAGE_CONFIG: 'minio|${{ service.minio.host }}?accessKey=huly&secretKey=${{ password.minio }}'
+      FRONT_URL: '${{ app.url }}'
+      STATS_URL: '${{ app.url }}/_stats'
+      ACCOUNTS_URL: '${{ app.url }}/_accounts'
+      MODEL_ENABLED: '*'
+      QUEUE_CONFIG: '${{ service.redpanda.host }}:9092'
+  - name: transactor
+    image: hardcoreeng/transactor:v0.7.432
+    icon: huly
+    port: 3333
+    # A private hostname resolves only once its pod runs, and the Kafka
+    # client gives up for good if the broker is missing when it starts.
+    entrypoint:
+      - sh
+      - -c
+    command:
+      - until getent hosts "${QUEUE_CONFIG%%:*}" >/dev/null; do sleep 2; done; exec node ./bundle.js
+    env:
+      SERVER_PORT: 3333
+      SERVER_SECRET: '${{ hex.secret }}'
+      DB_URL: 'postgres://selfhost:${{ password.cockroach }}@${{ service.cockroach.host }}:26257/defaultdb'
+      STORAGE_CONFIG: 'minio|${{ service.minio.host }}?accessKey=huly&secretKey=${{ password.minio }}'
+      FRONT_URL: '${{ app.url }}'
+      ACCOUNTS_URL: 'http://${{ service.account.host }}:3000'
+      FULLTEXT_URL: 'http://${{ service.fulltext.host }}:4700'
+      STATS_URL: 'http://${{ service.stats.host }}:4900'
+      LAST_NAME_FIRST: true
+      QUEUE_CONFIG: '${{ service.redpanda.host }}:9092'
+  - name: collaborator
+    image: hardcoreeng/collaborator:v0.7.432
+    icon: huly
+    port: 3078
+    env:
+      COLLABORATOR_PORT: 3078
+      SECRET: '${{ hex.secret }}'
+      ACCOUNTS_URL: 'http://${{ service.account.host }}:3000'
+      STATS_URL: 'http://${{ service.stats.host }}:4900'
+      STORAGE_CONFIG: 'minio|${{ service.minio.host }}?accessKey=huly&secretKey=${{ password.minio }}'
+  - name: workspace
+    image: hardcoreeng/workspace:v0.7.432
+    icon: huly
+    # A private hostname resolves only once its pod runs, and the Kafka
+    # client gives up for good if the broker is missing when it starts.
+    entrypoint:
+      - sh
+      - -c
+    command:
+      - until getent hosts "${QUEUE_CONFIG%%:*}" >/dev/null; do sleep 2; done; exec node bundle.js
+    env:
+      SERVER_SECRET: '${{ hex.secret }}'
+      DB_URL: 'postgres://selfhost:${{ password.cockroach }}@${{ service.cockroach.host }}:26257/defaultdb'
+      ACCOUNTS_DB_URL: 'postgres://selfhost:${{ password.cockroach }}@${{ service.cockroach.host }}:26257/defaultdb'
+      TRANSACTOR_URL: 'ws://${{ service.transactor.host }}:3333;wss://${{ app.host }}/_transactor'
+      STORAGE_CONFIG: 'minio|${{ service.minio.host }}?accessKey=huly&secretKey=${{ password.minio }}'
+      MODEL_ENABLED: '*'
+      ACCOUNTS_URL: 'http://${{ service.account.host }}:3000'
+      STATS_URL: 'http://${{ service.stats.host }}:4900'
+      QUEUE_CONFIG: '${{ service.redpanda.host }}:9092'
+  - name: fulltext
+    image: hardcoreeng/fulltext:v0.7.432
+    icon: huly
+    port: 4700
+    # A private hostname resolves only once its pod runs, and the Kafka
+    # client gives up for good if the broker is missing when it starts.
+    entrypoint:
+      - sh
+      - -c
+    command:
+      - until getent hosts "${QUEUE_CONFIG%%:*}" >/dev/null; do sleep 2; done; exec node --expose-gc bundle.js
+    env:
+      SERVER_SECRET: '${{ hex.secret }}'
+      DB_URL: 'postgres://selfhost:${{ password.cockroach }}@${{ service.cockroach.host }}:26257/defaultdb'
+      FULLTEXT_DB_URL: 'http://${{ service.elastic.host }}:9200'
+      ELASTIC_INDEX_NAME: huly_storage_index
+      STORAGE_CONFIG: 'minio|${{ service.minio.host }}?accessKey=huly&secretKey=${{ password.minio }}'
+      REKONI_URL: 'http://${{ service.rekoni.host }}:4004'
+      ACCOUNTS_URL: 'http://${{ service.account.host }}:3000'
+      STATS_URL: 'http://${{ service.stats.host }}:4900'
+      QUEUE_CONFIG: '${{ service.redpanda.host }}:9092'
+  - name: stats
+    image: hardcoreeng/stats:v0.7.432
+    icon: huly
+    port: 4900
+    env:
+      PORT: 4900
+      SERVER_SECRET: '${{ hex.secret }}'
+  - name: rekoni
+    image: hardcoreeng/rekoni-service:v0.7.432
+    icon: huly
+    port: 4004
+    env:
+      SECRET: '${{ hex.secret }}'
+  - name: kvs
+    image: hardcoreeng/hulykvs:v0.7.432
+    icon: huly
+    port: 8094
+    env:
+      HULY_DB_CONNECTION: 'postgres://selfhost:${{ password.cockroach }}@${{ service.cockroach.host }}:26257/defaultdb'
+      HULY_TOKEN_SECRET: '${{ hex.secret }}'
+  - name: cockroach
+    image: cockroachdb/cockroach:v24.2.10
+    icon: huly
+    port: 26257
+    volumes:
+      - path: /cockroach/store
+        size_gib: 10
+    # The image creates its certificates, database and user only while its
+    # data folder is empty, and a volume's root always holds lost+found: data
+    # and certificates live in folders of the volume instead.
+    entrypoint:
+      - sh
+      - -c
+    command:
+      - |
+        mkdir -p /cockroach/store/data
+        ln -sfn /cockroach/store/data /cockroach/cockroach-data
+        exec /cockroach/cockroach.sh start-single-node --accept-sql-without-tls --certs-dir=/cockroach/store/certs
+    env:
+      COCKROACH_DATABASE: defaultdb
+      COCKROACH_USER: selfhost
+      COCKROACH_PASSWORD: '${{ password.cockroach }}'
+  - name: redpanda
+    image: redpandadata/redpanda:v24.3.18
+    icon: huly
+    port: 9092
+    volumes:
+      - path: /var/lib/redpanda/data
+        size_gib: 5
+    command:
+      - redpanda
+      - start
+      - --kafka-addr
+      - internal://0.0.0.0:9092
+      - --advertise-kafka-addr
+      - 'internal://${{ service.redpanda.host }}:9092'
+      - --rpc-addr
+      - 0.0.0.0:33145
+      - --advertise-rpc-addr
+      - '${{ service.redpanda.host }}:33145'
+      - --mode
+      - dev-container
+      - --smp
+      - '1'
+      - --memory
+      - 1G
+      - --default-log-level=info
+  - name: minio
+    image: pgsty/silo:RELEASE.2026-11-12T00-00-00Z
+    icon: huly
+    port: 9000
+    volumes:
+      - path: /data
+        size_gib: 20
+    command:
+      - server
+      - /data
+      - --address
+      - :9000
+    env:
+      MINIO_ROOT_USER: huly
+      MINIO_ROOT_PASSWORD: '${{ password.minio }}'
+  - name: elastic
+    image: elasticsearch:7.14.2
+    icon: huly
+    port: 9200
+    volumes:
+      - path: /usr/share/elasticsearch/data
+        size_gib: 10
+    # Huly indexes attachments with the ingest-attachment plugin.
+    entrypoint:
+      - sh
+      - -c
+    command:
+      - |
+        ./bin/elasticsearch-plugin list | grep -q ingest-attachment || ./bin/elasticsearch-plugin install --batch ingest-attachment
+        exec env discovery.type=single-node /usr/local/bin/docker-entrypoint.sh eswrapper
+    env:
+      ES_JAVA_OPTS: -Xms1024m -Xmx1024m

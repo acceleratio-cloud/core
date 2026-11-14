@@ -1,0 +1,54 @@
+schema_version: 1
+name: GitLab
+icon: gitlab
+category: Developer tools
+pinned: true
+tagline: Git hosting with merge requests, issues, CI/CD and a package registry.
+description: |
+  GitLab Community Edition in one container: Git repositories, merge requests,
+  issues, wikis and CI/CD pipelines.
+
+  Sign in as root with the password in the gitlab service's Environment tab
+  (GITLAB_ROOT_PASSWORD). The first start takes a few minutes while GitLab
+  sets itself up. Clone and push over HTTPS; SSH is not exposed. Pipelines
+  need a GitLab Runner registered from Admin > CI/CD > Runners.
+features:
+  - Git repositories over HTTPS
+  - Merge requests with code review
+  - Issues, boards and wikis
+  - CI/CD pipelines for your own runners
+license: MIT
+repository: https://gitlab.com/gitlab-org/gitlab
+website: https://about.gitlab.com
+resources:
+  cpu: 2
+  memory_mib: 4096
+services:
+  - name: gitlab
+    image: gitlab/gitlab-ce:19.5.5-ce.0
+    icon: gitlab
+    port: 80
+    public: true
+    volumes:
+      - path: /etc/gitlab
+        size_gib: 1
+      - path: /var/log/gitlab
+        size_gib: 5
+      - path: /var/opt/gitlab
+        size_gib: 50
+    env:
+      # Read on the first start only; change the password in GitLab afterwards.
+      GITLAB_ROOT_PASSWORD: '${{ password.root }}'
+      # TLS ends at the platform's proxy, so GitLab serves plain HTTP on 80.
+      # Worker counts are fixed: by default they follow the node's CPU count.
+      GITLAB_OMNIBUS_CONFIG: |
+        external_url '${{ app.url }}'
+        nginx['listen_port'] = 80
+        nginx['listen_https'] = false
+        nginx['proxy_set_headers'] = { 'X-Forwarded-Proto' => 'https', 'X-Forwarded-Ssl' => 'on' }
+        letsencrypt['enable'] = false
+        puma['worker_processes'] = 2
+        sidekiq['concurrency'] = 10
+        prometheus_monitoring['enable'] = false
+        gitlab_kas['enable'] = false
+        gitlab_rails['env'] = { 'MALLOC_CONF' => 'dirty_decay_ms:1000,muzzy_decay_ms:1000' }

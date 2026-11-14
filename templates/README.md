@@ -2,7 +2,8 @@
 
 One file per app in `apps/<slug>.yaml`; the file name is the slug in the console URL.
 Icons are SVG files in `icons/<name>.svg` (32 KB at most), referenced by name from
-an app and from each of its services.
+an app and from each of its services. The console shows them on a dark tile, so a mark
+drawn in black ships in white.
 
 The API reads this folder at startup (`MARKETPLACE_TEMPLATES_DIR` overrides the
 path; the image has it at `/app/templates`) and serves it at `GET /marketplace/apps`.
@@ -22,17 +23,18 @@ features: [Short phrases]
 license: MIT
 repository: https://github.com/umami-software/umami
 website: https://umami.is
+pinned: false                 # optional; pinned apps are listed first
 resources: { cpu: 0.5, memory_mib: 512 }
 inputs:                       # optional; asked for in the deploy dialog
   - { name: ADMIN_EMAIL, label: Admin email, placeholder: you@example.com }
   - { name: ADMIN_USER, label: Admin username, default: admin }
   - { name: NOTE, label: Note, required: false }
-services:                     # 1 to 10; at most one public
+services:                     # at least one
   - name: umami
     image: ghcr.io/umami-software/umami:3.4.1   # explicit tag, never latest
     icon: umami
     port: 3000
-    public: true              # gets a generated https domain
+    public: true              # gets a generated https domain; any number may be public
     # volumes: [{ path: /data, size_gib: 5 }]   # up to 10, 1-100 GiB each
     env:
       DATABASE_URL: 'postgres://${{ service.postgres.user }}:${{ service.postgres.password }}@${{ service.postgres.host }}:5432/${{ service.postgres.database }}'
@@ -48,7 +50,10 @@ database (`type: postgres`), the same as one created in the console: backups,
 the Database tab and port 5432. A database takes only `name`, `icon` and
 `size_gib`; its database and user are fixed, so read them from the placeholders
 below rather than writing them out. Use `type: postgres` for every app that
-needs PostgreSQL.
+needs PostgreSQL. Its user owns the database but cannot create roles, so an
+app that needs a superuser (Logto) or its own Postgres image (Supabase) runs
+Postgres as a container instead, with its data in a folder below the volume's
+root, which holds `lost+found` (`PGDATA`).
 
 ## Placeholders
 
@@ -64,11 +69,13 @@ checked when the template loads and filled in when the app is deployed:
 | `password.<id>` | 32 random letters and digits |
 | `hex.<id>` | 64 random hex characters (32 bytes) |
 | `base64.<id>` | 64 random base64 characters (48 bytes) |
+| `jwt.<role>.<secret>` | HS256 token with a `role` claim, valid 10 years, signed with a generated value such as `password.jwt` |
 | `input.<NAME>` | what the user entered for that input |
 | `service.<name>.host` | private hostname of a template service, such as `postgres.internal` |
+| `service.<name>.url` | `https://` URL of a public service |
 | `service.<name>.user`, `.database`, `.password` | login of a `type: postgres` service |
-| `app.url` | `https://` URL of the public service |
-| `app.host` | hostname of the public service |
+| `app.url` | `https://` URL of the first public service |
+| `app.host` | hostname of the first public service |
 
 A generated value with the same placeholder is the same everywhere in one
 deploy, so a database and the app that uses it get one password. Users can see
@@ -81,7 +88,7 @@ or a `project_name` (a new one). The API creates one service per template
 service, named as in the template, or `<prefix>-<service>` when the request
 has a `prefix`. Without a prefix, if a name is already taken in the project, the
 API picks a random 4-character prefix starting with a letter for all of them and returns it as
-`generated_prefix`. It gives the public service a generated sslip.io domain, fills the placeholders and
+`generated_prefix`. It gives each public service a generated sslip.io domain, fills the placeholders and
 deploys every service. If any step fails, it removes what it created, the project
 too when it was new; the error says when something could not be removed. If the
 API itself stops in the middle of a deploy, nothing is rolled back: remove the

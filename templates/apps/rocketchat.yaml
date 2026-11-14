@@ -1,0 +1,71 @@
+schema_version: 1
+name: Rocket.Chat
+icon: rocketchat
+category: Productivity
+tagline: Team chat with channels, threads, video calls and integrations.
+description: |
+  Rocket.Chat with a MongoDB replica set of one node. Sign in as admin with
+  the password in the rocketchat service's Environment tab (ADMIN_PASS).
+
+  Files are kept in MongoDB. Push notifications to the mobile apps need the
+  workspace registered with Rocket.Chat Cloud from Administration.
+features:
+  - Channels, direct messages and threads
+  - Voice and video calls
+  - Integrations, webhooks and bots
+  - Mobile and desktop apps
+license: MIT
+repository: https://github.com/RocketChat/Rocket.Chat
+website: https://www.rocket.chat
+inputs:
+  - name: ADMIN_EMAIL
+    label: Admin email
+    placeholder: you@example.com
+resources:
+  cpu: 1
+  memory_mib: 2048
+services:
+  - name: rocketchat
+    image: rocketchat/rocket.chat:8.7.2
+    icon: rocketchat
+    port: 3000
+    public: true
+    env:
+      ROOT_URL: '${{ app.url }}'
+      PORT: 3000
+      MONGO_URL: 'mongodb://${{ service.mongodb.host }}:27017/rocketchat?replicaSet=rs0'
+      DEPLOY_METHOD: docker
+      # Read on the first start only, when there are no users yet.
+      ADMIN_USERNAME: admin
+      ADMIN_NAME: Administrator
+      ADMIN_EMAIL: '${{ input.ADMIN_EMAIL }}'
+      ADMIN_PASS: '${{ password.admin }}'
+      OVERWRITE_SETTING_Show_Setup_Wizard: completed
+  - name: mongodb
+    image: mongodb/mongodb-community-server:8.0.38-ubi9
+    icon: rocketchat
+    port: 27017
+    volumes:
+      - path: /data/db
+        size_gib: 10
+    # Rocket.Chat needs a replica set, named by this service's private
+    # hostname. A new pod starts before that hostname reaches it, and mongod
+    # then does not find itself in the config: once it does, the first start
+    # initiates the set and later ones re-apply the stored config.
+    entrypoint:
+      - sh
+      - -c
+    command:
+      - |
+        mongod --replSet rs0 --bind_ip_all &
+        pid=$!
+        trap 'kill -TERM $pid; wait $pid' TERM INT
+        until mongosh --quiet --host "$MONGO_HOST" --eval 'db.adminCommand("ping")' >/dev/null 2>&1; do sleep 2; done
+        mongosh --quiet --eval "
+          try { rs.status() } catch (e) {
+            if (e.codeName === 'NotYetInitialized') rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: '$MONGO_HOST:27017' }] })
+            else rs.reconfig(db.getSiblingDB('local').system.replset.findOne(), { force: true })
+          }"
+        wait $pid
+    env:
+      MONGO_HOST: '${{ service.mongodb.host }}'

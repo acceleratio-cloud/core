@@ -1,0 +1,54 @@
+schema_version: 1
+name: WordPress
+icon: wordpress
+category: Content
+tagline: Websites and blogs with themes, plugins and the block editor.
+description: |
+  WordPress on Apache with a MySQL database. Open the URL to pick the
+  language and create the first administrator.
+
+  Themes, plugins and uploads are kept on the wordpress service's volume.
+features:
+  - Block editor for pages and posts
+  - Thousands of themes and plugins
+  - Media library and user roles
+license: GPL-2.0
+repository: https://github.com/WordPress/WordPress
+website: https://wordpress.org
+resources:
+  cpu: 0.5
+  memory_mib: 1024
+services:
+  - name: wordpress
+    image: wordpress:7.1.4-php8.4-apache
+    icon: wordpress
+    port: 80
+    public: true
+    volumes:
+      - path: /var/www/html
+        size_gib: 10
+    env:
+      WORDPRESS_DB_HOST: '${{ service.mysql.host }}:3306'
+      WORDPRESS_DB_USER: wordpress
+      WORDPRESS_DB_PASSWORD: '${{ password.mysql }}'
+      WORDPRESS_DB_NAME: wordpress
+      WORDPRESS_AUTH_KEY: '${{ base64.auth_key }}'
+      WORDPRESS_SECURE_AUTH_KEY: '${{ base64.secure_auth_key }}'
+      WORDPRESS_LOGGED_IN_KEY: '${{ base64.logged_in_key }}'
+      WORDPRESS_NONCE_KEY: '${{ base64.nonce_key }}'
+      WORDPRESS_AUTH_SALT: '${{ base64.auth_salt }}'
+      WORDPRESS_SECURE_AUTH_SALT: '${{ base64.secure_auth_salt }}'
+      WORDPRESS_LOGGED_IN_SALT: '${{ base64.logged_in_salt }}'
+      WORDPRESS_NONCE_SALT: '${{ base64.nonce_salt }}'
+  - name: mysql
+    image: mysql:8.4.13
+    icon: mysql
+    port: 3306
+    volumes:
+      - path: /var/lib/mysql
+        size_gib: 10
+    env:
+      MYSQL_USER: wordpress
+      MYSQL_PASSWORD: '${{ password.mysql }}'
+      MYSQL_DATABASE: wordpress
+      MYSQL_ROOT_PASSWORD: '${{ password.mysql_root }}'

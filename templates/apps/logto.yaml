@@ -1,0 +1,68 @@
+schema_version: 1
+name: Logto
+icon: logto
+category: Security
+tagline: Sign-in, user management and SSO for your apps over OIDC and OAuth 2.0.
+description: |
+  An identity provider for your apps: hosted sign-in pages, social and
+  enterprise SSO, multi-factor authentication, roles and organizations.
+
+  Apps sign in through the logto service's URL. The admin console is at the
+  admin service's URL: the first visit creates the administrator account.
+features:
+  - OIDC and OAuth 2.0 provider
+  - Social and enterprise SSO connectors
+  - Multi-factor authentication
+  - Roles, permissions and organizations
+license: MPL-2.0
+repository: https://github.com/logto-io/logto
+website: https://logto.io
+resources:
+  cpu: 0.5
+  memory_mib: 1024
+services:
+  - name: logto
+    image: svhd/logto:1.46.0
+    icon: logto
+    port: 3001
+    public: true
+    # Seeds the database on the first start, then serves the app on 3001
+    # and the admin console on 3002.
+    entrypoint:
+      - sh
+      - -c
+    command:
+      - npm run cli db seed -- --swe && npm start
+    env:
+      TRUST_PROXY_HEADER: 1
+      ENDPOINT: '${{ service.logto.url }}'
+      ADMIN_ENDPOINT: '${{ service.admin.url }}'
+      DB_URL: 'postgres://postgres:${{ password.postgres }}@${{ service.postgres.host }}:5432/logto'
+  - name: admin
+    image: caddy:2.11.9-alpine
+    icon: logto
+    port: 3002
+    public: true
+    # The admin console's own domain, proxied to port 3002 of the logto service.
+    command:
+      - caddy
+      - reverse-proxy
+      - --from
+      - :3002
+      - --to
+      - '${{ service.logto.host }}:3002'
+      - --header-up
+      - 'X-Forwarded-Proto: https'
+  # Logto creates its own roles, so it needs a superuser, which a managed
+  # database does not give.
+  - name: postgres
+    image: postgres:17.12-alpine
+    icon: postgres
+    port: 5432
+    volumes:
+      - path: /var/lib/postgresql/data
+        size_gib: 5
+    env:
+      POSTGRES_PASSWORD: '${{ password.postgres }}'
+      # The volume's root holds lost+found, which initdb refuses.
+      PGDATA: /var/lib/postgresql/data/pgdata
