@@ -54,7 +54,10 @@ export const loadTemplates = (dir: string, logger?: Logger) => {
       logger?.error(message);
     }
   }
-  apps.sort((a, b) => a.name.localeCompare(b.name));
+  apps.sort(
+    (a, b) =>
+      Number(b.pinned) - Number(a.pinned) || a.name.localeCompare(b.name),
+  );
   return { apps, errors };
 };
 
@@ -69,7 +72,9 @@ export class MarketplaceService implements OnModuleInit {
     try {
       this.templates = loadTemplates(dir, this.logger).apps;
       // What the console sees: env and command stay on the server.
-      this.apps = this.templates.map((template) => ({
+      // `pinned` only orders the list; it is not part of the contract.
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      this.apps = this.templates.map(({ pinned, ...template }) => ({
         ...template,
         services: template.services.map(
           ({

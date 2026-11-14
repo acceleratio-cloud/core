@@ -44,7 +44,7 @@ const readPrefix = (prefix: unknown): string | null => {
 };
 /**
  * Turns a template into services of one project: creates them, gives
- * the public one a generated domain, fills the env placeholders and deploys.
+ * each public one a generated domain, fills the env placeholders and deploys.
  * A failure removes what this deploy created, the project too when it was new.
  */
 @Injectable()
@@ -205,29 +205,29 @@ export class MarketplaceDeployService {
         );
       }
 
-      const publicIndex = template.services.findIndex((s) => s.public);
-      const appHost =
-        publicIndex === -1
-          ? null
-          : await this.generateDomain(
-              projectId,
-              created[publicIndex].id,
-              template.services[publicIndex].port!,
-            );
-
       const services: Record<string, Record<string, string>> = {};
+      let appHost: string | null = null;
       for (const [index, service] of template.services.entries()) {
         const made = created[index];
-        services[service.name] =
-          service.type === 'postgres'
-            ? {
-                host: made.postgres!.host,
-                user: made.postgres!.username,
-                database: made.postgres!.database,
-                password: (await this.postgres.credentials(projectId, made.id))
-                  .password,
-              }
-            : { host: made.internal_domain! };
+        if (service.type === 'postgres') {
+          services[service.name] = {
+            host: made.postgres!.host,
+            user: made.postgres!.username,
+            database: made.postgres!.database,
+            password: (await this.postgres.credentials(projectId, made.id))
+              .password,
+          };
+          continue;
+        }
+        services[service.name] = { host: made.internal_domain! };
+        if (!service.public) continue;
+        const host = await this.generateDomain(
+          projectId,
+          made.id,
+          service.port!,
+        );
+        services[service.name].url = `https://${host}`;
+        appHost ??= host;
       }
 
       const context: RenderContext = {

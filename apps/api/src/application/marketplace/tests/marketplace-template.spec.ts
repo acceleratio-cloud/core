@@ -122,15 +122,38 @@ describe('readTemplate', () => {
     );
   });
 
-  it('rejects duplicate services and two public services', () => {
+  it('rejects duplicate services', () => {
     rejects(
       (raw) => ((raw.services[1].name = 'demo'), raw),
       /has "demo" twice/,
     );
-    rejects((raw) => {
-      Object.assign(raw.services[1], { public: true, port: 5432 });
-      return raw;
-    }, /may have one public service/);
+  });
+
+  it('allows several public services, each with a URL placeholder', () => {
+    const raw = valid();
+    Object.assign(raw.services[1], { public: true, port: 5432 });
+    raw.services[0] = {
+      ...raw.services[0],
+      env: { OTHER: '${{ service.postgres.url }}' },
+    } as never;
+    expect(
+      readTemplate('demo', raw, icons).services.filter((s) => s.public),
+    ).toHaveLength(2);
+    rejects(
+      (r) => ((r.services[1].env = { V: '${{ service.postgres.url }}' }), r),
+      /postgres is not public/,
+    );
+  });
+
+  it('reads pinned', () => {
+    expect(readTemplate('demo', valid(), icons).pinned).toBe(false);
+    expect(
+      readTemplate('demo', { ...valid(), pinned: true }, icons).pinned,
+    ).toBe(true);
+    rejects(
+      (raw) => ({ ...raw, pinned: 'yes' }),
+      /pinned: must be true or false/,
+    );
   });
 
   it('checks every placeholder against what the template declares', () => {
@@ -141,6 +164,7 @@ describe('readTemplate', () => {
     rejects(env('${{ input.DOMAIN }}'), /uses undeclared input/);
     rejects(env('${{ service.redis.host }}'), /uses unknown service\.redis/);
     rejects(env('${{ secret.x }}'), /unknown placeholder/);
+    rejects(env('${{ jwt.anon.input.X }}'), /unknown placeholder/);
     rejects(env('${{ password.db }'), /unclosed/);
     rejects(env({ nested: true }), /must be text, a number or a boolean/);
     rejects(
@@ -154,7 +178,9 @@ describe('readTemplate', () => {
     expect(() =>
       readTemplate(
         'demo',
-        env('${{ service.demo.host }}:${{ app.host }}:${{ hex.k }}')(valid()),
+        env(
+          '${{ service.demo.host }}:${{ app.host }}:${{ hex.k }}:${{ jwt.anon.hex.k }}',
+        )(valid()),
         icons,
       ),
     ).not.toThrow();

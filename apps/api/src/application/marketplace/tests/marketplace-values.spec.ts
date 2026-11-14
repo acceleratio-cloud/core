@@ -1,4 +1,6 @@
 import type { MarketplaceTemplate } from '../marketplace-template';
+import { createHmac } from 'node:crypto';
+
 import { readInputs, render, type RenderContext } from '../marketplace-values';
 
 const context = (): RenderContext => ({
@@ -47,6 +49,40 @@ describe('render', () => {
     expect(render('${{ hex.key }}', ctx)).toMatch(/^[0-9a-f]{64}$/);
     expect(render('${{ base64.key }}', ctx)).toMatch(/^[A-Za-z0-9+/]{64}$/);
     expect(render('${{ password.db }}', context())).not.toBe(first);
+  });
+
+  it('signs a JWT for a role with the secret it names', () => {
+    const ctx = context();
+    const [anon, again, key] = render(
+      '${{ jwt.anon.hex.jwt }} ${{ jwt.anon.hex.jwt }} ${{ hex.jwt }}',
+      ctx,
+    ).split(' ');
+    expect(again).toBe(anon);
+    const [header, payload, signature] = anon.split('.');
+    expect(
+      createHmac('sha256', key)
+        .update(`${header}.${payload}`)
+        .digest('base64url'),
+    ).toBe(signature);
+    const claims = JSON.parse(Buffer.from(payload, 'base64url').toString()) as {
+      role: string;
+      iat: number;
+      exp: number;
+    };
+    expect(claims.role).toBe('anon');
+    expect(claims.exp - claims.iat).toBeGreaterThan(9 * 365 * 24 * 3600);
+  });
+
+  it('fills the URL of a public service', () => {
+    const ctx = {
+      ...context(),
+      services: {
+        web: { host: 'web.internal', url: 'https://web-1.sslip.io' },
+      },
+    };
+    expect(render('${{ service.web.url }}', ctx)).toBe(
+      'https://web-1.sslip.io',
+    );
   });
 
   it('leaves text without placeholders alone', () => {

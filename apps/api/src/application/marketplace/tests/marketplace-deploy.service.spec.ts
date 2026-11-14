@@ -132,6 +132,7 @@ const setup = () => {
   );
   return {
     service,
+    marketplace,
     projects,
     workloads,
     network,
@@ -214,6 +215,48 @@ describe('MarketplaceDeployService', () => {
     expect(workloads.deploy.mock.calls.map((call) => call[1])).toEqual([
       'w1',
       'w3',
+    ]);
+  });
+
+  it('gives every public service a domain, app.url being the first', async () => {
+    const { service, marketplace, network, workloads } = setup();
+    marketplace.find.mockReturnValue({
+      ...template,
+      services: template.services.map((s) =>
+        s.name === 'redis'
+          ? {
+              ...s,
+              public: true,
+              port: 6379,
+              env: [{ key: 'SELF', value: '${{ service.redis.url }}' }],
+            }
+          : s,
+      ),
+    });
+    network.list
+      .mockResolvedValueOnce({ suggested_label: 'demo' })
+      .mockResolvedValueOnce({ suggested_label: 'redis' });
+
+    const result = await service.deploy(
+      'demo',
+      payload({ project_name: 'Demo' }),
+      null,
+    );
+
+    expect(network.generate.mock.calls.map((call) => call[1])).toEqual([
+      'w1',
+      'w3',
+    ]);
+    expect(result.url).toBe('https://demo-1-2-3-4.sslip.io');
+    expect(workloads.update.mock.calls[1]).toEqual([
+      PROJECT,
+      'w3',
+      expect.objectContaining({
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        config: expect.objectContaining({
+          env: [{ key: 'SELF', value: 'https://redis-1-2-3-4.sslip.io' }],
+        }),
+      }),
     ]);
   });
 

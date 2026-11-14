@@ -25,7 +25,6 @@ const INPUT_NAME = /^[A-Z][A-Z0-9_]{0,63}$/;
 // registry/path:tag, the tag explicit and not `latest`; an optional @sha256 digest.
 const IMAGE =
   /^[a-z0-9]+(?:[._-][a-z0-9]+)*(?::[0-9]+)?(?:\/[a-z0-9]+(?:[._-][a-z0-9]+)*)*:(?!latest(?:$|@))[\w][\w.-]{0,127}(?:@sha256:[a-f0-9]{64})?$/;
-const MAX_SERVICES = 10;
 // The same rules the Docker service settings apply.
 const ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const MAX_VOLUMES = 10;
@@ -41,6 +40,8 @@ export interface TemplateService extends MarketplaceService {
 
 export interface MarketplaceTemplate extends MarketplaceApp {
   services: TemplateService[];
+  /** Listed before the other apps. */
+  pinned: boolean;
 }
 
 export class TemplateError extends Error {}
@@ -306,10 +307,13 @@ export const readTemplate = (
     'license',
     'repository',
     'website',
+    'pinned',
     'resources',
     'inputs',
     'services',
   ]);
+  if (raw.pinned !== undefined && typeof raw.pinned !== 'boolean')
+    fail(`${slug}.pinned`, 'must be true or false');
   if (raw.schema_version !== TEMPLATE_SCHEMA_VERSION) {
     fail(`${slug}.schema_version`, `must be ${TEMPLATE_SCHEMA_VERSION}`);
   }
@@ -330,7 +334,7 @@ export const readTemplate = (
   const services = list(
     raw.services,
     `${slug}.services`,
-    MAX_SERVICES,
+    Number.POSITIVE_INFINITY,
     (item, path) => service(item, path, icons),
   );
   if (services.length === 0)
@@ -339,8 +343,6 @@ export const readTemplate = (
     services.map((s) => s.name),
     `${slug}.services`,
   );
-  if (services.filter((s) => s.public).length > 1)
-    fail(`${slug}.services`, 'may have one public service');
   const inputs =
     raw.inputs === undefined
       ? []
@@ -355,7 +357,7 @@ export const readTemplate = (
     databases: new Set(
       services.filter((s) => s.type === 'postgres').map((s) => s.name),
     ),
-    hasPublic: services.some((s) => s.public),
+    publics: new Set(services.filter((s) => s.public).map((s) => s.name)),
   };
   services.forEach((s, index) => {
     const at = `${slug}.services[${index}]`;
@@ -401,5 +403,6 @@ export const readTemplate = (
     },
     inputs,
     services,
+    pinned: raw.pinned === true,
   };
 };

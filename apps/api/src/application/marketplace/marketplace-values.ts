@@ -1,4 +1,4 @@
-import { randomBytes, randomInt } from 'node:crypto';
+import { createHmac, randomBytes, randomInt } from 'node:crypto';
 import { BadRequestException } from '@nestjs/common';
 
 import type { MarketplaceTemplate } from './marketplace-template';
@@ -10,11 +10,14 @@ import type { MarketplaceTemplate } from './marketplace-template';
     password.<id>        32 letters and digits
     hex.<id>             64 hex characters (32 random bytes)
     base64.<id>          64 base64 characters (48 random bytes)
+    jwt.<role>.<secret>  HS256 token with a `role` claim, signed with the
+                         value of the secret ref (such as `hex.jwt`)
     input.<NAME>         what the user typed for that input
     service.<name>.host  private hostname of a template service (`x.internal`)
+    service.<name>.url   https URL of a public service
     service.<name>.user / .database / .password
                          login of a `postgres` service
-    app.url / app.host   the public service's https URL / hostname
+    app.url / app.host   the first public service's https URL / hostname
 
   A generated value with the same ref is the same everywhere in one deploy, so
   a database and its client get one password.
@@ -23,7 +26,10 @@ import type { MarketplaceTemplate } from './marketplace-template';
 const PLACEHOLDER = /\$\{\{\s*([^{}]*?)\s*\}\}/g;
 const SECRET_REF = /^(password|hex|base64)\.[a-z0-9_]{1,40}$/;
 const INPUT_REF = /^input\.([A-Z][A-Z0-9_]{0,63})$/;
-const SERVICE_REF = /^service\.([a-z0-9-]+)\.(host|user|database|password)$/;
+const JWT_REF =
+  /^jwt\.([a-z_]{1,40})\.((?:password|hex|base64)\.[a-z0-9_]{1,40})$/;
+const SERVICE_REF =
+  /^service\.([a-z0-9-]+)\.(host|url|user|database|password)$/;
 const ALPHANUMERIC =
   'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
 
@@ -33,13 +39,14 @@ export interface RefScope {
   services: ReadonlySet<string>;
   /** Services of type `postgres`, the only ones with a login. */
   databases: ReadonlySet<string>;
-  hasPublic: boolean;
+  /** Public services, the only ones with a URL. */
+  publics: ReadonlySet<string>;
 }
 
 /** Returns why `value` holds a bad placeholder, or null when all are known. */
 export const checkRefs = (value: string, scope: RefScope): string | null => {
   for (const [, ref] of value.matchAll(PLACEHOLDER)) {
-    if (SECRET_REF.test(ref)) continue;
+    if (SECRET_REF.test(ref) || JWT_REF.test(ref)) continue;
     const input = INPUT_REF.exec(ref);
     if (input) {
       if (!scope.inputs.has(input[1])) return `uses undeclared input ${ref}`;
@@ -48,12 +55,18 @@ export const checkRefs = (value: string, scope: RefScope): string | null => {
     const service = SERVICE_REF.exec(ref);
     if (service) {
       if (!scope.services.has(service[1])) return `uses unknown ${ref}`;
+      if (service[2] === 'url') {
+        if (!scope.publics.has(service[1]))
+          return `uses ${ref}, but ${service[1]} is not public`;
+        continue;
+      }
       if (service[2] !== 'host' && !scope.databases.has(service[1]))
         return `uses ${ref}, but ${service[1]} is not a postgres service`;
       continue;
     }
     if (ref === 'app.url' || ref === 'app.host') {
-      if (!scope.hasPublic) return `uses ${ref} without a public service`;
+      if (scope.publics.size === 0)
+        return `uses ${ref} without a public service`;
       continue;
     }
     return `has an unknown placeholder \${{ ${ref} }}`;
@@ -66,9 +79,12 @@ export const checkRefs = (value: string, scope: RefScope): string | null => {
 
 export interface RenderContext {
   inputs: Readonly<Record<string, string>>;
-  /** Template service name → `host`, and `user`, `database`, `password` of a postgres service. */
+  /**
+   * Template service name → `host`, `url` of a public service, and `user`,
+   * `database`, `password` of a postgres service.
+   */
   services: Readonly<Record<string, Readonly<Record<string, string>>>>;
-  /** Hostname of the public service, when there is one. */
+  /** Hostname of the first public service, when there is one. */
   appHost: string | null;
   /** Generated values of this deploy, filled as refs are first met. */
   secrets: Map<string, string>;
@@ -83,13 +99,35 @@ const generate = (kind: string): string => {
   ).join('');
 };
 
+const secret = (ref: string, context: RenderContext) => {
+  if (!context.secrets.has(ref)) {
+    context.secrets.set(ref, generate(ref.split('.')[0]));
+  }
+  return context.secrets.get(ref)!;
+};
+
+const JWT_LIFETIME_SECONDS = 10 * 365 * 24 * 60 * 60;
+const base64url = (value: string | Buffer) =>
+  Buffer.from(value).toString('base64url');
+
+/** A long-lived HS256 token such as Supabase's anon and service_role keys. */
+export const signJwt = (role: string, key: string, now = Date.now()) => {
+  const iat = Math.floor(now / 1000);
+  const body = `${base64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }))}.${base64url(
+    JSON.stringify({ role, iat, exp: iat + JWT_LIFETIME_SECONDS }),
+  )}`;
+  return `${body}.${base64url(createHmac('sha256', key).update(body).digest())}`;
+};
+
 /** Fills every placeholder; refs were checked when the template loaded. */
 export const render = (value: string, context: RenderContext): string =>
   value.replace(PLACEHOLDER, (_, ref: string) => {
-    if (SECRET_REF.test(ref)) {
-      if (!context.secrets.has(ref)) {
-        context.secrets.set(ref, generate(ref.split('.')[0]));
-      }
+    if (SECRET_REF.test(ref)) return secret(ref, context);
+    const jwt = JWT_REF.exec(ref);
+    if (jwt) {
+      // Signed once per deploy, so every service gets the same token.
+      if (!context.secrets.has(ref))
+        context.secrets.set(ref, signJwt(jwt[1], secret(jwt[2], context)));
       return context.secrets.get(ref)!;
     }
     const input = INPUT_REF.exec(ref);
