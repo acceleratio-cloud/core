@@ -141,8 +141,16 @@ export class GithubClient {
     return created.token;
   }
 
-  /** Branch names, in GitHub's order, up to 1000. */
-  async listBranches(token: string, repository: string): Promise<string[]> {
+  /** A repository read without a token: GitHub answers 404 for a private one. */
+  publicRepository(repository: string): Promise<GithubRepositoryInfo> {
+    return this.call(`/repos/${repository}`);
+  }
+
+  /** Branch names, in GitHub's order, up to 1000. Without a token, public only. */
+  async listBranches(
+    token: string | undefined,
+    repository: string,
+  ): Promise<string[]> {
     const names: string[] = [];
 
     for (let page = 1; page <= MAX_REPOSITORY_PAGES; page += 1) {
@@ -157,9 +165,29 @@ export class GithubClient {
     return names;
   }
 
+  /** Whether a branch exists: one request, unlike listing them all. */
+  async hasBranch(
+    token: string | undefined,
+    repository: string,
+    branch: string,
+  ): Promise<boolean> {
+    try {
+      await this.call(
+        `/repos/${repository}/branches/${encodeURIComponent(branch)}`,
+        { token },
+      );
+      return true;
+    } catch (error) {
+      if ((error as Error).cause === 404) {
+        return false;
+      }
+      throw error;
+    }
+  }
+
   /** The commit a branch points at. */
   async branchHead(
-    token: string,
+    token: string | undefined,
     repository: string,
     branch: string,
   ): Promise<{ sha: string; message: string }> {
@@ -202,6 +230,8 @@ export class GithubClient {
       } | null;
       throw new BadGatewayException(
         `GitHub returned ${response.status}${body?.message ? `: ${body.message}` : ''}`,
+        // The status lets a caller tell a missing repository from an outage.
+        { cause: response.status, description: 'Bad Gateway' },
       );
     }
 

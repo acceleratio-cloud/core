@@ -331,9 +331,9 @@ export const GithubWorkloadBuilds = () => {
     following,
   );
   const autoDeploy = workload.auto_deploy ?? true;
-  const repository = (
-    effectiveConfig(workload) as unknown as Partial<GithubWorkloadConfig>
-  ).repository;
+  const { repository, github_app_id: appId } = effectiveConfig(
+    workload,
+  ) as unknown as Partial<GithubWorkloadConfig>;
   const builds = value ?? [];
   const latest = builds[0];
   const now = useNow(latest?.status === 'building');
@@ -362,9 +362,11 @@ export const GithubWorkloadBuilds = () => {
     <DetailSection
       title="Builds"
       description={
-        autoDeploy
-          ? 'A push to the branch deploys it once the service has been deployed. Turn this off in Configuration.'
-          : 'Only Deploy builds the branch; pushes are ignored. Turn on Deploy on push in Configuration.'
+        !appId
+          ? "Deploy builds the branch's latest commit. A public repository without a GitHub App is not deployed on push."
+          : autoDeploy
+            ? 'A push to the branch deploys it once the service has been deployed. Turn this off in Configuration.'
+            : 'Only Deploy builds the branch; pushes are ignored. Turn on Deploy on push in Configuration.'
       }
     >
       {actionError ? (

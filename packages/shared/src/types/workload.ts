@@ -108,15 +108,20 @@ export interface RailpackCommands {
 
 /**
  * A service built from a repository branch read through a GitHub App of the
- * integration. It runs like a Docker service and has the same settings; a
- * deploy builds the branch's `Dockerfile` and fills `docker_image` and
- * `commit_sha`. The App and repository are fixed after creation; the branch can be changed and the next deploy builds its head.
+ * integration, or from a public repository read without one. It runs like a
+ * Docker service and has the same settings; a deploy builds the branch's
+ * `Dockerfile` and fills `docker_image` and `commit_sha`. The App and
+ * repository are fixed after creation; the branch can be changed and the next
+ * deploy builds its head.
  */
 export interface GithubWorkloadConfig
   extends Omit<DockerWorkloadConfig, 'docker_image'>,
     RailpackCommands {
-  /** `GithubApp.id` the repository is read through. */
-  github_app_id: string;
+  /**
+   * `GithubApp.id` the repository is read through. Absent for a public
+   * repository: read without a token and deployed only by hand.
+   */
+  github_app_id?: string;
   /** `owner/name`. */
   repository: string;
   branch: string;

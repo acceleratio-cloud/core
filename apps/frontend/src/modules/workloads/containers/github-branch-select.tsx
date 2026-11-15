@@ -12,7 +12,8 @@ import {
 } from '@/shared/components/ui/select';
 
 /**
- * The branches of a repository the App can reach. The current value stays
+ * The branches of a repository the App can reach, or of a public repository
+ * when there is no App. The current value stays
  * listed even when GitHub no longer has it, so the field never goes blank.
  */
 export const GithubBranchSelect = ({
@@ -24,13 +25,13 @@ export const GithubBranchSelect = ({
   disabled,
 }: {
   id: string;
-  appId: string;
+  appId?: string;
   repository: string;
   value: string;
   onChange: (branch: string) => void;
   disabled?: boolean;
 }) => {
-  const key = `${appId}/${repository}`;
+  const key = `${appId ?? 'public'}/${repository}`;
   const [loaded, setLoaded] = useState<{ key: string; list: string[] } | null>(
     null,
   );

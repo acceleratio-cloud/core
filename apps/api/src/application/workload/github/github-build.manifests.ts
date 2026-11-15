@@ -88,7 +88,8 @@ export const RAILPACK_FRONTEND = `ghcr.io/railwayapp/railpack-frontend:${RAILPAC
  * when there is one, otherwise a Railpack plan, with the install, build and
  * start commands from `RAILPACK_*_CMD` when the Job sets them. The commit and
  * its submodules (as BuildKit's git source fetched them) are fetched with the token in a
- * one-off header sent only to github.com, so it is never written to disk, and
+ * one-off header sent only to github.com, so it is never written to disk (a
+ * public repository has no token and sends no header), and
  * `.git` is removed before BuildKit sees the source; `RUN` steps never see
  * the token.
  * The image digest, followed by `dockerfile` for a Dockerfile build, is
@@ -98,7 +99,9 @@ export const buildScript = (): string =>
   [
     'set -eu',
     'cd "$(mktemp -d)"',
-    `auth="http.https://github.com/.extraHeader=Authorization: Basic $(printf 'x-access-token:%s' "$GIT_AUTH_TOKEN" | base64 | tr -d '\\n')"`,
+    // An empty value sends no header: a public repository has no token.
+    'auth="http.https://github.com/.extraHeader="',
+    `if [ -n "$GIT_AUTH_TOKEN" ]; then auth="http.https://github.com/.extraHeader=Authorization: Basic $(printf 'x-access-token:%s' "$GIT_AUTH_TOKEN" | base64 | tr -d '\\n')"; fi`,
     // Only git needs the token: nothing started later, Railpack included, inherits it.
     'unset GIT_AUTH_TOKEN',
     'git init -q src',

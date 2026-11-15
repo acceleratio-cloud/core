@@ -597,7 +597,10 @@ export const EditDockerWorkloadConfig = () => {
                       />
                     </div>
                   </InlineRow>
-                  <AutoDeployRow branch={source.branch} />
+                  {/* A public repository without an App sends no pushes. */}
+                  {source.github_app_id ? (
+                    <AutoDeployRow branch={source.branch} />
+                  ) : null}
                 </>
               ) : (
                 <>

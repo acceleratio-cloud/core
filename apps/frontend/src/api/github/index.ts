@@ -33,9 +33,19 @@ export const githubApi = {
     );
     return data;
   },
-  branches: async (id: string, repository: string) => {
+  /** Without an App id, the branches of a public repository. */
+  branches: async (id: string | undefined, repository: string) => {
     const { data } = await api.get<string[]>(
-      `/integrations/github/apps/${id}/branches`,
+      id
+        ? `/integrations/github/apps/${id}/branches`
+        : '/integrations/github/public/branches',
+      { params: { repository } },
+    );
+    return data;
+  },
+  publicRepository: async (repository: string) => {
+    const { data } = await api.get<Omit<GithubRepository, 'installation_id'>>(
+      '/integrations/github/public/repository',
       { params: { repository } },
     );
     return data;

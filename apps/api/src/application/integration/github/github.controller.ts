@@ -116,6 +116,20 @@ export class GithubController {
     return this.github.branches(id, repository ?? '');
   }
 
+  @Get('public/repository')
+  publicRepository(
+    @Query('repository') repository: string | undefined,
+  ): Promise<Omit<GithubRepository, 'installation_id'>> {
+    return this.github.publicRepository(repository ?? '');
+  }
+
+  @Get('public/branches')
+  publicBranches(
+    @Query('repository') repository: string | undefined,
+  ): Promise<string[]> {
+    return this.github.branches(undefined, repository ?? '');
+  }
+
   @Delete('apps/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
   remove(@Param('id', ParseUUIDPipe) id: string): Promise<void> {

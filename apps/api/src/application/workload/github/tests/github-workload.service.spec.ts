@@ -142,6 +142,102 @@ describe('GithubWorkloadService config', () => {
     );
   });
 
+  it('keeps a public source without an App', () => {
+    const { internals } = build();
+    const config = internals.normalizeConfig({ ...source, github_app_id: '' });
+
+    expect(config).toEqual({ repository: 'acme/api', branch: 'main' });
+    expect(config).not.toHaveProperty('github_app_id');
+  });
+
+  it('creates a public service from the repository GitHub names', async () => {
+    const publicRepository = jest
+      .fn()
+      .mockResolvedValue({ full_name: 'Acme/API', default_branch: 'trunk' });
+    const publicBranchExists = jest.fn().mockResolvedValue(true);
+    const branches = jest.fn();
+    const { service } = build({
+      publicRepository,
+      publicBranchExists,
+      branches,
+    });
+    const create = jest
+      .spyOn(DockerWorkloadService.prototype, 'create')
+      .mockResolvedValue({ id: 'w1' } as never);
+
+    await service.create('p1', {
+      name: 'site',
+      type: 'github',
+      config: { repository: 'acme/api' } as never,
+    });
+
+    expect(publicRepository).toHaveBeenCalledWith('acme/api');
+    // One request for the branch, not a listing of all of them.
+    expect(publicBranchExists).toHaveBeenCalledWith('Acme/API', 'trunk');
+    expect(branches).not.toHaveBeenCalled();
+    const config = create.mock.calls[0][1].config as Record<string, unknown>;
+    expect(config).toMatchObject({ repository: 'Acme/API', branch: 'trunk' });
+    expect(config.github_app_id).toBeUndefined();
+  });
+
+  it('keeps a public service without an App on update', async () => {
+    const { service, internals } = build();
+    const update = jest
+      .spyOn(DockerWorkloadService.prototype, 'update')
+      .mockResolvedValue({ id: 'w1' } as never);
+
+    internals.findRow = jest.fn().mockResolvedValue({
+      id: 'w1',
+      draft_config: { repository: 'acme/api', branch: 'main' },
+    });
+
+    await service.update('p1', 'w1', {
+      config: { ...source, github_app_id: 'other' },
+    });
+
+    expect(update.mock.calls[0][2].config).toMatchObject({
+      repository: 'acme/api',
+      branch: 'main',
+    });
+    expect(
+      (update.mock.calls[0][2].config as Record<string, unknown>).github_app_id,
+    ).toBeUndefined();
+  });
+
+  it('refuses a public branch GitHub does not have', async () => {
+    const { service } = build({
+      publicRepository: jest
+        .fn()
+        .mockResolvedValue({ full_name: 'acme/api', default_branch: 'main' }),
+      publicBranchExists: jest.fn().mockResolvedValue(false),
+    });
+    const create = jest.spyOn(DockerWorkloadService.prototype, 'create');
+
+    await expect(
+      service.create('p1', {
+        name: 'site',
+        type: 'github',
+        config: { repository: 'acme/api', branch: 'gone' },
+      }),
+    ).rejects.toThrow('Branch gone does not exist in acme/api');
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('refuses deploy on push for a public service', async () => {
+    const { service, internals } = build();
+    const update = jest.spyOn(DockerWorkloadService.prototype, 'update');
+
+    internals.findRow = jest.fn().mockResolvedValue({
+      id: 'w1',
+      draft_config: { repository: 'acme/api', branch: 'main' },
+    });
+
+    await expect(
+      service.update('p1', 'w1', { auto_deploy: true }),
+    ).rejects.toThrow('deploys only by hand');
+    expect(update).not.toHaveBeenCalled();
+  });
+
   it('ignores a requested source, image or commit on update', async () => {
     const { service, internals } = build();
     const update = jest
@@ -432,6 +528,9 @@ describe('build manifests', () => {
       '-c "$auth" submodule update -q --init --recursive',
     );
     expect(script).not.toMatch(/https:\/\/[^"\s]*\$GIT_AUTH_TOKEN/);
+    // A public repository has no token: git then sends no header at all.
+    expect(script).toContain('auth="http.https://github.com/.extraHeader="');
+    expect(script).toContain('if [ -n "$GIT_AUTH_TOKEN" ]; then auth=');
     expect(script).toContain('rm -rf src/.git');
     expect(script.indexOf('unset GIT_AUTH_TOKEN')).toBeLessThan(
       script.indexOf('git init'),

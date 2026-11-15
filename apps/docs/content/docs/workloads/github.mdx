@@ -1,20 +1,46 @@
 ---
 title: GitHub services
-description: Build and deploy a repository branch.
+description: Build and deploy a branch of a public or private repository.
 ---
 
-A GitHub service follows one branch of a repository. Deploy builds the
-branch's latest commit and runs it like a [Docker service](/workloads/docker),
-with the same environment variables, volumes, domains, versions and logs.
-
-Connect GitHub first in **Settings → Integrations**
-(see [GitHub integration](/settings/github)).
+A GitHub service follows one branch of a public or private repository on
+github.com. Deploy builds the branch's latest commit and runs it like a
+[Docker service](/workloads/docker), with the same environment variables,
+volumes, domains, versions and logs.
 
 ## Create a service
 
-Pick a repository the GitHub App is installed on, then a branch. The branch
-can be changed later in the service's settings; the next deploy builds the new
-branch's latest commit.
+Choose **Create service → GitHub**, then **Private repository** or **Public
+repository** at the top of the dialog. Both continue the same way: pick a
+branch, name the service and create it.
+
+### Private repository
+
+A repository a GitHub App is installed on. Connect GitHub first in
+**Settings → Integrations** (see [GitHub integration](/settings/github)), then
+pick the repository.
+
+### Public repository
+
+Any public repository on github.com, with no GitHub App. Enter it as:
+
+- `owner/name`
+- its address, such as `https://github.com/owner/name`, or the address of one
+  of its pages, such as `https://github.com/owner/name/tree/dev`
+- its clone address, `https://github.com/owner/name.git` or
+  `git@github.com:owner/name.git`
+
+Once the repository is found, its branches load with the default branch
+picked. A moved or renamed repository is saved under its current name. A
+private repository is refused here: add it on the **Private repository** tab.
+
+A service from a public repository deploys only by hand: pushes reach the
+platform through a GitHub App (see [Deploy on push](#deploy-on-push)).
+
+### After creation
+
+The repository is fixed. The branch can be changed in the service's
+**Configuration**; the next deploy builds the new branch's latest commit.
 
 ## How it builds
 
@@ -53,7 +79,8 @@ the current commands, skips the build.
 
 ## Deploy on push
 
-A push to the branch deploys a service that was deployed before. Turn off
+A push to the branch deploys a service that was deployed before. It needs the
+GitHub App: a public repository added without one deploys by hand. Turn off
 **Deploy on push** in the service's settings to deploy only by hand. A push
 during a build cancels that build.
 

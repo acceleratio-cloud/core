@@ -36,6 +36,17 @@ import {
   type GithubInstallationRow,
 } from './schemas/github-installation.schema';
 
+/** `owner/name` as GitHub allows it; `.` and `..` would change the API path. */
+const PUBLIC_NAME = /^[A-Za-z0-9-]+\/(?!\.\.?$)[A-Za-z0-9._-]+$/;
+
+/** A repository name typed by a user, safe to put in a GitHub API path. */
+export const publicName = (repository: string): string => {
+  if (!PUBLIC_NAME.test(repository)) {
+    throw new BadRequestException('Enter a repository as owner/name');
+  }
+  return repository;
+};
+
 export const INVALID_STATE_MESSAGE =
   'The request expired or was not started from this console. Start again.';
 export const INVALID_RETURN_URL_MESSAGE = 'Unrecognized console address';
@@ -234,15 +245,58 @@ export class GithubService {
     return groups.flat();
   }
 
+  /** A public repository, read without a GitHub App. */
+  async publicRepository(
+    repository: string,
+  ): Promise<Omit<GithubRepository, 'installation_id'>> {
+    try {
+      const found = await this.github.publicRepository(publicName(repository));
+      return {
+        id: found.id,
+        full_name: found.full_name,
+        private: found.private,
+        default_branch: found.default_branch,
+      };
+    } catch (error) {
+      if ((error as Error).cause === 404) {
+        throw new BadRequestException(
+          `No public repository ${repository} on GitHub. Use the Private tab for a private one.`,
+        );
+      }
+      throw error;
+    }
+  }
+
   /**
    * What a build needs: the branch's head commit and a token that can only
-   * read this repository.
+   * read this repository. Without an App the repository is public and the
+   * token is empty.
    */
   async checkout(
-    id: string,
+    id: string | undefined,
     repository: string,
     branch: string,
   ): Promise<{ token: string; sha: string; message: string }> {
+    if (!id) {
+      try {
+        return {
+          token: '',
+          ...(await this.github.branchHead(
+            undefined,
+            publicName(repository),
+            branch,
+          )),
+        };
+      } catch (error) {
+        if ((error as Error).cause === 404) {
+          throw new BadRequestException(
+            `GitHub has no public branch ${branch} in ${repository}. The repository may have been made private or deleted.`,
+          );
+        }
+        throw error;
+      }
+    }
+
     const found = await this.requireRepository(id, repository);
     const app = await this.requireApp(id);
     const token = await this.github.repositoryReadToken(
@@ -255,8 +309,20 @@ export class GithubService {
     return { token, ...head };
   }
 
-  /** Branch names of a repository the App can reach. */
-  async branches(id: string, repository: string): Promise<string[]> {
+  /** Whether a public repository has a branch, in one request. */
+  publicBranchExists(repository: string, branch: string): Promise<boolean> {
+    return this.github.hasBranch(undefined, publicName(repository), branch);
+  }
+
+  /** Branch names of a repository the App can reach, or of a public one. */
+  async branches(
+    id: string | undefined,
+    repository: string,
+  ): Promise<string[]> {
+    if (!id) {
+      return this.github.listBranches(undefined, publicName(repository));
+    }
+
     const found = await this.requireRepository(id, repository);
     const app = await this.requireApp(id);
     const token = await this.github.installationToken(

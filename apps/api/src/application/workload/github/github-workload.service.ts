@@ -288,7 +288,10 @@ export class GithubWorkloadService extends DockerWorkloadService {
     return this.withBuild(item, latest.get(id));
   }
 
-  /** The repository must be reachable through the chosen App's installations. */
+  /**
+   * The repository must be reachable through the chosen App's installations;
+   * without an App it must be public.
+   */
   override async create(
     projectId: string,
     payload: CreateWorkloadPayload,
@@ -301,13 +304,15 @@ export class GithubWorkloadService extends DockerWorkloadService {
     const appId = text(input?.github_app_id);
     const repository = text(input?.repository);
 
-    if (!appId || !repository) {
-      throw new BadRequestException('Choose a GitHub App and a repository');
+    if (!repository) {
+      throw new BadRequestException('Choose a repository');
     }
 
-    const found = (await this.github.repositories(appId)).find(
-      (item) => item.full_name === repository,
-    );
+    const found = appId
+      ? (await this.github.repositories(appId)).find(
+          (item) => item.full_name === repository,
+        )
+      : await this.github.publicRepository(repository);
 
     if (!found) {
       throw new BadRequestException(
@@ -317,7 +322,7 @@ export class GithubWorkloadService extends DockerWorkloadService {
 
     const branch = text(input?.branch) || found.default_branch;
 
-    await this.requireBranch(appId, found.full_name, branch);
+    await this.requireBranch(appId || undefined, found.full_name, branch);
 
     return super.create(projectId, {
       ...payload,
@@ -327,7 +332,7 @@ export class GithubWorkloadService extends DockerWorkloadService {
         docker_image: undefined,
         commit_sha: undefined,
         built_commands: undefined,
-        github_app_id: appId,
+        github_app_id: appId || undefined,
         repository: found.full_name,
         branch,
       },
@@ -344,10 +349,19 @@ export class GithubWorkloadService extends DockerWorkloadService {
     payload: UpdateWorkloadPayload,
   ): Promise<Workload> {
     const row = await this.findRow(projectId, id);
+    const current =
+      row.draft_config ?? (await this.activeVersion(row))?.config ?? null;
+    const source = sourceOf(current);
 
     if (payload?.auto_deploy !== undefined) {
       if (typeof payload.auto_deploy !== 'boolean') {
         throw new BadRequestException('auto_deploy must be true or false');
+      }
+
+      if (!source.github_app_id) {
+        throw new BadRequestException(
+          'A public repository without a GitHub App deploys only by hand',
+        );
       }
 
       await this.db
@@ -360,16 +374,13 @@ export class GithubWorkloadService extends DockerWorkloadService {
       return this.withLatest(await super.update(projectId, id, payload));
     }
 
-    const current =
-      row.draft_config ?? (await this.activeVersion(row))?.config ?? null;
-    const source = sourceOf(current);
     const branch = text(
       (payload.config as Partial<GithubWorkloadConfig>).branch,
     );
 
     if (branch && branch !== source.branch) {
       await this.requireBranch(
-        source.github_app_id!,
+        source.github_app_id,
         source.repository!,
         branch,
       );
@@ -381,6 +392,8 @@ export class GithubWorkloadService extends DockerWorkloadService {
         ...payload,
         config: {
           ...payload.config,
+          // A public service stays without an App.
+          github_app_id: undefined,
           docker_image: undefined,
           commit_sha: undefined,
           built_commands: undefined,
@@ -585,14 +598,16 @@ export class GithubWorkloadService extends DockerWorkloadService {
     config: WorkloadConfig | undefined,
   ): DockerWorkloadConfig {
     const input = config as Partial<GithubWorkloadConfig> | undefined;
+    const appId = text(input?.github_app_id);
     const source = {
-      github_app_id: text(input?.github_app_id),
+      // Absent for a public repository, read without an App.
+      ...(appId ? { github_app_id: appId } : {}),
       repository: text(input?.repository),
       branch: text(input?.branch),
     };
 
-    if (!source.github_app_id || !source.repository || !source.branch) {
-      throw new BadRequestException('Choose a GitHub App and a repository');
+    if (!source.repository || !source.branch) {
+      throw new BadRequestException('Choose a repository and a branch');
     }
 
     const image = text(input?.docker_image);
@@ -627,11 +642,17 @@ export class GithubWorkloadService extends DockerWorkloadService {
   }
 
   private async requireBranch(
-    appId: string,
+    appId: string | undefined,
     repository: string,
     branch: string,
   ): Promise<void> {
-    if (!(await this.github.branches(appId, repository)).includes(branch)) {
+    // A public repository is checked in one request: it shares GitHub's
+    // unauthenticated limit of 60 an hour per server address.
+    const exists = appId
+      ? (await this.github.branches(appId, repository)).includes(branch)
+      : await this.github.publicBranchExists(repository, branch);
+
+    if (!exists) {
       throw new BadRequestException(
         `Branch ${branch} does not exist in ${repository}`,
       );

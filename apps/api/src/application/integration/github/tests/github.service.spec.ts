@@ -1,7 +1,7 @@
 import { createHmac, randomBytes } from 'node:crypto';
-import { BadRequestException } from '@nestjs/common';
+import { BadGatewayException, BadRequestException } from '@nestjs/common';
 import { signState } from '@/common/secret-box';
-import { GithubService } from '../github.service';
+import { GithubService, publicName } from '../github.service';
 import { verifyWebhookSignature } from '../github-webhook';
 
 // The real SystemService pulls in the ESM-only Kubernetes client.
@@ -149,5 +149,90 @@ describe('GithubService', () => {
         state,
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+});
+
+describe('public repositories', () => {
+  const withClient = (client: Record<string, jest.Mock>) =>
+    new GithubService({} as never, client as never, {} as never);
+
+  it('takes owner/name only, never a path that leaves the repository', () => {
+    expect(publicName('acme/api.js')).toBe('acme/api.js');
+
+    for (const name of [
+      '',
+      'acme',
+      'acme/api/branches',
+      '../x',
+      'acme/..',
+      'acme/.',
+      'a b/c',
+      'acme/api?x=1',
+    ]) {
+      expect(() => publicName(name)).toThrow(BadRequestException);
+    }
+  });
+
+  it('points a missing or private repository at the Private tab', async () => {
+    const service = withClient({
+      publicRepository: jest
+        .fn()
+        .mockRejectedValue(
+          new BadGatewayException('GitHub returned 404', { cause: 404 }),
+        ),
+    });
+
+    await expect(service.publicRepository('acme/secret')).rejects.toThrow(
+      'No public repository acme/secret on GitHub',
+    );
+  });
+
+  it('passes other GitHub errors through, a rate limit included', async () => {
+    const limited = new BadGatewayException('GitHub returned 403', {
+      cause: 403,
+    });
+    const service = withClient({
+      publicRepository: jest.fn().mockRejectedValue(limited),
+    });
+
+    await expect(service.publicRepository('acme/api')).rejects.toBe(limited);
+  });
+
+  it('says so when a public branch is gone at deploy', async () => {
+    const service = withClient({
+      branchHead: jest
+        .fn()
+        .mockRejectedValue(
+          new BadGatewayException('GitHub returned 404', { cause: 404 }),
+        ),
+    });
+
+    await expect(
+      service.checkout(undefined, 'acme/api', 'main'),
+    ).rejects.toThrow('may have been made private or deleted');
+  });
+
+  it('checks a public branch in one request', async () => {
+    const hasBranch = jest.fn().mockResolvedValue(true);
+
+    await expect(
+      withClient({ hasBranch }).publicBranchExists('acme/api', 'feat/x'),
+    ).resolves.toBe(true);
+    expect(hasBranch).toHaveBeenCalledWith(undefined, 'acme/api', 'feat/x');
+  });
+
+  it('reads a public branch head and branches without a token', async () => {
+    const branchHead = jest.fn().mockResolvedValue({ sha: 'c1', message: 'm' });
+    const listBranches = jest.fn().mockResolvedValue(['main']);
+    const service = withClient({ branchHead, listBranches });
+
+    await expect(
+      service.checkout(undefined, 'acme/api', 'main'),
+    ).resolves.toEqual({ token: '', sha: 'c1', message: 'm' });
+    await expect(service.branches(undefined, 'acme/api')).resolves.toEqual([
+      'main',
+    ]);
+    expect(branchHead).toHaveBeenCalledWith(undefined, 'acme/api', 'main');
+    expect(listBranches).toHaveBeenCalledWith(undefined, 'acme/api');
   });
 });
