@@ -13,6 +13,11 @@ the service's **Configuration**, with:
 
 ![The Add volume dialog: mount path /data, 5 GiB, storage profile Platform default](/screenshots/add-volume.png)
 
+A new, empty volume is writable by every user, so images that run as a
+non-root user, such as n8n or Elasticsearch, can write to it. Once the app has
+written to it or changed its owner, its permissions are left as the app set
+them.
+
 Volumes are part of the service's configuration: they are created, moved to a
 new path and deleted by the next deploy. A rollback restores everything else
 and leaves volumes as they are.

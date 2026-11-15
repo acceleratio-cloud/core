@@ -54,12 +54,25 @@ Domain changes are the exception: they apply at once, without a deploy.
 
 A service can be **stopped**, **started** and **restarted** from its menu.
 
+## Service icon
+
+Click the icon next to a service's name on its page to change it. Pick a logo
+from the built-in set or paste an `https://` link to an image; **Use default**
+brings back the icon of the service's kind. The icon shows on the canvas card
+and the service page, and changing it does not redeploy.
+
 ## Project tabs
 
 | Tab | What it shows |
 | --- | --- |
-| Architecture | The services of the project on a canvas |
+| Architecture | The services of the project on a canvas, linked where they [talk to each other](/networking/traffic) |
 | Usage Metrics | CPU, memory, network, disk and database metrics. See [Logs and metrics](/workloads/logs-and-metrics) |
 | Logs | The output of every service in one list |
 | Audit Trail | Who changed what in the project, from where, and how it ended |
 | Settings | The project's own settings |
+
+## Quick search
+
+Press <kbd>⌘K</kbd> (<kbd>Ctrl K</kbd> on Windows and Linux), or click the
+search in the header, to jump to any console page, settings section or
+project.
