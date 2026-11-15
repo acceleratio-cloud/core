@@ -577,8 +577,13 @@ SSH, with the scripts and requirement checks in `node-join-script.ts`. SSH goes 
   refuse while the drain plan lists `delete_blockers` (last control plane, data only on this node).
 - A service's `node_selector` (`DockerWorkloadConfig`) is validated by `normalizeNodeSelector` and
   rendered as the pod `nodeSelector`.
-- Frontend: `modules/servers/` has the server list (`ServersView`), the row actions
-  (`ServerActions`) and one dialog per action. `useNodeOperation` polls an operation until it ends.
+- Frontend: `modules/servers/` has the server table, the row actions (`ServerActions`) and one
+  dialog per action. `useNodeOperation` polls an operation until it ends.
+- `/cluster` (`modules/cluster/containers/cluster-view.tsx`) is the cluster page: capacity
+  (`GET /cluster/capacity`: allocatable CPU and memory minus cAdvisor root-cgroup usage from
+  VictoriaMetrics, memory as RSS so file cache is not counted, and Longhorn disk size and free
+  space, or the servers' disk sizes without Longhorn; unreadable values are null), system status
+  (`SystemStatusList`), the servers and the storage profiles. `modules/cluster/` also holds the storage profile and benchmark files.
 
 ## Storage classes
 
@@ -610,9 +615,9 @@ SSH, with the scripts and requirement checks in `node-join-script.ts`. SSH goes 
   cluster context and the previous successful run of the profile). Each test runs as its own fio
   invocation between `---TEST-START`/`---TEST-END` markers, with 1 s averaged bandwidth, IOPS and
   latency logs, so every poll of a running Job records finished tests and the running one. The
-  console shows the report at `/settings/storage/benchmarks/[id]` with hand-rolled SVG charts (one
-  series, one axis, crosshair, keyboard and a per-second table); `/settings?tab=storage` opens
-  the Storage tab. The API polls the Job every 5 s, resumes active runs on bootstrap,
+  console shows the report at `/cluster/storage/benchmarks/[id]` with hand-rolled SVG charts (one
+  series, one axis, crosshair, keyboard and a per-second table); profiles are listed on
+  `/cluster`. The API polls the Job every 5 s, resumes active runs on bootstrap,
   parses fio's JSON from the pod log and then deletes the Job and claim, switching the volume to
   `Delete` first so `Retain` profiles leave no data. Write tests are bounded by bytes so a run
   fits its 2 GiB claim on any driver.

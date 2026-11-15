@@ -1,8 +1,8 @@
-import { BenchmarkReportView } from '@/modules/settings/containers/benchmark-report-view';
+import { BenchmarkReportView } from '@/modules/cluster/containers/benchmark-report-view';
 
 export default async function BenchmarkReportPage({
   params,
-}: PageProps<'/settings/storage/benchmarks/[id]'>) {
+}: PageProps<'/cluster/storage/benchmarks/[id]'>) {
   const { id } = await params;
 
   return (

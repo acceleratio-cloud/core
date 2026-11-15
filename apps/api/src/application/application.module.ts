@@ -13,7 +13,10 @@ import { MarketplaceDeployService } from '@/application/marketplace/marketplace-
 import { MarketplaceService } from '@/application/marketplace/marketplace.service';
 import { LogsController } from '@/application/logs/logs.controller';
 import { LogsService } from '@/application/logs/logs.service';
-import { MetricsController } from '@/application/metrics/metrics.controller';
+import {
+  ClusterMetricsController,
+  MetricsController,
+} from '@/application/metrics/metrics.controller';
 import { MetricsService } from '@/application/metrics/metrics.service';
 import { NodeController } from '@/application/node/node.controller';
 import { NodeService } from '@/application/node/node.service';
@@ -81,6 +84,7 @@ import { VictoriaMetricsClient } from '@/vendor/victoriametrics/victoriametrics.
   controllers: [
     AuditLogController,
     AuthController,
+    ClusterMetricsController,
     GithubController,
     HealthController,
     MarketplaceController,

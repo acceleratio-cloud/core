@@ -67,6 +67,23 @@ export interface ClusterCapacity {
   memory_bytes: number;
 }
 
+/** A cluster-wide resource; null where it cannot be read. */
+export interface ClusterResourceCapacity {
+  total: number | null;
+  available: number | null;
+}
+
+/**
+ * Capacity of the whole cluster. CPU and memory: allocatable minus live
+ * usage. Storage: Longhorn disks, or the servers' disks without Longhorn
+ * (then nothing reports free space).
+ */
+export interface ClusterCapacityOverview {
+  cpu_cores: ClusterResourceCapacity;
+  memory_bytes: ClusterResourceCapacity;
+  storage_bytes: ClusterResourceCapacity & { source: "longhorn" | "node" };
+}
+
 /**
  * PostgreSQL databases of the project, from their CloudNativePG exporter:
  * one series per database. Empty lists when the project has none.

@@ -1,8 +1,7 @@
 import type { LucideIcon } from 'lucide-react';
-import { HardDrive, Plug, SlidersHorizontal, UserRound } from 'lucide-react';
+import { Plug, SlidersHorizontal, UserRound } from 'lucide-react';
 
-export type SettingsSectionId =
-  'system' | 'storage' | 'integrations' | 'profile';
+export type SettingsSectionId = 'system' | 'integrations' | 'profile';
 
 export type SettingsNavItem = {
   id: SettingsSectionId;
@@ -17,7 +16,6 @@ export const SETTINGS_TAB_PARAM = 'tab';
 
 export const SETTINGS_SECTIONS: SettingsNavItem[] = [
   { id: 'system', label: 'System', icon: SlidersHorizontal },
-  { id: 'storage', label: 'Storage', icon: HardDrive },
   { id: 'integrations', label: 'Integrations', icon: Plug },
   { id: 'profile', label: 'Profile', icon: UserRound },
 ];

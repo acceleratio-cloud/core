@@ -3,11 +3,49 @@ title: Servers
 description: The servers of your cluster.
 ---
 
-The installer starts a cluster of one server. The console's **Servers** page
-lists every server of the cluster and manages them: add servers, stop new work
-on one, move its work away and remove it.
+The installer starts a cluster of one server. The console's **Cluster** page
+shows the capacity of the cluster, the state of every platform component, the
+servers and the [storage profiles](/storage/storage-profiles). It manages the
+servers: add servers, stop new work on one, move its work away and remove it.
 
-![The Servers page with one control-plane server and its menu: Cordon, Drain, Labels and taints, Remove server](/screenshots/servers.png)
+![The Cluster page: CPU, memory and storage gauges and the system status of every platform component](/screenshots/cluster.png)
+
+## Capacity
+
+Three gauges show the whole cluster: the share in use, and how much is
+available of the total. Under 70% in use is **Healthy**, up to 90% **High**,
+above that **Critical**.
+
+| Gauge | Total | Available |
+| --- | --- | --- |
+| CPU | CPU of all servers that workloads can use | The total minus what runs now, averaged over 5 minutes |
+| Memory | Memory of all servers that workloads can use | The total minus the memory programs use. File cache, which the system frees on demand, counts as available |
+| Storage | The disks Longhorn keeps volumes on | Free space on those disks |
+
+CPU and memory use come from the platform's metrics. While metrics are
+unavailable, the gauges show the total only. On a cluster without Longhorn,
+storage shows the size of the servers' disks without free space.
+
+## System status
+
+**System status** lists every platform component with its state and how many
+of its pods are ready (servers, for the cluster itself). It refreshes every 30
+seconds. The same list opens from the status button in the console's header.
+
+| State | Meaning |
+| --- | --- |
+| Operational | Every pod is ready |
+| Degraded | Some pods are not ready |
+| Down | No pod is ready, or the component has none |
+| Unknown | The cluster could not be read |
+
+## Servers
+
+The server list shows each server's role, address, CPU, memory and disk, and
+its running pods. Its menu holds **Cordon**, **Drain**, **Labels and taints**
+and **Remove server** ([drain and remove](/servers/drain-and-remove)).
+
+![The server list with one control-plane server and its menu: Cordon, Drain, Labels and taints, Remove server](/screenshots/servers.png)
 
 ## Roles
 

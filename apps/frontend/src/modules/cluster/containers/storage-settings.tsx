@@ -9,7 +9,7 @@ import { getApiErrorMessage } from '@/api';
 import { storageClassesApi } from '@/api/storage-classes';
 import { Button } from '@/shared/components/ui/button';
 import { Skeleton } from '@/shared/components/ui/skeleton';
-import { SettingsSection } from '../components/settings-section';
+import { SettingsSection } from '@/modules/settings/components/settings-section';
 import { StorageClassRow } from '../components/storage-class-row';
 import {
   toCreatePayload,

@@ -21,7 +21,6 @@ import {
 import { Button, buttonVariants } from '@/shared/components/ui/button';
 import { Skeleton } from '@/shared/components/ui/skeleton';
 import { BenchmarkTestCard } from '../components/benchmark-test-card';
-import { settingsSectionHref } from '../sections';
 import {
   formatLatency,
   stepLabel,
@@ -36,7 +35,7 @@ import {
 } from '../utils/storage-class-form';
 
 const POLL_MS = 4000;
-export const STORAGE_SETTINGS_HREF = settingsSectionHref('storage');
+const CLUSTER_HREF = '/cluster';
 
 const isActive = (report: StorageBenchmarkReport) =>
   report.status === 'pending' || report.status === 'running';
@@ -155,7 +154,7 @@ export const BenchmarkReportView = ({ id }: { id: string }) => {
         report.storage_class_id,
       );
 
-      router.push(`/settings/storage/benchmarks/${next.id}`);
+      router.push(`/cluster/storage/benchmarks/${next.id}`);
     } catch (startError) {
       sileo.error({
         title: 'Could not start the benchmark',
@@ -168,7 +167,7 @@ export const BenchmarkReportView = ({ id }: { id: string }) => {
 
   const back = (
     <Link
-      href={STORAGE_SETTINGS_HREF}
+      href={CLUSTER_HREF}
       className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }), '-ml-2')}
     >
       <ArrowLeft
@@ -176,7 +175,7 @@ export const BenchmarkReportView = ({ id }: { id: string }) => {
         strokeWidth={1.75}
         data-icon="inline-start"
       />
-      Storage settings
+      Cluster
     </Link>
   );
 
@@ -366,7 +365,7 @@ export const BenchmarkReportView = ({ id }: { id: string }) => {
                 {' '}
                 Compared with the run{' '}
                 <Link
-                  href={`/settings/storage/benchmarks/${previous.id}`}
+                  href={`/cluster/storage/benchmarks/${previous.id}`}
                   className="text-brand-fg underline-offset-4 hover:underline"
                 >
                   {formatRelativeTime(previous.created_at)}

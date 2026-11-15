@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import {
   METRICS_RANGES,
+  type ClusterCapacityOverview,
   type ProjectMetrics,
   type VolumeUsage,
 } from '@acceleratio/shared';
@@ -39,5 +40,15 @@ export class MetricsController {
     @Param('projectId', ParseUUIDPipe) projectId: string,
   ): Promise<VolumeUsage[]> {
     return this.metricsService.getVolumeUsage(projectId);
+  }
+}
+
+@Controller('cluster')
+export class ClusterMetricsController {
+  constructor(private readonly metricsService: MetricsService) {}
+
+  @Get('capacity')
+  capacity(): Promise<ClusterCapacityOverview> {
+    return this.metricsService.getClusterCapacity();
   }
 }

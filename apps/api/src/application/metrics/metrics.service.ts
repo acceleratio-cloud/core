@@ -8,6 +8,7 @@ import type { V1PersistentVolumeClaim, V1Pod } from '@kubernetes/client-node';
 import {
   OTHER_METRICS_SERIES_KEY,
   type ClusterCapacity,
+  type ClusterCapacityOverview,
   type MetricsRange,
   type ProjectMetrics,
   type ProjectMetricsSummary,
@@ -28,6 +29,7 @@ import {
 } from '@/application/workload/postgres/postgres.manifests';
 import { getKubernetesStatusCode } from '@/vendor/kubernetes/kubernetes-error';
 import { KubernetesService } from '@/vendor/kubernetes/kubernetes.service';
+import { listLonghorn, type LonghornNode } from '@/vendor/kubernetes/longhorn';
 import { isActivePod, listNamespacePods } from '@/vendor/kubernetes/pods';
 import {
   type PromSeries,
@@ -35,6 +37,7 @@ import {
   VictoriaMetricsUnavailableError,
 } from '@/vendor/victoriametrics/victoriametrics.client';
 import {
+  clusterUsageQueries,
   createPodResolver,
   foldSignal,
   lastValue,
@@ -375,6 +378,84 @@ export class MetricsService {
       >;
     } catch (error) {
       throw this.unavailable(error);
+    }
+  }
+
+  /**
+   * Total and available CPU, memory and storage of the cluster. A source that
+   * cannot be read leaves its values null instead of failing the request.
+   */
+  async getClusterCapacity(): Promise<ClusterCapacityOverview> {
+    const now = Math.floor(Date.now() / 1000);
+    const usage = (promql: string) =>
+      this.victoriaMetrics.query(promql, now).then(scalarValue, (error) => {
+        this.logger.warn(
+          `Failed to read cluster usage: ${(error as Error).message}`,
+        );
+        return null;
+      });
+
+    const [capacity, cpuUsed, memoryUsed, storage] = await Promise.all([
+      this.clusterCapacity(),
+      usage(clusterUsageQueries.cpu_cores),
+      usage(clusterUsageQueries.memory_bytes),
+      this.clusterStorage(),
+    ]);
+
+    const resource = (total: number | null, used: number | null) => ({
+      total,
+      available:
+        total === null || used === null ? null : Math.max(total - used, 0),
+    });
+
+    return {
+      cpu_cores: resource(capacity?.cpu_cores ?? null, cpuUsed),
+      memory_bytes: resource(capacity?.memory_bytes ?? null, memoryUsed),
+      storage_bytes: storage,
+    };
+  }
+
+  /** Longhorn disks, or the servers' own disks without Longhorn. */
+  private async clusterStorage(): Promise<
+    ClusterCapacityOverview['storage_bytes']
+  > {
+    const longhorn = await listLonghorn<LonghornNode>(this.kubernetes, 'nodes');
+
+    if (longhorn) {
+      let total = 0;
+      let available = 0;
+
+      for (const node of longhorn) {
+        for (const disk of Object.values(node.status?.diskStatus ?? {})) {
+          total += disk?.storageMaximum ?? 0;
+          available += disk?.storageAvailable ?? 0;
+        }
+      }
+
+      return { total, available, source: 'longhorn' };
+    }
+
+    // shortcut: without Longhorn (local-path, development) nothing reports
+    // free space, so only the servers' disk sizes are shown.
+    try {
+      const { items } = await this.kubernetes.coreV1.listNode();
+      const total = items.reduce(
+        (sum, node) =>
+          sum +
+          (parseQuantity(node.status?.capacity?.['ephemeral-storage']) ?? 0),
+        0,
+      );
+
+      return {
+        total: items.length > 0 ? total : null,
+        available: null,
+        source: 'node',
+      };
+    } catch (error) {
+      this.logger.warn(
+        `Failed to read node storage: ${(error as Error).message}`,
+      );
+      return { total: null, available: null, source: 'node' };
     }
   }
 

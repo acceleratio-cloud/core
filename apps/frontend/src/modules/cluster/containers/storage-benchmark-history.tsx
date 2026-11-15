@@ -14,7 +14,7 @@ import {
   SelectValue,
 } from '@/shared/components/ui/select';
 import { Skeleton } from '@/shared/components/ui/skeleton';
-import { SettingsSection } from '../components/settings-section';
+import { SettingsSection } from '@/modules/settings/components/settings-section';
 import { StorageBenchmarkTable } from '../components/storage-benchmark-table';
 
 type StorageBenchmarkHistoryProps = {

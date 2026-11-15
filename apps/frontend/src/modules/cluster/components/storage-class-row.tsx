@@ -53,7 +53,7 @@ const ReportLink = ({ id, label }: { id: string; label: string }) => (
   <>
     {' · '}
     <Link
-      href={`/settings/storage/benchmarks/${id}`}
+      href={`/cluster/storage/benchmarks/${id}`}
       className="text-brand-fg underline-offset-4 hover:underline"
     >
       {label}

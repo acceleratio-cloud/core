@@ -14,7 +14,7 @@ import { UserMenu } from './user-menu';
 const links: CommandPage[] = [
   { label: 'Overview', href: '/', icon: House },
   { label: 'Marketplace', href: '/marketplace', icon: Store },
-  { label: 'Servers', href: '/servers', icon: Server },
+  { label: 'Cluster', href: '/cluster', icon: Server },
   { label: 'Settings', href: '/settings', icon: Settings },
 ];
 

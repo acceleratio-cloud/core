@@ -168,6 +168,15 @@ export const volumeQueries = (namespace: string) => {
   } as const;
 };
 
+/**
+ * Whole-server usage summed over the cluster: cAdvisor's root cgroup. Memory
+ * is RSS, so file cache the kernel frees on demand does not count as used.
+ */
+export const clusterUsageQueries = {
+  cpu_cores: 'sum(rate(container_cpu_usage_seconds_total{id="/"}[5m]))',
+  memory_bytes: 'sum(container_memory_rss{id="/"})',
+} as const;
+
 export interface WorkloadRef {
   id: string;
   name: string;

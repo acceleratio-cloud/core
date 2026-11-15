@@ -72,6 +72,8 @@ const build = (
     pods?: unknown[];
     queryRange?: (promql: string) => Promise<PromSeries[]>;
     exists?: boolean;
+    longhornNodes?: unknown[] | null;
+    query?: (promql: string) => Promise<PromSeries[]>;
   } = {},
 ) => {
   const coreV1 = {
@@ -85,8 +87,22 @@ const build = (
       .fn()
       .mockResolvedValue({ items: [] }),
     listNode: jest.fn().mockResolvedValue({
-      items: [{ status: { allocatable: { cpu: '4', memory: '8Gi' } } }],
+      items: [
+        {
+          status: {
+            allocatable: { cpu: '4', memory: '8Gi' },
+            capacity: { 'ephemeral-storage': '100Gi' },
+          },
+        },
+      ],
     }),
+  };
+  const customObjects = {
+    listNamespacedCustomObject: jest.fn(() =>
+      overrides.longhornNodes === null || overrides.longhornNodes === undefined
+        ? Promise.reject(new Error('not found'))
+        : Promise.resolve({ items: overrides.longhornNodes }),
+    ),
   };
   const queryRange = jest.fn(
     overrides.queryRange ??
@@ -100,7 +116,9 @@ const build = (
             : [],
         )),
   );
-  const query = jest.fn().mockResolvedValue([]);
+  const query = jest.fn(
+    overrides.query ?? (() => Promise.resolve<PromSeries[]>([])),
+  );
   const service = new MetricsService(
     {
       exists: jest.fn().mockResolvedValue(overrides.exists ?? true),
@@ -108,7 +126,7 @@ const build = (
     {
       list: jest.fn().mockResolvedValue([workload('w-api', 'api')]),
     } as unknown as WorkloadService,
-    { coreV1 } as unknown as KubernetesService,
+    { coreV1, customObjects } as unknown as KubernetesService,
     { queryRange, query } as unknown as VictoriaMetricsClient,
   );
 
@@ -129,6 +147,58 @@ describe('postgresQueries', () => {
 });
 
 describe('MetricsService', () => {
+  describe('getClusterCapacity', () => {
+    const scalar = (value: string): PromSeries[] => [
+      { metric: {}, value: [60, value] },
+    ];
+
+    it('subtracts live usage and sums Longhorn disks', async () => {
+      const { service } = build({
+        longhornNodes: [
+          {
+            status: {
+              diskStatus: {
+                a: { storageMaximum: 100, storageAvailable: 40 },
+                b: { storageMaximum: 50, storageAvailable: 10 },
+              },
+            },
+          },
+          { status: {} },
+        ],
+        query: (promql) =>
+          Promise.resolve(
+            promql.includes('cpu')
+              ? scalar('1.5')
+              : scalar(String(9 * 1024 ** 3)),
+          ),
+      });
+
+      await expect(service.getClusterCapacity()).resolves.toEqual({
+        cpu_cores: { total: 4, available: 2.5 },
+        // Usage above allocatable reads as nothing left, never negative.
+        memory_bytes: { total: 8 * 1024 ** 3, available: 0 },
+        storage_bytes: { total: 150, available: 50, source: 'longhorn' },
+      });
+    });
+
+    it('keeps totals when metrics and Longhorn are unavailable', async () => {
+      const { service } = build({
+        query: () =>
+          Promise.reject(new VictoriaMetricsUnavailableError('down')),
+      });
+
+      await expect(service.getClusterCapacity()).resolves.toEqual({
+        cpu_cores: { total: 4, available: null },
+        memory_bytes: { total: 8 * 1024 ** 3, available: null },
+        storage_bytes: {
+          total: 100 * 1024 ** 3,
+          available: null,
+          source: 'node',
+        },
+      });
+    });
+  });
+
   it('reports usage per service volume and database disk, skipping claims without stats', async () => {
     const { service, coreV1, query } = build();
     const claim = (name: string, labels: Record<string, string> = {}) => ({

@@ -36,7 +36,7 @@ import {
   toNestException,
 } from '@/vendor/kubernetes/kubernetes-error';
 import { KubernetesService } from '@/vendor/kubernetes/kubernetes.service';
-import { listLonghorn } from '@/vendor/kubernetes/longhorn';
+import { listLonghorn, type LonghornNode } from '@/vendor/kubernetes/longhorn';
 import { workload } from '@/application/workload/schemas/workload.schema';
 import { workloadVersion } from '@/application/workload/schemas/workload-version.schema';
 import { toStorageBenchmark } from './benchmark/storage-benchmark.results';
@@ -65,10 +65,6 @@ import {
 
 export const DEFAULT_PLATFORM_STORAGE_CLASS_NAME = 'longhorn';
 
-interface LonghornNode {
-  spec?: { allowScheduling?: boolean };
-  status?: { conditions?: { type?: string; status?: string }[] };
-}
 export const PLATFORM_FORBIDDEN_MESSAGE =
   'The platform storage class is managed by the installer and cannot be changed';
 const NOT_FOUND_MESSAGE = 'Storage class not found';

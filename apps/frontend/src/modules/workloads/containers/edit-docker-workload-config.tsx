@@ -754,7 +754,7 @@ export const EditDockerWorkloadConfig = () => {
         {isSite ? null : (
           <DetailSection
             title="Placement"
-            description="Run the service only on servers with these labels. Set labels on the Servers page."
+            description="Run the service only on servers with these labels. Set labels on the Cluster page."
           >
             <div className="divide-y divide-edge-subtle">
               <SettingRow

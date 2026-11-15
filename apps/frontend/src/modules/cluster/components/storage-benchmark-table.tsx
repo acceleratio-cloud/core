@@ -211,7 +211,7 @@ export const StorageBenchmarkTable = ({ runs }: StorageBenchmarkTableProps) => {
                 </td>
                 <td className="py-2.5 whitespace-nowrap">
                   <Link
-                    href={`/settings/storage/benchmarks/${run.id}`}
+                    href={`/cluster/storage/benchmarks/${run.id}`}
                     aria-label={`Open the report of the ${run.storage_class_name} benchmark`}
                     className="text-brand-fg underline-offset-4 hover:underline"
                   >
