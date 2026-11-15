@@ -1,0 +1,18 @@
+---
+title: Traffic between services
+description: See which services of a project talk to each other.
+---
+
+The project canvas links services that exchanged traffic in the last hour.
+Each link points from the client (the service that opens the connections) to
+the server; when both services open connections to each other, dots travel
+both ways.
+
+![The Rocket.Chat project canvas: a link from rocketchat to mongodb with blue dots moving toward the database](/screenshots/traffic.png)
+
+- Blue dots move along a link while the services are talking; more dots mean
+  more connection activity. They show activity, not bandwidth.
+- A link with no dots has been quiet for the last minute.
+- Only TCP traffic between services of the same project is shown.
+
+The data comes from Cilium Hubble and refreshes every 15 seconds.

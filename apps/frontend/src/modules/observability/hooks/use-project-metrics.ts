@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useState } from 'react';
 
 import type { MetricsRange, ProjectMetrics } from '@acceleratio/shared';
 import {
@@ -9,9 +9,7 @@ import {
   isApiRequestCancelled,
 } from '@/api';
 import { metricsApi } from '@/api/metrics';
-
-/** Matches the scrape interval: a faster refresh would show the same data. */
-export const METRICS_REFRESH_MS = 15_000;
+import { usePolling } from './use-polling';
 
 export type MetricsError = {
   message: string;
@@ -42,79 +40,42 @@ export const useProjectMetrics = (
     isLoading: true,
     updatedAt: null,
   });
-  const controller = useRef<AbortController | null>(null);
+  const load = useCallback(
+    async (signal: AbortSignal) => {
+      setState((previous) => ({ ...previous, isLoading: true }));
 
-  const load = useCallback(async () => {
-    controller.current?.abort();
-    const current = new AbortController();
-    controller.current = current;
+      try {
+        const data = await metricsApi.get(projectId, range, signal);
 
-    setState((previous) => ({ ...previous, isLoading: true }));
-
-    try {
-      const data = await metricsApi.get(projectId, range, current.signal);
-
-      if (!current.signal.aborted) {
-        setState({
-          data,
-          error: null,
-          isLoading: false,
-          updatedAt: Date.now(),
-        });
-      }
-    } catch (error) {
-      if (current.signal.aborted || isApiRequestCancelled(error)) {
-        return;
-      }
-
-      setState((previous) => ({
-        ...previous,
-        isLoading: false,
-        error: {
-          message: getApiErrorMessage(error),
-          unavailable: getApiErrorStatus(error) === 503,
-        },
-      }));
-    }
-  }, [projectId, range]);
-
-  useEffect(() => {
-    if (!enabled) {
-      return;
-    }
-
-    let timer: number | null = null;
-
-    const schedule = () => {
-      timer = window.setInterval(() => {
-        if (document.visibilityState === 'visible') {
-          void load();
+        if (!signal.aborted) {
+          setState({
+            data,
+            error: null,
+            isLoading: false,
+            updatedAt: Date.now(),
+          });
         }
-      }, METRICS_REFRESH_MS);
-    };
+      } catch (error) {
+        if (signal.aborted || isApiRequestCancelled(error)) {
+          return;
+        }
 
-    const handleVisibility = () => {
-      if (document.visibilityState === 'visible') {
-        void load();
+        setState((previous) => ({
+          ...previous,
+          isLoading: false,
+          error: {
+            message: getApiErrorMessage(error),
+            unavailable: getApiErrorStatus(error) === 503,
+          },
+        }));
       }
-    };
-
-    void load();
-    schedule();
-    document.addEventListener('visibilitychange', handleVisibility);
-
-    return () => {
-      if (timer !== null) {
-        window.clearInterval(timer);
-      }
-
-      document.removeEventListener('visibilitychange', handleVisibility);
-      controller.current?.abort();
-    };
-  }, [enabled, load]);
+    },
+    [projectId, range],
+  );
+  const refresh = usePolling(load, enabled);
 
   // A new range must not show the previous range's series under its label.
   const data = state.data?.range === range ? state.data : null;
 
-  return { ...state, data, refresh: load };
+  return { ...state, data, refresh };
 };

@@ -1,7 +1,14 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import type { Edge, NodeMouseHandler, OnNodeDrag } from '@xyflow/react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
+import type { EdgeTypes, NodeMouseHandler, OnNodeDrag } from '@xyflow/react';
 import {
   Background,
   BackgroundVariant,
@@ -20,9 +27,13 @@ import { workloadNodeTypes } from '@/modules/workloads/components/workload-nodes
 import type { WorkloadNode } from '@/modules/workloads/utils/workload-nodes';
 import { toWorkloadNodes } from '@/modules/workloads/utils/workload-nodes';
 import { CanvasLoader } from '@/shared/components/canvas-loader';
+import { TrafficEdge } from '../components/traffic-edge';
+import { useProjectTraffic } from '../hooks/use-project-traffic';
 import { useProject } from '../providers/project-provider';
 
-const emptyEdges: Edge[] = [];
+const edgeTypes = { traffic: TrafficEdge } satisfies EdgeTypes;
+
+const formatRate = new Intl.NumberFormat('en', { maximumFractionDigits: 1 });
 
 /**
  * Geometry of the details panel (`WorkloadDetails`: `top-16 right-2
@@ -38,9 +49,21 @@ const CAMERA_DURATION_MS = 450;
 
 const easeOutCubic = (t: number) => 1 - (1 - t) ** 3;
 
-const prefersReducedMotion = () =>
-  typeof window !== 'undefined' &&
-  window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
+
+const subscribeReducedMotion = (onChange: () => void) => {
+  const query = window.matchMedia(REDUCED_MOTION);
+  query.addEventListener('change', onChange);
+  return () => query.removeEventListener('change', onChange);
+};
+
+/** Follows the reduced-motion preference for the camera and traffic dots. */
+const usePrefersReducedMotion = () =>
+  useSyncExternalStore(
+    subscribeReducedMotion,
+    () => window.matchMedia(REDUCED_MOTION).matches,
+    () => false,
+  );
 
 export const ProjectCanvas = () => {
   const { workloads, workloadsError } = useProject();
@@ -91,7 +114,9 @@ const WorkloadFlow = ({
   onSelectWorkload: (workloadId: string) => void;
   onClearSelection: () => void;
 }) => {
-  const { workloads, isLoadingWorkloads, moveWorkload } = useProject();
+  const { project, workloads, isLoadingWorkloads, moveWorkload } = useProject();
+  const traffic = useProjectTraffic(project.id);
+  const reducedMotion = usePrefersReducedMotion();
   const { setCenter, getZoom } = useReactFlow();
   const canvasWidth = useStore((state) => state.width);
   const canvasHeight = useStore((state) => state.height);
@@ -121,6 +146,33 @@ const WorkloadFlow = ({
       });
     });
   }, [workloads, selectedWorkloadId, setNodes]);
+
+  const edges = useMemo<TrafficEdge[]>(() => {
+    const names = new Map(workloads.map((w) => [w.id, w.name]));
+
+    return traffic.flatMap((link) => {
+      const from = names.get(link.source);
+      const to = names.get(link.target);
+
+      return from && to
+        ? [
+            {
+              id: `${link.source}->${link.target}`,
+              type: 'traffic' as const,
+              source: link.source,
+              target: link.target,
+              selectable: false,
+              data: {
+                flowsPerSecond: link.flows_per_second,
+                twoWay: link.two_way,
+                reducedMotion,
+                label: `${from} ${link.two_way ? '↔' : '→'} ${to} · ${formatRate.format(link.flows_per_second)} flows/s`,
+              },
+            },
+          ]
+        : [];
+    });
+  }, [traffic, workloads, reducedMotion]);
 
   const handleNodeDragStart = useCallback<OnNodeDrag<WorkloadNode>>(
     (_, node) => {
@@ -169,12 +221,19 @@ const WorkloadFlow = ({
         node.position.y + nodeHeight / 2 + (canvasHeight / 2 - targetY) / zoom,
         {
           zoom,
-          duration: prefersReducedMotion() ? 0 : CAMERA_DURATION_MS,
+          duration: reducedMotion ? 0 : CAMERA_DURATION_MS,
           ease: easeOutCubic,
         },
       );
     },
-    [onSelectWorkload, getZoom, setCenter, canvasWidth, canvasHeight],
+    [
+      onSelectWorkload,
+      getZoom,
+      setCenter,
+      canvasWidth,
+      canvasHeight,
+      reducedMotion,
+    ],
   );
 
   return (
@@ -183,8 +242,9 @@ const WorkloadFlow = ({
           node locally without deleting it on the server. */}
       <ReactFlow
         nodes={nodes}
-        edges={emptyEdges}
+        edges={edges}
         nodeTypes={workloadNodeTypes}
+        edgeTypes={edgeTypes}
         onNodesChange={onNodesChange}
         onNodeClick={handleNodeClick}
         onNodeDragStart={handleNodeDragStart}

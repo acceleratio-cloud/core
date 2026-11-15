@@ -1323,6 +1323,14 @@ cni:
   binPath: "${CILIUM_CNI_BIN_PATH}"
 operator:
   replicas: 1
+# Flow and TCP flag counters per workload pair for the project canvas.
+# VictoriaMetrics scrapes them through the annotated hubble-metrics Service.
+hubble:
+  enabled: true
+  metrics:
+    enabled:
+      - "flow:labelsContext=source_namespace,source_workload,destination_namespace,destination_workload"
+      - "tcp:labelsContext=source_namespace,source_workload,destination_namespace,destination_workload"
 EOF
 }
 

@@ -10,6 +10,7 @@ import {
   TriangleAlert,
   type LucideIcon,
 } from 'lucide-react';
+import { Handle, Position } from '@xyflow/react';
 
 import type {
   Workload,
@@ -42,18 +43,34 @@ export const NodeCard = ({
   selected?: boolean;
   children: ReactNode;
 }) => (
-  <div
-    className={cn(
-      'w-66 cursor-grab overflow-hidden rounded-xl border shadow-float',
-      'active:cursor-grabbing',
-      'outline-2 outline-offset-2 transition-[border-color,outline-color,background-color] duration-150 ease-out motion-reduce:transition-none',
-      selected
-        ? 'border-selection bg-selection-wash outline-selection/35'
-        : 'border-border bg-surface-raised outline-transparent hover:border-edge-strong',
-    )}
-  >
-    {children}
-  </div>
+  <>
+    {/* Traffic edges float to the card border; React Flow still needs an
+        anchor of each kind to render them. */}
+    <Handle
+      type="target"
+      position={Position.Top}
+      isConnectable={false}
+      className="pointer-events-none opacity-0"
+    />
+    <Handle
+      type="source"
+      position={Position.Bottom}
+      isConnectable={false}
+      className="pointer-events-none opacity-0"
+    />
+    <div
+      className={cn(
+        'w-66 cursor-grab overflow-hidden rounded-xl border shadow-float',
+        'active:cursor-grabbing',
+        'outline-2 outline-offset-2 transition-[border-color,outline-color,background-color] duration-150 ease-out motion-reduce:transition-none',
+        selected
+          ? 'border-selection bg-selection-wash outline-selection/35'
+          : 'border-border bg-surface-raised outline-transparent hover:border-edge-strong',
+      )}
+    >
+      {children}
+    </div>
+  </>
 );
 
 const METER_BARS = 5;

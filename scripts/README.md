@@ -149,8 +149,9 @@ log is also linked as `/var/log/acceleratio/install.log`.
    kube-proxy disabled.
 4. **Helm** — installs the pinned Helm binary.
 5. **Cilium** — installs Cilium with `kubeProxyReplacement: true` and the
-   CNI paths used by k3s 1.36 (`/etc/cni/net.d` and `/opt/cni/bin`), then waits
-   for the node and CoreDNS.
+   CNI paths used by k3s 1.36 (`/etc/cni/net.d` and `/opt/cni/bin`) and
+   Hubble flow and TCP metrics per workload pair (scraped by VictoriaMetrics
+   for the traffic on the project canvas), then waits for the node and CoreDNS.
 6. **Longhorn** — installs the chart (UI off, one replica of each controller,
    over-provisioning 300% because volumes are thin, drains move the last
    replica of a volume before the node goes) and waits for every node to be

@@ -74,6 +74,7 @@ const build = (
     exists?: boolean;
     longhornNodes?: unknown[] | null;
     query?: (promql: string) => Promise<PromSeries[]>;
+    workloads?: Workload[];
   } = {},
 ) => {
   const coreV1 = {
@@ -124,7 +125,9 @@ const build = (
       exists: jest.fn().mockResolvedValue(overrides.exists ?? true),
     } as unknown as ProjectService,
     {
-      list: jest.fn().mockResolvedValue([workload('w-api', 'api')]),
+      list: jest
+        .fn()
+        .mockResolvedValue(overrides.workloads ?? [workload('w-api', 'api')]),
     } as unknown as WorkloadService,
     { coreV1, customObjects } as unknown as KubernetesService,
     { queryRange, query } as unknown as VictoriaMetricsClient,
@@ -318,6 +321,58 @@ describe('MetricsService', () => {
 
     expect(metrics.summary.cpu_limit_cores).toBeNull();
     expect(metrics.workloads[0].memory_limit_bytes).toBeNull();
+  });
+
+  describe('getProjectTraffic', () => {
+    it("links the project's services from its Hubble series", async () => {
+      const series: PromSeries[] = [
+        {
+          metric: { source_workload: 'api', destination_workload: 'db' },
+          value: [0, '3'],
+        },
+      ];
+      const { service, query } = build({
+        workloads: [workload('w-api', 'api'), workload('w-db', 'db')],
+        query: () => Promise.resolve(series),
+      });
+
+      await expect(service.getProjectTraffic(projectId, 600)).resolves.toEqual({
+        edges: [
+          {
+            source: 'w-api',
+            target: 'w-db',
+            two_way: false,
+            flows_per_second: 3,
+          },
+        ],
+      });
+      expect(query).toHaveBeenCalledTimes(3);
+      expect(query).toHaveBeenCalledWith(
+        expect.stringContaining(`source_namespace="${namespace}"`),
+        600,
+      );
+    });
+
+    it('returns 404 for an unknown project', async () => {
+      const { service } = build({ exists: false });
+
+      await expect(service.getProjectTraffic(projectId)).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+    });
+
+    it('returns 503 when VictoriaMetrics is unreachable', async () => {
+      const { service } = build({
+        query: () =>
+          Promise.reject(
+            new VictoriaMetricsUnavailableError('connect refused'),
+          ),
+      });
+
+      await expect(service.getProjectTraffic(projectId)).rejects.toEqual(
+        new ServiceUnavailableException(METRICS_UNAVAILABLE_MESSAGE),
+      );
+    });
   });
 
   it('returns 404 for an unknown project', async () => {

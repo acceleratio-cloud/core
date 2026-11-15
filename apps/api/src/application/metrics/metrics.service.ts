@@ -12,6 +12,7 @@ import {
   type MetricsRange,
   type ProjectMetrics,
   type ProjectMetricsSummary,
+  type ProjectTraffic,
   type VolumeUsage,
   type Workload,
   type WorkloadMetrics,
@@ -40,6 +41,7 @@ import {
   clusterUsageQueries,
   createPodResolver,
   foldSignal,
+  foldTraffic,
   lastValue,
   lastValues,
   metricsWindow,
@@ -47,6 +49,7 @@ import {
   postgresQueries,
   projectQueries,
   scalarValue,
+  trafficQueries,
   valuesByLabel,
   volumeQueries,
   type WorkloadRef,
@@ -339,6 +342,28 @@ export class MetricsService {
           ]
         : [];
     });
+  }
+
+  /** Which services of the project talk to each other, and how busily. */
+  async getProjectTraffic(
+    projectId: string,
+    now = Math.floor(Date.now() / 1000),
+  ): Promise<ProjectTraffic> {
+    if (!(await this.projectService.exists(projectId))) {
+      throw new NotFoundException('Project not found');
+    }
+
+    const queries = trafficQueries(projectNamespace(projectId));
+    const [workloads, opened, recent, activity] = await Promise.all([
+      this.workloadService.list(projectId),
+      this.victoriaMetrics.query(queries.opened, now),
+      this.victoriaMetrics.query(queries.recent, now),
+      this.victoriaMetrics.query(queries.activity, now),
+    ]).catch((error: unknown) => {
+      throw this.unavailable(error);
+    });
+
+    return { edges: foldTraffic({ opened, recent, activity }, workloads) };
   }
 
   private async queryByClaim(promql: string, time: number) {

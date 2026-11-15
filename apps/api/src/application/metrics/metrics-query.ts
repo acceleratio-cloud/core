@@ -5,6 +5,7 @@ import {
   type MetricsRange,
   type MetricsSeries,
   type MetricsSignal,
+  type ServiceTrafficEdge,
 } from '@acceleratio/shared';
 import type { PromSeries } from '@/vendor/victoriametrics/victoriametrics.client';
 
@@ -288,6 +289,130 @@ export const foldSignal = (
   }
 
   return { total: toPoints(total), by_workload: byWorkload };
+};
+
+/**
+ * Instant PromQL for the Hubble counters between workloads of a namespace.
+ * `opened` counts SYNs since the Cilium agent started: a SYN goes from client
+ * to server, so it gives the direction of a link even when its connections
+ * were opened long ago. `recent` (last hour) decides which links exist and
+ * `activity` how busy they are now; both count forwarded packet traces in
+ * either direction (PolicyVerdict events only repeat a connection's first
+ * packet).
+ */
+export const trafficQueries = (namespace: string) => {
+  const ns = quote(namespace);
+  const within = `source_namespace=${ns},destination_namespace=${ns}`;
+  const byPair = 'sum by (source_workload, destination_workload)';
+  const flows = `hubble_flows_processed_total{${within},verdict="FORWARDED",type="Trace"}`;
+
+  return {
+    opened: `${byPair} (hubble_tcp_flags_total{${within},flag="SYN"})`,
+    recent: `${byPair} (increase(${flows}[1h]))`,
+    activity: `${byPair} (rate(${flows}[${INSTANCE_RATE_WINDOW}]))`,
+  } as const;
+};
+
+interface PairTraffic {
+  /** The two workload ids, in sorted order. */
+  ends: [string, string];
+  /** SYNs seen from ends[0] to ends[1], and the other way. */
+  opened: [boolean, boolean];
+  /** Flows in the last hour from ends[0] to ends[1], and the other way. */
+  recent: [number, number];
+  flowsPerSecond: number;
+}
+
+/**
+ * Folds Hubble pair series into one link per pair of the project's
+ * workloads that exchanged traffic in the last hour. Hubble names a
+ * workload after its Deployment or CNPG Cluster, which is the workload's
+ * `external_name`; pairs within one workload are left out. The link points
+ * from client to server, or is two-way when both sides open connections.
+ */
+export const foldTraffic = (
+  series: {
+    opened: PromSeries[];
+    recent: PromSeries[];
+    activity: PromSeries[];
+  },
+  workloads: WorkloadRef[],
+): ServiceTrafficEdge[] => {
+  const idOf = new Map(workloads.map((w) => [w.external_name, w.id]));
+  const pairs = new Map<string, PairTraffic>();
+
+  /** The pair of a series, its direction index and its value. */
+  const read = (item: PromSeries) => {
+    const source = idOf.get(item.metric.source_workload ?? '');
+    const target = idOf.get(item.metric.destination_workload ?? '');
+    const value = toNumber(item.value?.[1] ?? '') ?? 0;
+
+    if (!source || !target || source === target || value <= 0) {
+      return null;
+    }
+
+    const ends: [string, string] =
+      source < target ? [source, target] : [target, source];
+    const key = ends.join('>');
+    let pair = pairs.get(key);
+
+    if (!pair) {
+      pair = {
+        ends,
+        opened: [false, false],
+        recent: [0, 0],
+        flowsPerSecond: 0,
+      };
+      pairs.set(key, pair);
+    }
+
+    return { pair, index: source === ends[0] ? 0 : 1, value };
+  };
+
+  for (const item of series.opened) {
+    const hit = read(item);
+
+    if (hit) {
+      hit.pair.opened[hit.index] = true;
+    }
+  }
+
+  for (const item of series.recent) {
+    const hit = read(item);
+
+    if (hit) {
+      hit.pair.recent[hit.index] += hit.value;
+    }
+  }
+
+  for (const item of series.activity) {
+    const hit = read(item);
+
+    if (hit) {
+      hit.pair.flowsPerSecond += hit.value;
+    }
+  }
+
+  return [...pairs.values()]
+    .filter((pair) => pair.recent[0] + pair.recent[1] > 0)
+    .map(({ ends, opened, recent, flowsPerSecond }) => {
+      // shortcut: connections older than the Cilium agent left no SYN, so
+      // the busier direction is taken as client to server; a new connection
+      // between the pair corrects it.
+      const forward =
+        opened[0] !== opened[1] ? opened[0] : recent[0] >= recent[1];
+
+      return {
+        source: forward ? ends[0] : ends[1],
+        target: forward ? ends[1] : ends[0],
+        two_way: opened[0] && opened[1],
+        flows_per_second: flowsPerSecond,
+      };
+    })
+    .sort(
+      (a, b) =>
+        a.source.localeCompare(b.source) || a.target.localeCompare(b.target),
+    );
 };
 
 /** The newest value of a series, or null when it has none. */

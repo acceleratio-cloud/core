@@ -1,4 +1,4 @@
 {
   "title": "Networking",
-  "pages": [ "private-network", "domains"]
+  "pages": [ "private-network", "domains", "traffic"]
 }

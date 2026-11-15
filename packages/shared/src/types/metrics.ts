@@ -119,6 +119,22 @@ export interface ProjectMetrics {
   postgres: PostgresMetrics;
 }
 
+/** Two services of a project that exchanged traffic in the last hour. */
+export interface ServiceTrafficEdge {
+  /** Workload id of the client (the side that opens the connections). */
+  source: string;
+  /** Workload id of the server. */
+  target: string;
+  /** Both sides open connections to each other. */
+  two_way: boolean;
+  /** Current flow events per second in both directions; 0 when quiet now. */
+  flows_per_second: number;
+}
+
+export interface ProjectTraffic {
+  edges: ServiceTrafficEdge[];
+}
+
 /**
  * How full one disk is, from kubelet stats: a volume of a service, or the
  * data disk of a PostgreSQL database.
