@@ -1,0 +1,170 @@
+schema_version: 1
+name: Langfuse
+icon: langfuse
+category: AI
+tagline: Tracing, prompt management and evaluations for LLM applications.
+description: |
+  Langfuse records every LLM call, tool call and agent step of your app as
+  traces, with cost, latency and scores, and keeps versioned prompts and
+  datasets for evaluations.
+
+  The first account to sign up creates an organization; create a project and
+  its API keys there, then point the Langfuse SDK or OpenTelemetry at the
+  langfuse service's URL. The worker service ingests events into ClickHouse.
+  The storage service is public because browsers upload media and download
+  exports from it directly.
+features:
+  - Traces for LLM calls, agents and tools
+  - Versioned prompts with a playground
+  - Datasets, evaluations and LLM-as-a-judge scores
+  - SDKs for Python and JavaScript, and OpenTelemetry
+license: MIT
+repository: https://github.com/langfuse/langfuse
+website: https://langfuse.com
+resources:
+  cpu: 4
+  memory_mib: 8192
+services:
+  - name: langfuse
+    image: langfuse/langfuse:4.80.0
+    icon: langfuse
+    port: 3000
+    public: true
+    env:
+      NEXTAUTH_URL: '${{ app.url }}'
+      NEXTAUTH_SECRET: '${{ password.nextauth_secret }}'
+      SALT: '${{ password.salt }}'
+      ENCRYPTION_KEY: '${{ hex.encryption_key }}'
+      DATABASE_URL: 'postgresql://${{ service.postgres.user }}:${{ service.postgres.password }}@${{ service.postgres.host }}:5432/${{ service.postgres.database }}'
+      CLICKHOUSE_MIGRATION_URL: 'clickhouse://${{ service.clickhouse.host }}:9000'
+      CLICKHOUSE_URL: 'http://${{ service.clickhouse.host }}:8123'
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: '${{ password.clickhouse }}'
+      CLICKHOUSE_CLUSTER_ENABLED: false
+      REDIS_HOST: '${{ service.redis.host }}'
+      REDIS_PORT: 6379
+      REDIS_AUTH: '${{ password.redis }}'
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: us-east-1
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: 'http://${{ service.storage.host }}:9000'
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: true
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: langfuse
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: '${{ password.storage }}'
+      LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_MEDIA_UPLOAD_PREFIX: media/
+      LANGFUSE_S3_MEDIA_UPLOAD_REGION: us-east-1
+      # Browsers upload media to the public endpoint; the server uses the private one.
+      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: '${{ service.storage.url }}'
+      LANGFUSE_S3_MEDIA_UPLOAD_INTERNAL_ENDPOINT: 'http://${{ service.storage.host }}:9000'
+      LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: true
+      LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: langfuse
+      LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: '${{ password.storage }}'
+      LANGFUSE_S3_BATCH_EXPORT_ENABLED: true
+      LANGFUSE_S3_BATCH_EXPORT_BUCKET: langfuse
+      LANGFUSE_S3_BATCH_EXPORT_PREFIX: exports/
+      LANGFUSE_S3_BATCH_EXPORT_REGION: us-east-1
+      LANGFUSE_S3_BATCH_EXPORT_ENDPOINT: 'http://${{ service.storage.host }}:9000'
+      LANGFUSE_S3_BATCH_EXPORT_EXTERNAL_ENDPOINT: '${{ service.storage.url }}'
+      LANGFUSE_S3_BATCH_EXPORT_FORCE_PATH_STYLE: true
+      LANGFUSE_S3_BATCH_EXPORT_ACCESS_KEY_ID: langfuse
+      LANGFUSE_S3_BATCH_EXPORT_SECRET_ACCESS_KEY: '${{ password.storage }}'
+  - name: worker
+    image: langfuse/langfuse-worker:4.80.0
+    icon: langfuse
+    port: 3030
+    env:
+      NEXTAUTH_URL: '${{ app.url }}'
+      SALT: '${{ password.salt }}'
+      ENCRYPTION_KEY: '${{ hex.encryption_key }}'
+      DATABASE_URL: 'postgresql://${{ service.postgres.user }}:${{ service.postgres.password }}@${{ service.postgres.host }}:5432/${{ service.postgres.database }}'
+      CLICKHOUSE_MIGRATION_URL: 'clickhouse://${{ service.clickhouse.host }}:9000'
+      CLICKHOUSE_URL: 'http://${{ service.clickhouse.host }}:8123'
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: '${{ password.clickhouse }}'
+      CLICKHOUSE_CLUSTER_ENABLED: false
+      REDIS_HOST: '${{ service.redis.host }}'
+      REDIS_PORT: 6379
+      REDIS_AUTH: '${{ password.redis }}'
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: us-east-1
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: 'http://${{ service.storage.host }}:9000'
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: true
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: langfuse
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: '${{ password.storage }}'
+      LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_MEDIA_UPLOAD_PREFIX: media/
+      LANGFUSE_S3_MEDIA_UPLOAD_REGION: us-east-1
+      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: 'http://${{ service.storage.host }}:9000'
+      LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: true
+      LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: langfuse
+      LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: '${{ password.storage }}'
+      LANGFUSE_S3_BATCH_EXPORT_ENABLED: true
+      LANGFUSE_S3_BATCH_EXPORT_BUCKET: langfuse
+      LANGFUSE_S3_BATCH_EXPORT_PREFIX: exports/
+      LANGFUSE_S3_BATCH_EXPORT_REGION: us-east-1
+      LANGFUSE_S3_BATCH_EXPORT_ENDPOINT: 'http://${{ service.storage.host }}:9000'
+      LANGFUSE_S3_BATCH_EXPORT_EXTERNAL_ENDPOINT: '${{ service.storage.url }}'
+      LANGFUSE_S3_BATCH_EXPORT_FORCE_PATH_STYLE: true
+      LANGFUSE_S3_BATCH_EXPORT_ACCESS_KEY_ID: langfuse
+      LANGFUSE_S3_BATCH_EXPORT_SECRET_ACCESS_KEY: '${{ password.storage }}'
+  - name: clickhouse
+    image: clickhouse/clickhouse-server:26.3.62.3
+    icon: clickhouse
+    port: 8123
+    volumes:
+      - path: /var/lib/clickhouse
+        size_gib: 20
+    env:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: '${{ password.clickhouse }}'
+  - name: redis
+    image: redis:7.4.12-alpine
+    icon: redis
+    port: 6379
+    volumes:
+      - path: /data
+        size_gib: 1
+    command:
+      - redis-server
+      - --requirepass
+      - $(REDIS_PASSWORD)
+      - --maxmemory-policy
+      - noeviction
+    env:
+      REDIS_PASSWORD: '${{ password.redis }}'
+  - name: storage
+    image: rustfs/rustfs:1.0.5
+    icon: rustfs
+    port: 9000
+    public: true
+    volumes:
+      - path: /data
+        size_gib: 20
+    # Starts RustFS, then creates the bucket (a no-op once it exists).
+    entrypoint:
+      - sh
+      - -c
+    command:
+      - |
+        /entrypoint.sh &
+        pid=$!
+        trap 'kill -TERM $pid; wait $pid' TERM INT
+        until curl -s -o /dev/null http://localhost:9000/; do sleep 1; done
+        curl -s -o /dev/null -X PUT --aws-sigv4 aws:amz:us-east-1:s3 --user "$RUSTFS_ACCESS_KEY:$RUSTFS_SECRET_KEY" "http://localhost:9000/$BUCKET"
+        wait $pid
+    env:
+      BUCKET: langfuse
+      RUSTFS_ACCESS_KEY: langfuse
+      RUSTFS_SECRET_KEY: '${{ password.storage }}'
+      RUSTFS_VOLUMES: /data
+      RUSTFS_ADDRESS: ':9000'
+      RUSTFS_CONSOLE_ENABLE: false
+      # Browsers upload media from the langfuse service's pages.
+      RUSTFS_CORS_ALLOWED_ORIGINS: '${{ app.url }}'
+  - name: postgres
+    type: postgres
+    icon: postgres
+    size_gib: 10

@@ -1,0 +1,69 @@
+schema_version: 1
+name: Windmill
+icon: windmill
+category: Automation
+tagline: Scripts, flows and internal apps in Python, TypeScript, Go, Bash and SQL, run by workers.
+description: |
+  Windmill turns scripts into webhooks, schedules, workflows and UIs. The
+  windmill service serves the editor and API and queues jobs; the worker
+  service runs them, and worker-native runs lightweight native jobs such as
+  HTTP and SQL steps in-process. Scale the worker service for more parallel
+  jobs.
+
+  Sign in as admin@windmill.dev with the password changeme right after deploy:
+  the setup that follows replaces that account. Scripts run as processes on
+  the workers, so give developer access only to people you trust with the
+  instance.
+features:
+  - Python, TypeScript, Go, Bash, SQL and more
+  - Flows with branches, loops, retries and approvals
+  - Webhooks, schedules and queue triggers
+  - Low-code app builder for internal tools
+  - Separate worker groups for heavy and native jobs
+license: AGPL-3.0
+repository: https://github.com/windmill-labs/windmill
+website: https://www.windmill.dev
+resources:
+  cpu: 2
+  memory_mib: 4096
+services:
+  - name: windmill
+    image: ghcr.io/windmill-labs/windmill:1.875.0
+    icon: windmill
+    port: 8000
+    public: true
+    env:
+      MODE: server
+      DATABASE_URL: 'postgres://postgres:${{ password.postgres }}@${{ service.postgres.host }}:5432/windmill?sslmode=disable'
+  # No volume, so it can run several instances; the dependency cache refills
+  # after a restart.
+  - name: worker
+    image: ghcr.io/windmill-labs/windmill:1.875.0
+    icon: windmill
+    env:
+      MODE: worker
+      WORKER_GROUP: default
+      DATABASE_URL: 'postgres://postgres:${{ password.postgres }}@${{ service.postgres.host }}:5432/windmill?sslmode=disable'
+  - name: worker-native
+    image: ghcr.io/windmill-labs/windmill:1.875.0
+    icon: windmill
+    env:
+      MODE: worker
+      WORKER_GROUP: native
+      NATIVE_MODE: true
+      SLEEP_QUEUE: 200
+      DATABASE_URL: 'postgres://postgres:${{ password.postgres }}@${{ service.postgres.host }}:5432/windmill?sslmode=disable'
+  # Windmill creates a role WITH BYPASSRLS, which takes a superuser that a
+  # managed database does not give.
+  - name: postgres
+    image: postgres:17.12-alpine
+    icon: postgres
+    port: 5432
+    volumes:
+      - path: /var/lib/postgresql/data
+        size_gib: 10
+    env:
+      POSTGRES_DB: windmill
+      POSTGRES_PASSWORD: '${{ password.postgres }}'
+      # The volume's root holds lost+found, which initdb refuses.
+      PGDATA: /var/lib/postgresql/data/pgdata

@@ -1,0 +1,35 @@
+schema_version: 1
+name: Qdrant
+icon: qdrant
+category: AI
+tagline: Vector database for semantic search and RAG, with a built-in dashboard.
+description: |
+  Qdrant stores embeddings with JSON payloads and answers similarity queries
+  with filters, for retrieval-augmented generation, recommendations and
+  semantic search.
+
+  Every request needs the API key in the service's Environment tab
+  (QDRANT__SERVICE__API_KEY), sent as the api-key header. The dashboard is at
+  /dashboard. Other services in the project reach it on port 6333.
+features:
+  - HNSW vector search with payload filters
+  - Hybrid dense and sparse vectors
+  - Quantization to cut memory use
+  - Snapshots and a web dashboard
+license: Apache-2.0
+repository: https://github.com/qdrant/qdrant
+website: https://qdrant.tech
+resources:
+  cpu: 1
+  memory_mib: 1024
+services:
+  - name: qdrant
+    image: qdrant/qdrant:v1.20.1
+    icon: qdrant
+    port: 6333
+    public: true
+    volumes:
+      - path: /qdrant/storage
+        size_gib: 10
+    env:
+      QDRANT__SERVICE__API_KEY: '${{ password.api_key }}'

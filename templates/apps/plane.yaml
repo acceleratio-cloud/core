@@ -1,0 +1,97 @@
+schema_version: 1
+name: Plane
+icon: plane
+category: Productivity
+tagline: Project tracking with issues, cycles, modules, pages and roadmaps.
+description: |
+  Plane tracks work as issues in projects, with sprints (cycles), modules,
+  list, board, calendar and Gantt views, and pages for docs next to the work.
+
+  The plane service runs the all-in-one image: web app, API, workers and the
+  live server. The first visit creates the instance admin; instance settings
+  are at /god-mode. Attachments are kept in the storage service, which is
+  public because browsers upload to it directly.
+features:
+  - Issues with board, list, calendar and Gantt views
+  - Cycles, modules and roadmaps
+  - Pages with real-time collaboration
+  - REST API and webhooks
+license: AGPL-3.0
+repository: https://github.com/makeplane/plane
+website: https://plane.so
+resources:
+  cpu: 2
+  memory_mib: 4096
+services:
+  - name: plane
+    image: makeplane/plane-aio-community:v1.4.3
+    icon: plane
+    port: 80
+    public: true
+    env:
+      DOMAIN_NAME: '${{ app.host }}'
+      APP_PROTOCOL: https
+      SITE_ADDRESS: ':80'
+      SECRET_KEY: '${{ password.secret_key }}'
+      LIVE_SERVER_SECRET_KEY: '${{ password.live_secret_key }}'
+      DATABASE_URL: 'postgresql://${{ service.postgres.user }}:${{ service.postgres.password }}@${{ service.postgres.host }}:5432/${{ service.postgres.database }}'
+      REDIS_URL: 'redis://${{ service.redis.host }}:6379/'
+      AMQP_URL: 'amqp://plane:${{ password.rabbitmq }}@${{ service.rabbitmq.host }}:5672/plane'
+      AWS_REGION: us-east-1
+      AWS_S3_ENDPOINT_URL: '${{ service.storage.url }}'
+      AWS_S3_BUCKET_NAME: uploads
+      AWS_ACCESS_KEY_ID: plane
+      AWS_SECRET_ACCESS_KEY: '${{ password.storage }}'
+  - name: redis
+    image: valkey/valkey:7.2.11-alpine
+    icon: redis
+    port: 6379
+    volumes:
+      - path: /data
+        size_gib: 1
+  - name: rabbitmq
+    image: rabbitmq:3.13.6-management-alpine
+    icon: rabbitmq
+    port: 5672
+    volumes:
+      - path: /var/lib/rabbitmq
+        size_gib: 1
+    env:
+      # A fixed node name keeps the data directory across pods, whose hostnames change.
+      RABBITMQ_NODENAME: rabbit@localhost
+      RABBITMQ_DEFAULT_USER: plane
+      RABBITMQ_DEFAULT_PASS: '${{ password.rabbitmq }}'
+      RABBITMQ_DEFAULT_VHOST: plane
+  - name: storage
+    image: rustfs/rustfs:1.0.5
+    icon: rustfs
+    port: 9000
+    public: true
+    volumes:
+      - path: /data
+        size_gib: 10
+    # Starts RustFS, then creates the bucket (a no-op once it exists).
+    entrypoint:
+      - sh
+      - -c
+    command:
+      - |
+        /entrypoint.sh &
+        pid=$!
+        trap 'kill -TERM $pid; wait $pid' TERM INT
+        until curl -s -o /dev/null http://localhost:9000/; do sleep 1; done
+        curl -s -o /dev/null -X PUT --aws-sigv4 aws:amz:us-east-1:s3 --user "$RUSTFS_ACCESS_KEY:$RUSTFS_SECRET_KEY" "http://localhost:9000/$BUCKET"
+        wait $pid
+    env:
+      BUCKET: uploads
+      RUSTFS_ACCESS_KEY: plane
+      RUSTFS_SECRET_KEY: '${{ password.storage }}'
+      RUSTFS_VOLUMES: /data
+      RUSTFS_ADDRESS: ':9000'
+      RUSTFS_CONSOLE_ENABLE: false
+      # Browsers upload attachments from the plane service's pages.
+      RUSTFS_CORS_ALLOWED_ORIGINS: '${{ app.url }}'
+  - name: postgres
+    type: postgres
+    icon: postgres
+    size_gib: 10

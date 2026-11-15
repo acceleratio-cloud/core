@@ -53,7 +53,15 @@ below rather than writing them out. Use `type: postgres` for every app that
 needs PostgreSQL. Its user owns the database but cannot create roles, so an
 app that needs a superuser (Logto) or its own Postgres image (Supabase) runs
 Postgres as a container instead, with its data in a folder below the volume's
-root, which holds `lost+found` (`PGDATA`).
+root, which holds `lost+found` (`PGDATA`). So does an app that needs an
+untrusted extension such as pgvector (Chatwoot).
+
+A volume belongs to one service, so services that share files (a web service
+and its worker) use S3 instead: a RustFS `storage` service that creates its
+bucket on start (Twenty). It is public only when browsers upload to it or
+follow links to it, with `RUSTFS_CORS_ALLOWED_ORIGINS` set to the app's URL
+(Plane). Services that share most of their env can reuse it with a YAML anchor
+and `<<:` (Dify).
 
 ## Placeholders
 

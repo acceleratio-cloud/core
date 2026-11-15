@@ -1,0 +1,38 @@
+schema_version: 1
+name: NocoDB
+icon: nocodb
+category: Productivity
+tagline: Spreadsheet-style tables, forms and views over a real database.
+description: |
+  NocoDB gives teams Airtable-style bases with grid, kanban, gallery, form and
+  calendar views, plus a REST API for every table.
+
+  The first account to sign up becomes the super admin. Tables and settings
+  are kept in PostgreSQL; attachments are kept on the volume.
+features:
+  - Grid, kanban, gallery, form and calendar views
+  - Links, lookups, rollups and formulas
+  - REST API and webhooks for every table
+  - Roles and sharing per base
+license: Sustainable Use License
+repository: https://github.com/nocodb/nocodb
+website: https://nocodb.com
+resources:
+  cpu: 1
+  memory_mib: 1024
+services:
+  - name: nocodb
+    image: nocodb/nocodb:2026.10.1
+    icon: nocodb
+    port: 8080
+    public: true
+    volumes:
+      - path: /usr/app/data
+        size_gib: 5
+    env:
+      NC_DB: 'pg://${{ service.postgres.host }}:5432?u=${{ service.postgres.user }}&p=${{ service.postgres.password }}&d=${{ service.postgres.database }}'
+      NC_PUBLIC_URL: '${{ app.url }}'
+  - name: postgres
+    type: postgres
+    icon: postgres
+    size_gib: 5

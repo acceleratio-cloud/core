@@ -1,0 +1,100 @@
+schema_version: 1
+name: Twenty
+icon: twenty
+category: Productivity
+tagline: Open-source CRM for companies, people and deals, with workflows and an API.
+description: |
+  Twenty is a CRM with customizable objects and fields, kanban pipelines,
+  email and calendar sync, and workflows that run on record changes.
+
+  The first account to sign up creates the workspace; later users join by
+  invitation. Records are kept in PostgreSQL and files in the storage service.
+features:
+  - Custom objects, fields and views
+  - Kanban pipelines for deals
+  - Gmail, Outlook and calendar sync
+  - Workflows, REST and GraphQL APIs
+license: AGPL-3.0
+repository: https://github.com/twentyhq/twenty
+website: https://twenty.com
+resources:
+  cpu: 2
+  memory_mib: 3072
+services:
+  - name: twenty
+    image: twentycrm/twenty:v2.58.2
+    icon: twenty
+    port: 3000
+    public: true
+    env:
+      NODE_PORT: 3000
+      SERVER_URL: '${{ app.url }}'
+      PG_DATABASE_URL: 'postgres://${{ service.postgres.user }}:${{ service.postgres.password }}@${{ service.postgres.host }}:5432/${{ service.postgres.database }}'
+      REDIS_URL: 'redis://${{ service.redis.host }}:6379'
+      ENCRYPTION_KEY: '${{ base64.encryption_key }}'
+      STORAGE_TYPE: s3
+      STORAGE_S3_REGION: us-east-1
+      STORAGE_S3_NAME: twenty
+      STORAGE_S3_ENDPOINT: 'http://${{ service.storage.host }}:9000'
+      STORAGE_S3_ACCESS_KEY_ID: twenty
+      STORAGE_S3_SECRET_ACCESS_KEY: '${{ password.storage }}'
+  - name: worker
+    image: twentycrm/twenty:v2.58.2
+    icon: twenty
+    command:
+      - yarn
+      - worker:prod
+    env:
+      SERVER_URL: '${{ app.url }}'
+      PG_DATABASE_URL: 'postgres://${{ service.postgres.user }}:${{ service.postgres.password }}@${{ service.postgres.host }}:5432/${{ service.postgres.database }}'
+      REDIS_URL: 'redis://${{ service.redis.host }}:6379'
+      ENCRYPTION_KEY: '${{ base64.encryption_key }}'
+      # The twenty service runs them.
+      DISABLE_DB_MIGRATIONS: true
+      DISABLE_CRON_JOBS_REGISTRATION: true
+      STORAGE_TYPE: s3
+      STORAGE_S3_REGION: us-east-1
+      STORAGE_S3_NAME: twenty
+      STORAGE_S3_ENDPOINT: 'http://${{ service.storage.host }}:9000'
+      STORAGE_S3_ACCESS_KEY_ID: twenty
+      STORAGE_S3_SECRET_ACCESS_KEY: '${{ password.storage }}'
+  - name: redis
+    image: redis:7.4.12-alpine
+    icon: redis
+    port: 6379
+    command:
+      - redis-server
+      - --maxmemory-policy
+      - noeviction
+  # S3 storage that both twenty and the worker read; separate volumes would
+  # split their files.
+  - name: storage
+    image: rustfs/rustfs:1.0.5
+    icon: rustfs
+    port: 9000
+    volumes:
+      - path: /data
+        size_gib: 10
+    # Starts RustFS, then creates the bucket (a no-op once it exists).
+    entrypoint:
+      - sh
+      - -c
+    command:
+      - |
+        /entrypoint.sh &
+        pid=$!
+        trap 'kill -TERM $pid; wait $pid' TERM INT
+        until curl -s -o /dev/null http://localhost:9000/; do sleep 1; done
+        curl -s -o /dev/null -X PUT --aws-sigv4 aws:amz:us-east-1:s3 --user "$RUSTFS_ACCESS_KEY:$RUSTFS_SECRET_KEY" "http://localhost:9000/$BUCKET"
+        wait $pid
+    env:
+      BUCKET: twenty
+      RUSTFS_ACCESS_KEY: twenty
+      RUSTFS_SECRET_KEY: '${{ password.storage }}'
+      RUSTFS_VOLUMES: /data
+      RUSTFS_ADDRESS: ':9000'
+      RUSTFS_CONSOLE_ENABLE: false
+  - name: postgres
+    type: postgres
+    icon: postgres
+    size_gib: 10

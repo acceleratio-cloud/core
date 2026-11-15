@@ -1,0 +1,51 @@
+schema_version: 1
+name: Cal.com
+icon: calcom
+category: Productivity
+tagline: Scheduling with booking pages, availability rules and calendar sync.
+description: |
+  Cal.com publishes booking pages for people and teams, checks availability
+  against connected calendars and sends confirmations, reminders and video
+  links.
+
+  The first visit opens a setup wizard that creates the admin account.
+  Bookings and settings are kept in PostgreSQL. Emails need SMTP settings
+  (EMAIL_SERVER_HOST and related) in the service's Environment tab.
+features:
+  - Booking pages for people and teams
+  - Google, Outlook and CalDAV calendar sync
+  - Round-robin and collective team events
+  - Workflows, webhooks and an embed for your site
+license: MIT
+repository: https://github.com/calcom/cal.com
+website: https://cal.com
+resources:
+  cpu: 1
+  memory_mib: 2048
+services:
+  - name: calcom
+    image: calcom/cal.com:v6.2.0
+    icon: calcom
+    port: 3000
+    public: true
+    # The image's start script goes on without tables when the database is
+    # still starting, so migrate until it succeeds first.
+    command:
+      - sh
+      - -c
+      - until npx prisma migrate deploy --schema /calcom/packages/prisma/schema.prisma; do sleep 5; done && exec /calcom/scripts/start.sh
+    env:
+      # The image rewrites its built-in URL to this one on start.
+      NEXT_PUBLIC_WEBAPP_URL: '${{ app.url }}'
+      # A quoted, comma-separated list; Cal.com logs a warning on every request without its own host.
+      ALLOWED_HOSTNAMES: '"${{ app.host }}"'
+      NEXTAUTH_SECRET: '${{ password.nextauth_secret }}'
+      CALENDSO_ENCRYPTION_KEY: '${{ password.encryption_key }}'
+      DATABASE_URL: 'postgresql://${{ service.postgres.user }}:${{ service.postgres.password }}@${{ service.postgres.host }}:5432/${{ service.postgres.database }}'
+      DATABASE_DIRECT_URL: 'postgresql://${{ service.postgres.user }}:${{ service.postgres.password }}@${{ service.postgres.host }}:5432/${{ service.postgres.database }}'
+      # host:port the start script waits for.
+      DATABASE_HOST: '${{ service.postgres.host }}:5432'
+  - name: postgres
+    type: postgres
+    icon: postgres
+    size_gib: 5

@@ -1,0 +1,43 @@
+schema_version: 1
+name: 9Router
+icon: 9router
+category: AI
+tagline: One OpenAI-compatible endpoint for coding tools, with fallback across 60+ AI providers.
+description: |
+  9Router sits between coding tools such as Claude Code, Codex, Cursor and
+  Cline and the AI providers you connect. When a subscription runs out of
+  quota it falls back to cheaper or free providers in the order you set.
+
+  Sign in to the dashboard at /dashboard with the password in the service's
+  Environment tab (INITIAL_PASSWORD). Point tools at the service's URL with
+  /v1 and an API key created in the dashboard. Providers, keys and usage are
+  kept in SQLite on the volume.
+features:
+  - OpenAI-compatible /v1 endpoint
+  - Subscription, cheap and free provider tiers with fallback
+  - Combos of models across providers
+  - Usage and cost tracking per key
+license: MIT
+repository: https://github.com/decolua/9router
+website: https://9router.com
+resources:
+  cpu: 0.5
+  memory_mib: 512
+services:
+  - name: router
+    image: decolua/9router:0.5.116
+    icon: 9router
+    port: 20128
+    public: true
+    volumes:
+      - path: /app/data
+        size_gib: 2
+    env:
+      # Kubernetes sets HOSTNAME to the pod name, which Next.js would bind to.
+      HOSTNAME: 0.0.0.0
+      BASE_URL: '${{ app.url }}'
+      INITIAL_PASSWORD: '${{ password.admin }}'
+      JWT_SECRET: '${{ hex.jwt_secret }}'
+      # Signs API keys; the built-in default is public.
+      API_KEY_SECRET: '${{ hex.api_key_secret }}'
+      AUTH_COOKIE_SECURE: true

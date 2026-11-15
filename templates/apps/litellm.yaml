@@ -1,0 +1,40 @@
+schema_version: 1
+name: LiteLLM
+icon: litellm
+category: AI
+tagline: OpenAI-compatible gateway to 100+ model providers, with keys, budgets and spend tracking.
+description: |
+  LiteLLM puts every model provider behind one OpenAI-compatible API. Teams
+  get their own virtual keys with budgets, rate limits and model access, and
+  every request is logged with its cost.
+
+  Sign in to the admin UI at /ui as admin with the master key from the
+  service's Environment tab (LITELLM_MASTER_KEY), then add models there.
+  Models, keys and spend are kept in PostgreSQL.
+features:
+  - One API for OpenAI, Anthropic, Bedrock, Vertex, Ollama and more
+  - Virtual keys with budgets and rate limits
+  - Spend tracking per key, user and team
+  - Fallbacks, retries and load balancing
+license: MIT
+repository: https://github.com/BerriAI/litellm
+website: https://www.litellm.ai
+resources:
+  cpu: 1
+  memory_mib: 1024
+services:
+  - name: litellm
+    image: ghcr.io/berriai/litellm:v1.109.1
+    icon: litellm
+    port: 4000
+    public: true
+    env:
+      DATABASE_URL: 'postgresql://${{ service.postgres.user }}:${{ service.postgres.password }}@${{ service.postgres.host }}:5432/${{ service.postgres.database }}'
+      STORE_MODEL_IN_DB: 'True'
+      LITELLM_MASTER_KEY: 'sk-${{ hex.master_key }}'
+      # Encrypts provider credentials in the database; changing it loses them.
+      LITELLM_SALT_KEY: 'sk-${{ hex.salt_key }}'
+  - name: postgres
+    type: postgres
+    icon: postgres
+    size_gib: 5

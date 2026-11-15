@@ -1,0 +1,386 @@
+schema_version: 1
+name: Dify
+icon: dify
+category: AI
+tagline: Build AI apps, agents and RAG workflows in a visual editor, served as APIs.
+description: |
+  Dify builds chatbots, agents and workflows over any model provider, with
+  knowledge bases for retrieval, tools, plugins and an API for every app.
+
+  The first visit to the dify service's URL creates the administrator account.
+  Model providers are plugins: install them from the marketplace in Plugins.
+  Vectors are kept in PostgreSQL with pgvector, files in the storage service.
+
+  Code nodes run in the sandbox service and agent shells in local-sandbox,
+  both behind their SSRF proxies. Unlike Dify's own Docker setup, they share
+  the project's network with the other services, so keep the project for Dify.
+features:
+  - Visual workflow and chatflow editor
+  - Agents with tools, MCP and plugins
+  - Knowledge bases with hybrid retrieval
+  - API and web app for every app you build
+license: Dify Open Source License
+repository: https://github.com/langgenius/dify
+website: https://dify.ai
+resources:
+  cpu: 4
+  memory_mib: 8192
+services:
+  # Routes one domain to the api, web and plugin services, like Dify's nginx.
+  - name: dify
+    image: caddy:2.11.9-alpine
+    icon: dify
+    port: 80
+    public: true
+    entrypoint:
+      - sh
+      - -c
+    command:
+      - |
+        cat > /etc/caddy/Caddyfile <<'EOF'
+        {
+          servers {
+            trusted_proxies static private_ranges
+          }
+        }
+        :80 {
+          request_body {
+            max_size 100MB
+          }
+          @api path /console/api* /api* /v1* /openapi* /files* /mcp* /triggers* /callbacks/human-input/v2/im/*
+          handle @api {
+            reverse_proxy {$API_UPSTREAM}
+          }
+          handle /socket.io/* {
+            reverse_proxy {$SOCKET_UPSTREAM}
+          }
+          handle /e/* {
+            reverse_proxy {$PLUGIN_UPSTREAM}
+          }
+          handle {
+            reverse_proxy {$WEB_UPSTREAM}
+          }
+        }
+        EOF
+        exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+    env:
+      API_UPSTREAM: '${{ service.api.host }}:5001'
+      SOCKET_UPSTREAM: '${{ service.api-websocket.host }}:5001'
+      PLUGIN_UPSTREAM: '${{ service.plugin-daemon.host }}:5002'
+      WEB_UPSTREAM: '${{ service.web.host }}:3000'
+  - name: api
+    image: langgenius/dify-api:1.19.0
+    icon: dify
+    port: 5001
+    # Shared by api-websocket, worker and worker-beat below.
+    env: &api-env
+      MODE: api
+      MIGRATION_ENABLED: true
+      SECRET_KEY: '${{ base64.secret_key }}'
+      CONSOLE_WEB_URL: '${{ app.url }}'
+      CONSOLE_API_URL: '${{ app.url }}'
+      SERVICE_API_URL: '${{ app.url }}'
+      APP_WEB_URL: '${{ app.url }}'
+      APP_API_URL: '${{ app.url }}'
+      FILES_URL: '${{ app.url }}'
+      TRIGGER_URL: '${{ app.url }}'
+      ENDPOINT_URL_TEMPLATE: '${{ app.url }}/e/{hook_id}'
+      INTERNAL_FILES_URL: 'http://${{ service.api.host }}:5001'
+      RESPECT_XFORWARD_HEADERS_ENABLED: true
+      DB_TYPE: postgresql
+      DB_HOST: '${{ service.postgres.host }}'
+      DB_PORT: 5432
+      DB_USERNAME: postgres
+      DB_PASSWORD: '${{ password.postgres }}'
+      DB_DATABASE: dify
+      VECTOR_STORE: pgvector
+      PGVECTOR_HOST: '${{ service.postgres.host }}'
+      PGVECTOR_PORT: 5432
+      PGVECTOR_USER: postgres
+      PGVECTOR_PASSWORD: '${{ password.postgres }}'
+      PGVECTOR_DATABASE: dify
+      REDIS_HOST: '${{ service.redis.host }}'
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: '${{ password.redis }}'
+      CELERY_BROKER_URL: 'redis://:${{ password.redis }}@${{ service.redis.host }}:6379/1'
+      STORAGE_TYPE: s3
+      S3_ENDPOINT: 'http://${{ service.storage.host }}:9000'
+      S3_REGION: us-east-1
+      S3_BUCKET_NAME: dify
+      S3_ADDRESS_STYLE: path
+      S3_ACCESS_KEY: dify
+      S3_SECRET_KEY: '${{ password.storage }}'
+      CODE_EXECUTION_ENDPOINT: 'http://${{ service.sandbox.host }}:8194'
+      CODE_EXECUTION_API_KEY: '${{ password.sandbox }}'
+      SSRF_PROXY_HTTP_URL: 'http://${{ service.ssrf-proxy.host }}:3128'
+      SSRF_PROXY_HTTPS_URL: 'http://${{ service.ssrf-proxy.host }}:3128'
+      PLUGIN_DAEMON_URL: 'http://${{ service.plugin-daemon.host }}:5002'
+      PLUGIN_DAEMON_KEY: '${{ password.plugin_daemon }}'
+      INNER_API_KEY_FOR_PLUGIN: '${{ password.inner_api }}'
+      AGENT_BACKEND_BASE_URL: 'http://${{ service.agent-backend.host }}:5050'
+      AGENT_BACKEND_API_TOKEN: '${{ password.agent_api }}'
+      NEXT_PUBLIC_ENABLE_AGENT_V2: true
+  # Real-time collaboration in the editor.
+  - name: api-websocket
+    image: langgenius/dify-api:1.19.0
+    icon: dify
+    port: 5001
+    env:
+      <<: *api-env
+      SERVER_WORKER_AMOUNT: 1
+      SERVER_WORKER_CLASS: geventwebsocket.gunicorn.workers.GeventWebSocketWorker
+      SERVER_WORKER_CONNECTIONS: 1000
+      GUNICORN_TIMEOUT: 360
+  - name: worker
+    image: langgenius/dify-api:1.19.0
+    icon: dify
+    env:
+      <<: *api-env
+      MODE: worker
+  - name: worker-beat
+    image: langgenius/dify-api:1.19.0
+    icon: dify
+    env:
+      <<: *api-env
+      MODE: beat
+  - name: web
+    image: langgenius/dify-web:1.19.0
+    icon: dify
+    port: 3000
+    env:
+      # Empty: the browser calls the API on the same domain.
+      CONSOLE_API_URL: ''
+      APP_API_URL: ''
+      SERVER_CONSOLE_API_URL: 'http://${{ service.api.host }}:5001'
+      NEXT_PUBLIC_SOCKET_URL: 'wss://${{ app.host }}'
+      NEXT_PUBLIC_ENABLE_AGENT_V2: true
+      MARKETPLACE_API_URL: https://marketplace.dify.ai
+      MARKETPLACE_URL: https://marketplace.dify.ai
+  - name: plugin-daemon
+    image: langgenius/dify-plugin-daemon:0.6.14-local
+    icon: dify
+    port: 5002
+    volumes:
+      - path: /app/storage
+        size_gib: 10
+    env:
+      SERVER_PORT: 5002
+      SERVER_KEY: '${{ password.plugin_daemon }}'
+      DIFY_INNER_API_URL: 'http://${{ service.api.host }}:5001'
+      DIFY_INNER_API_KEY: '${{ password.inner_api }}'
+      DB_HOST: '${{ service.postgres.host }}'
+      DB_PORT: 5432
+      DB_USERNAME: postgres
+      DB_PASSWORD: '${{ password.postgres }}'
+      # Created by the daemon on first start.
+      DB_DATABASE: dify_plugin
+      DB_SSL_MODE: disable
+      REDIS_HOST: '${{ service.redis.host }}'
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: '${{ password.redis }}'
+      PLUGIN_STORAGE_TYPE: local
+      PLUGIN_STORAGE_LOCAL_ROOT: /app/storage
+      PLUGIN_WORKING_PATH: /app/storage/cwd
+      PLUGIN_INSTALLED_PATH: plugin
+      PLUGIN_PACKAGE_CACHE_PATH: plugin_packages
+      PLUGIN_MEDIA_CACHE_PATH: assets
+      PLUGIN_REMOTE_INSTALLING_HOST: 0.0.0.0
+      PLUGIN_REMOTE_INSTALLING_PORT: 5003
+      FORCE_VERIFYING_SIGNATURE: true
+      PYTHON_ENV_INIT_TIMEOUT: 120
+      PLUGIN_MAX_EXECUTION_TIMEOUT: 600
+      MAX_PLUGIN_PACKAGE_SIZE: 52428800
+  # Runs code nodes; outbound requests go through ssrf-proxy.
+  - name: sandbox
+    image: langgenius/dify-sandbox:0.2.15
+    icon: dify
+    port: 8194
+    env:
+      API_KEY: '${{ password.sandbox }}'
+      GIN_MODE: release
+      WORKER_TIMEOUT: 15
+      ENABLE_NETWORK: true
+      SANDBOX_PORT: 8194
+      HTTP_PROXY: 'http://${{ service.ssrf-proxy.host }}:3128'
+      HTTPS_PROXY: 'http://${{ service.ssrf-proxy.host }}:3128'
+  # Dify's SSRF proxy: outbound HTTP from apps and code nodes, never to private networks.
+  - name: ssrf-proxy
+    image: ubuntu/squid:6.6-24.04_edge
+    icon: dify
+    port: 3128
+    entrypoint:
+      - bash
+      - -c
+    command:
+      - |
+        cat > /etc/squid/squid.conf <<'EOF'
+        acl client_localnet src 0.0.0.1-0.255.255.255 10.0.0.0/8 100.64.0.0/10 169.254.0.0/16 172.16.0.0/12 192.168.0.0/16 fc00::/7 fe80::/10
+        acl to_private_networks dst 0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 127.0.0.0/8 169.254.0.0/16 172.16.0.0/12 192.168.0.0/16 224.0.0.0/4 240.0.0.0/4 ::/128 ::1/128 ::ffff:0:0/96 ::/96 fc00::/7 fe80::/10
+        acl SSL_ports port 443
+        acl Safe_ports port 80 21 443 70 210 1025-65535 280 488 591 777
+        acl CONNECT method CONNECT
+        acl allowed_domains dstdomain .marketplace.dify.ai
+        http_port 3128
+        http_access deny !Safe_ports
+        http_access deny CONNECT !SSL_ports
+        http_access allow localhost manager
+        http_access deny manager
+        http_access deny to_private_networks
+        http_access allow allowed_domains
+        http_access allow client_localnet
+        http_access allow localhost
+        http_access deny all
+        tcp_outgoing_address 0.0.0.0
+        coredump_dir /var/spool/squid
+        refresh_pattern . 0 20% 4320
+        client_request_buffer_max_size 100 MB
+        connect_timeout 30 seconds
+        request_timeout 2 minutes
+        read_timeout 2 minutes
+        client_lifetime 5 minutes
+        dns_timeout 30 seconds
+        EOF
+        # Squid logs as its own user, which cannot write to the container's output.
+        tail -F /var/log/squid/access.log /var/log/squid/cache.log 2>/dev/null &
+        /usr/sbin/squid -Nz
+        exec /usr/sbin/squid -f /etc/squid/squid.conf -NYC 1
+  - name: agent-backend
+    image: langgenius/dify-agent-backend:1.19.0
+    icon: dify
+    port: 5050
+    env:
+      DIFY_AGENT_API_TOKEN: '${{ password.agent_api }}'
+      DIFY_AGENT_REDIS_URL: 'redis://:${{ password.redis }}@${{ service.redis.host }}:6379/2'
+      DIFY_AGENT_PLUGIN_DAEMON_URL: 'http://${{ service.plugin-daemon.host }}:5002'
+      DIFY_AGENT_PLUGIN_DAEMON_API_KEY: '${{ password.plugin_daemon }}'
+      DIFY_AGENT_INNER_API_URL: 'http://${{ service.api.host }}:5001'
+      DIFY_AGENT_INNER_API_KEY: '${{ password.inner_api }}'
+      DIFY_AGENT_RUNTIME_BACKEND: local
+      DIFY_AGENT_LOCAL_SANDBOX_ENDPOINT: 'http://${{ service.local-sandbox.host }}:5004'
+      DIFY_AGENT_LOCAL_SANDBOX_AUTH_TOKEN: '${{ hex.local_sandbox }}'
+      DIFY_AGENT_SANDBOX_FILES_BASE_URL: 'http://${{ service.api.host }}:5001'
+      DIFY_AGENT_STUB_API_BASE_URL: 'http://${{ service.agent-backend.host }}:5050/agent-stub'
+      # Upstream's default. It must be exactly 32 bytes in unpadded base64url,
+      # which no generated value is; replace it in the Environment tab.
+      DIFY_AGENT_SERVER_SECRET_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY
+  # Runs agent shell commands; outbound requests go through agent-ssrf-proxy.
+  - name: local-sandbox
+    image: langgenius/dify-agent-local-sandbox:1.19.0
+    icon: dify
+    port: 5004
+    volumes:
+      - path: /home/dify
+        size_gib: 1
+      - path: /workspace
+        size_gib: 5
+    command:
+      - shellctl
+      - serve
+      - --listen
+      - 0.0.0.0:5004
+      - --require-auth-token
+    env:
+      SHELLCTL_AUTH_TOKEN: '${{ hex.local_sandbox }}'
+      HTTP_PROXY: 'http://${{ service.agent-ssrf-proxy.host }}:3128'
+      HTTPS_PROXY: 'http://${{ service.agent-ssrf-proxy.host }}:3128'
+      NO_PROXY: localhost,127.0.0.1
+  # Lets agent shells reach only the agent stub, Dify's files and the internet.
+  - name: agent-ssrf-proxy
+    image: ubuntu/squid:6.6-24.04_edge
+    icon: dify
+    port: 3128
+    entrypoint:
+      - bash
+      - -c
+    command:
+      - |
+        cat > /etc/squid/squid.conf <<EOF
+        acl client_localnet src 0.0.0.1-0.255.255.255 10.0.0.0/8 100.64.0.0/10 169.254.0.0/16 172.16.0.0/12 192.168.0.0/16 fc00::/7 fe80::/10
+        acl to_private_networks dst 0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 127.0.0.0/8 169.254.0.0/16 172.16.0.0/12 192.168.0.0/16 224.0.0.0/4 240.0.0.0/4 ::/128 ::1/128 ::ffff:0:0/96 ::/96 fc00::/7 fe80::/10
+        acl SSL_ports port 443
+        acl Safe_ports port 80 21 443 70 210 1025-65535 280 488 591 777
+        acl CONNECT method CONNECT
+        acl dst_agent_backend dstdomain $AGENT_BACKEND_HOST
+        acl dst_dify_api dstdomain $API_HOST
+        acl path_files urlpath_regex -i ^/files/
+        acl path_agent_stub urlpath_regex -i ^/agent-stub/
+        http_port 3128
+        http_access deny !Safe_ports
+        http_access deny CONNECT !SSL_ports
+        http_access allow dst_agent_backend path_agent_stub
+        http_access allow dst_dify_api path_files
+        http_access deny to_private_networks
+        http_access allow all
+        tcp_outgoing_address 0.0.0.0
+        coredump_dir /var/spool/squid
+        refresh_pattern . 0 20% 4320
+        connect_timeout 30 seconds
+        request_timeout 2 minutes
+        read_timeout 2 minutes
+        dns_timeout 30 seconds
+        EOF
+        # Squid logs as its own user, which cannot write to the container's output.
+        tail -F /var/log/squid/access.log /var/log/squid/cache.log 2>/dev/null &
+        /usr/sbin/squid -Nz
+        exec /usr/sbin/squid -f /etc/squid/squid.conf -NYC 1
+    env:
+      AGENT_BACKEND_HOST: '${{ service.agent-backend.host }}'
+      API_HOST: '${{ service.api.host }}'
+  - name: redis
+    image: redis:7.4.12-alpine
+    icon: redis
+    port: 6379
+    volumes:
+      - path: /data
+        size_gib: 1
+    command:
+      - redis-server
+      - --requirepass
+      - $(REDIS_PASSWORD)
+    env:
+      REDIS_PASSWORD: '${{ password.redis }}'
+  # Shared by api and the workers, which separate volumes would split.
+  - name: storage
+    image: rustfs/rustfs:1.0.5
+    icon: rustfs
+    port: 9000
+    volumes:
+      - path: /data
+        size_gib: 20
+    # Starts RustFS, then creates the bucket (a no-op once it exists).
+    entrypoint:
+      - sh
+      - -c
+    command:
+      - |
+        /entrypoint.sh &
+        pid=$!
+        trap 'kill -TERM $pid; wait $pid' TERM INT
+        until curl -s -o /dev/null http://localhost:9000/; do sleep 1; done
+        curl -s -o /dev/null -X PUT --aws-sigv4 aws:amz:us-east-1:s3 --user "$RUSTFS_ACCESS_KEY:$RUSTFS_SECRET_KEY" "http://localhost:9000/$BUCKET"
+        wait $pid
+    env:
+      BUCKET: dify
+      RUSTFS_ACCESS_KEY: dify
+      RUSTFS_SECRET_KEY: '${{ password.storage }}'
+      RUSTFS_VOLUMES: /data
+      RUSTFS_ADDRESS: ':9000'
+      RUSTFS_CONSOLE_ENABLE: false
+  # pgvector for knowledge bases, and the plugin daemon creates its own
+  # database: both take a superuser.
+  - name: postgres
+    image: pgvector/pgvector:0.8.7-pg17-trixie
+    icon: postgres
+    port: 5432
+    volumes:
+      - path: /var/lib/postgresql/data
+        size_gib: 20
+    command:
+      - postgres
+      - -c
+      - max_connections=200
+    env:
+      POSTGRES_DB: dify
+      POSTGRES_PASSWORD: '${{ password.postgres }}'
+      # The volume's root holds lost+found, which initdb refuses.
+      PGDATA: /var/lib/postgresql/data/pgdata
