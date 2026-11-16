@@ -104,7 +104,7 @@ export const SystemStatusButton = () => {
         size="sm"
         aria-haspopup="dialog"
         onClick={() => setOpen(true)}
-        className="rounded-full text-muted-foreground hover:text-foreground"
+        className="rounded-full gap-1.5 text-muted-foreground hover:text-foreground"
       >
         <span aria-hidden="true" className={cn("status-dot", summary.dot)} />
         <span className="hidden xl:inline">{summary.label}</span>

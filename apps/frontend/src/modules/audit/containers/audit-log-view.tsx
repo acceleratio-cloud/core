@@ -208,8 +208,8 @@ export const AuditLogView = ({ active }: AuditLogViewProps) => {
           />
           <p className="text-sm font-medium text-foreground">No events yet</p>
           <p className="max-w-sm text-sm text-muted-foreground">
-            Deploys, setting changes, revealed secrets and opened terminals
-            show here as they happen.
+            Deploys, setting changes, revealed secrets and opened terminals show
+            here as they happen.
           </p>
         </div>
       ) : (
@@ -426,10 +426,7 @@ const AuditDetails = ({ entry }: { entry: AuditLogEntry }) => {
         : null,
     ],
     ['Status', entry.status_code ? String(entry.status_code) : null],
-    [
-      'Duration',
-      entry.duration_ms === null ? null : `${entry.duration_ms} ms`,
-    ],
+    ['Duration', entry.duration_ms === null ? null : `${entry.duration_ms} ms`],
     ['Error', entry.error],
   ];
 

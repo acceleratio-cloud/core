@@ -13,9 +13,10 @@ other hardware. It provisions a single-node Kubernetes cluster:
 - RustFS `1.0.5` as the S3 object store, one pod on a 50 GiB Longhorn volume
   in the `rustfs` namespace: project buckets, PostgreSQL backups and static
   site files; see [Object storage (RustFS)](#object-storage-rustfs)
-- VictoriaMetrics single node (chart `0.50.0`), which scrapes kubelet and
-  cAdvisor metrics for the project Observability tab and keeps 14 days on the
-  server's own disk (`/var/lib/victoria-metrics`)
+- VictoriaMetrics single node (chart `0.50.0`), which scrapes only the metrics
+  the console shows (cAdvisor, kubelet volume stats, Hubble, CloudNativePG)
+  plus CPU throttling and OOM counters, and keeps 14 days on the server's own
+  disk (`/var/lib/victoria-metrics`)
 - VictoriaLogs single node with Vector (chart `victoria-logs-single`
   `0.13.11`): Vector collects the stdout and stderr of project services for the
   project Logs tab, and VictoriaLogs keeps 7 days, at most 2 GiB, on the
@@ -229,6 +230,8 @@ Every variable can be set in the environment or in a file passed to
 | `VICTORIAMETRICS_RELEASE` | `victoria-metrics` | Helm release and Service name |
 | `VICTORIAMETRICS_DATA_DIR` | `/var/lib/victoria-metrics` | hostPath for the metrics database |
 | `VICTORIAMETRICS_RETENTION` | `14d` | how long metrics are kept |
+| `VICTORIAMETRICS_MEMORY_LIMIT` | `512Mi` | memory limit; caches are sized from it. Raise it beyond ~200k active series |
+| `VICTORIAMETRICS_CPUS` | `2` | `GOMAXPROCS`: ingestion buffers (~8 MiB each) and insert workers |
 | `VICTORIALOGS_CHART_VERSION` | `0.13.11` | `victoria-logs-single` chart version (includes Vector) |
 | `VICTORIALOGS_NAMESPACE` | `victoria-logs` | VictoriaLogs and Vector namespace |
 | `VICTORIALOGS_RELEASE` | `victoria-logs` | Helm release and Service name |
@@ -237,11 +240,11 @@ Every variable can be set in the environment or in a file passed to
 | `VICTORIALOGS_MAX_DISK` | `2GiB` | disk cap; the oldest logs go first beyond it |
 | `ACCELERATIO_NAMESPACE` | `acceleratio` | namespace for PostgreSQL, the API and the console |
 | `ACCELERATIO_VERSION` | `0.5.0` | image tag for the API and the console |
+| `SCAN_MEMORY_LIMIT` | `1Gi` | memory of one image scan of the Security tab; raise it when large images fail with "ran out of memory" |
+| `SCAN_TIMEOUT_MINUTES` | `20` | how long one image scan may run (1 to 180) |
 | `ACCELERATIO_API_IMAGE` | `ghcr.io/acceleratio-cloud/api:<version>` | API image |
 | `ACCELERATIO_CONSOLE_IMAGE` | `ghcr.io/acceleratio-cloud/console:<version>` | console image |
 | `POSTGRES_IMAGE` | `postgres:17-alpine` | PostgreSQL image |
-| `SCAN_MEMORY_LIMIT` | `1Gi` | memory of one image scan of the Security tab; raise it when large images fail with "ran out of memory" |
-| `SCAN_TIMEOUT_MINUTES` | `20` | how long one image scan may run (1 to 180) |
 | `POSTGRES_DATA_DIR` | `/var/lib/acceleratio/postgres` | hostPath for the database files |
 | `ACCELERATIO_CONSOLE_NODE_PORT` | `30300` | node port of the console |
 | `ACCELERATIO_API_NODE_PORT` | `30080` | node port of the API |

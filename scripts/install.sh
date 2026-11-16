@@ -73,6 +73,8 @@ VICTORIAMETRICS_NAMESPACE="${VICTORIAMETRICS_NAMESPACE:-victoria-metrics}"
 VICTORIAMETRICS_RELEASE="${VICTORIAMETRICS_RELEASE:-victoria-metrics}"
 VICTORIAMETRICS_DATA_DIR="${VICTORIAMETRICS_DATA_DIR:-/var/lib/victoria-metrics}"
 VICTORIAMETRICS_RETENTION="${VICTORIAMETRICS_RETENTION:-14d}"
+VICTORIAMETRICS_MEMORY_LIMIT="${VICTORIAMETRICS_MEMORY_LIMIT:-512Mi}"
+VICTORIAMETRICS_CPUS="${VICTORIAMETRICS_CPUS:-2}"
 
 # update.sh reads this default; keep the KEY="${KEY:-default}" form.
 VICTORIALOGS_CHART_VERSION="${VICTORIALOGS_CHART_VERSION:-0.13.11}"
@@ -98,11 +100,11 @@ POSTGRES_IMAGE="${POSTGRES_IMAGE:-postgres:17-alpine}"
 REGISTRY_IMAGE="${REGISTRY_IMAGE:-ghcr.io/project-zot/zot:v2.1.23}"
 REGISTRY_SIZE="${REGISTRY_SIZE:-50Gi}"
 REGISTRY_CLUSTER_IP="${REGISTRY_CLUSTER_IP:-}"
-# Image references in workloads use this name; only the mirror resolves it.
-# Keep in step with REGISTRY_PULL_HOST in the API.
 # Image scans of the Security tab: one Job at a time, nothing between scans.
 SCAN_MEMORY_LIMIT="${SCAN_MEMORY_LIMIT:-1Gi}"
 SCAN_TIMEOUT_MINUTES="${SCAN_TIMEOUT_MINUTES:-20}"
+# Image references in workloads use this name; only the mirror resolves it.
+# Keep in step with REGISTRY_PULL_HOST in the API.
 readonly REGISTRY_HOST="registry.acceleratio.internal"
 ACCELERATIO_DATA_DIR="${ACCELERATIO_DATA_DIR:-/var/lib/acceleratio}"
 POSTGRES_DATA_DIR="${POSTGRES_DATA_DIR:-${ACCELERATIO_DATA_DIR}/postgres}"
@@ -411,6 +413,8 @@ Common variables (environment or --config):
   VICTORIAMETRICS_RELEASE     default victoria-metrics
   VICTORIAMETRICS_DATA_DIR    default /var/lib/victoria-metrics
   VICTORIAMETRICS_RETENTION   default 14d
+  VICTORIAMETRICS_MEMORY_LIMIT default 512Mi (raise for ~200k+ active series)
+  VICTORIAMETRICS_CPUS        default 2 (GOMAXPROCS; sizes ingestion buffers)
   VICTORIALOGS_CHART_VERSION  default 0.13.11
   VICTORIALOGS_NAMESPACE      default victoria-logs
   VICTORIALOGS_RELEASE        default victoria-logs
@@ -428,12 +432,12 @@ Common variables (environment or --config):
   REGISTRY_IMAGE              default ghcr.io/project-zot/zot:v2.1.23
   REGISTRY_SIZE               default 50Gi (volume for built images)
   REGISTRY_CLUSTER_IP         default <service CIDR>.50 (fixed registry ClusterIP)
+  SCAN_MEMORY_LIMIT           default 1Gi (memory of one image scan)
+  SCAN_TIMEOUT_MINUTES        default 20 (one image scan, 1 to 180)
   POSTGRES_DATA_DIR           default /var/lib/acceleratio/postgres
   ACCELERATIO_CONSOLE_NODE_PORT default 30300
   ACCELERATIO_API_NODE_PORT   default 30080
   ACCELERATIO_DEV             default 0 (1 is the same as --dev)
-  SCAN_MEMORY_LIMIT           default 1Gi (memory of one image scan)
-  SCAN_TIMEOUT_MINUTES        default 20 (one image scan, 1 to 180)
   ACCELERATIO_POSTGRES_NODE_PORT default 30432 (PostgreSQL, --dev only)
   RUSTFS_NODE_PORT            default 30900 (RustFS S3, --dev only)
   ACCELERATIO_PUBLIC_HOST     default public IPv4; host used in the URLs
@@ -811,6 +815,13 @@ validate_cni_paths() {
         ;;
     esac
   done
+}
+
+# Go ignores an invalid GOMAXPROCS and uses every core, which silently undoes it.
+validate_victoriametrics() {
+  if ! [[ $VICTORIAMETRICS_CPUS =~ ^[1-9][0-9]*$ ]]; then
+    die "VICTORIAMETRICS_CPUS must be a positive whole number (got '${VICTORIAMETRICS_CPUS}')"
+  fi
 }
 
 detach_cilium_bpf() {
@@ -1873,20 +1884,123 @@ EOF
 write_victoriametrics_values() {
   write_file "${CONFIG_DIR}/victoriametrics-values.yaml" 0644 <<EOF
 # ${MANAGED_BY} - manual edits will be overwritten.
-# Single-node VictoriaMetrics with the chart's built-in Kubernetes scrape
-# config (kubelet and cAdvisor through the API server). The API reads it
-# through the API server's service proxy for the Observability tab.
-# The TSDB lives on hostPath, so metrics keep working while the storage layer
-# is down.
+# Single-node VictoriaMetrics. The API reads it through the API server's
+# service proxy for the Observability tab, the canvas traffic and the Cluster
+# page. The TSDB lives on hostPath, so metrics keep working while the storage
+# layer is down.
 server:
   fullnameOverride: "${VICTORIAMETRICS_RELEASE}"
   retentionPeriod: "${VICTORIAMETRICS_RETENTION}"
+  # Caches are sized from the limit; without one, from the whole server.
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: "${VICTORIAMETRICS_MEMORY_LIMIT}"
+  # Ingestion buffers (~8 MiB each) and workers scale with the CPUs it sees,
+  # every core of the server by default; two are plenty for this load.
+  env:
+    - name: GOMAXPROCS
+      value: "${VICTORIAMETRICS_CPUS}"
+  # Only the series the API queries (apps/api/src/application/metrics/
+  # metrics-query.ts; its spec checks each queried metric is kept here), plus
+  # CPU throttling and OOM counters, kept so a resource limit hint has history.
+  # The chart's own jobs keep ~160k series on a single k3s server, mostly
+  # apiserver and etcd histograms that k3s also serves on the kubelet endpoint.
   scrape:
     enabled: true
+    config:
+      global:
+        # SCRAPE_INTERVAL_SECONDS in the API.
+        scrape_interval: 15s
+      scrape_configs:
+        - job_name: kubernetes-nodes-cadvisor
+          scheme: https
+          tls_config:
+            ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+            insecure_skip_verify: true
+          bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+          honor_timestamps: false
+          metrics_path: /metrics/cadvisor
+          kubernetes_sd_configs:
+            - role: node
+          metric_relabel_configs:
+            - source_labels: [__name__]
+              action: keep
+              regex: container_(cpu_usage_seconds_total|cpu_cfs_(periods|throttled_periods)_total|oom_events_total|memory_working_set_bytes|memory_rss|network_(receive|transmit)_bytes_total|fs_(reads|writes)_bytes_total)
+        - job_name: kubernetes-nodes
+          scheme: https
+          tls_config:
+            ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+            insecure_skip_verify: true
+          bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+          kubernetes_sd_configs:
+            - role: node
+          metric_relabel_configs:
+            - source_labels: [__name__]
+              action: keep
+              regex: kubelet_volume_stats_(used|capacity)_bytes
+        # Hubble's flow and TCP flag counters, from Cilium's annotated Service.
+        - job_name: kubernetes-service-endpoints
+          kubernetes_sd_configs:
+            - role: endpoints
+          relabel_configs:
+            - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name]
+              action: keep
+              regex: kube-system;hubble-metrics
+            - source_labels: [__meta_kubernetes_pod_container_init]
+              action: drop
+              regex: "true"
+            - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_port, __meta_kubernetes_pod_container_port_number]
+              action: keep_if_equal
+            - source_labels: [__address__, __meta_kubernetes_service_annotation_prometheus_io_port]
+              action: replace
+              regex: ([^:]+)(?::\d+)?;(\d+)
+              replacement: \$1:\$2
+              target_label: __address__
+          metric_relabel_configs:
+            - source_labels: [__name__]
+              action: keep
+              regex: hubble_(flows_processed|tcp_flags)_total
+        # The CloudNativePG exporter of each database pod.
+        - job_name: kubernetes-pods
+          kubernetes_sd_configs:
+            - role: pod
+          relabel_configs:
+            - source_labels: [__meta_kubernetes_pod_labelpresent_cnpg_io_cluster]
+              action: keep
+              regex: "true"
+            - source_labels: [__meta_kubernetes_pod_container_init]
+              action: drop
+              regex: "true"
+            - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_port, __meta_kubernetes_pod_container_port_number]
+              action: keep_if_equal
+            - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+              action: keep
+              regex: "true"
+            - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+              action: replace
+              regex: ([^:]+)(?::\d+)?;(\d+)
+              replacement: \$1:\$2
+              target_label: __address__
+            - source_labels: [__meta_kubernetes_namespace]
+              target_label: namespace
+            - source_labels: [__meta_kubernetes_pod_name]
+              target_label: pod
+          metric_relabel_configs:
+            - source_labels: [__name__]
+              action: keep
+              regex: cnpg_(backends_total|pg_database_size_bytes|pg_stat_database_(xact_commit|xact_rollback|blks_hit|blks_read))
   persistentVolume:
     enabled: false
   extraArgs:
     storageDataPath: /vm-data
+    # The chart does not restart the pod when the scrape config changes.
+    promscrape.configCheckInterval: 1m
+    # Defaults to twice VICTORIAMETRICS_CPUS; console queries are small, and
+    # each open Usage Metrics tab sends about one a second.
+    search.maxConcurrentRequests: 16
   extraVolumes:
     - name: data
       hostPath:
@@ -2552,6 +2666,10 @@ spec:
             # Shown in the DNS instructions when an admin sets a custom domain.
             - name: ACCELERATIO_PUBLIC_IP
               value: "${K3S_PUBLIC_IP}"
+            - name: SCAN_MEMORY_LIMIT
+              value: "${SCAN_MEMORY_LIMIT}"
+            - name: SCAN_TIMEOUT_MINUTES
+              value: "${SCAN_TIMEOUT_MINUTES}"
           readinessProbe:
             httpGet:
               path: /healthz
@@ -2666,10 +2784,6 @@ metadata:
   name: registry
   namespace: ${ns}
 data:
-            - name: SCAN_MEMORY_LIMIT
-              value: "${SCAN_MEMORY_LIMIT}"
-            - name: SCAN_TIMEOUT_MINUTES
-              value: "${SCAN_TIMEOUT_MINUTES}"
   # Retention keeps the build cache and the 20 newest images per service.
   config.json: |
     {
@@ -3125,6 +3239,7 @@ main() {
   setup_logging
   log_info "Acceleratio installer ${SCRIPT_NAME} starting"
   validate_cni_paths
+  validate_victoriametrics
   preflight
   resolve_registry_cluster_ip
 

@@ -1,4 +1,7 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
+  clusterUsageQueries,
   createPodResolver,
   foldTraffic,
   instanceQueries,
@@ -7,10 +10,12 @@ import {
   lastValues,
   metricsWindow,
   parseQuantity,
+  postgresQueries,
   projectQueries,
   scalarValue,
   trafficQueries,
   valuesByPod,
+  volumeQueries,
   type WorkloadRef,
 } from '../metrics-query';
 
@@ -294,5 +299,40 @@ describe('foldTraffic', () => {
     ).toEqual([
       expect.objectContaining({ two_way: true, flows_per_second: 3 }),
     ]);
+  });
+});
+
+describe('installer scrape config', () => {
+  // install.sh keeps only the series it names, so a query on any other
+  // metric would find no data.
+  const installer = readFileSync(
+    join(__dirname, '../../../../../../scripts/install.sh'),
+    'utf8',
+  );
+  const kept = [
+    ...installer.matchAll(
+      /source_labels: \[__name__\]\s+action: keep\s+regex: (\S+)/g,
+    ),
+  ].map(([, regex]) => new RegExp(`^(?:${regex})$`));
+  const queries = [
+    projectQueries('ns', '1m'),
+    postgresQueries('ns', '1m'),
+    instanceQueries('ns', ['web-1']),
+    volumeQueries('ns'),
+    clusterUsageQueries,
+    trafficQueries('ns'),
+  ].flatMap((group) => Object.values(group));
+  const metrics = new Set(
+    queries.flatMap((query) =>
+      [...query.matchAll(/([a-z_:][a-z0-9_:]*)\{/g)].map(([, name]) => name),
+    ),
+  );
+
+  it('keeps every metric the API queries', () => {
+    expect(kept.length).toBeGreaterThan(0);
+    expect(metrics.size).toBeGreaterThan(10);
+    expect(
+      [...metrics].filter((name) => !kept.some((regex) => regex.test(name))),
+    ).toEqual([]);
   });
 });

@@ -651,9 +651,14 @@ SSH, with the scripts and requirement checks in `node-join-script.ts`. SSH goes 
 ## Metrics
 
 - `application/metrics/` serves `GET /projects/:projectId/metrics?range=15m|1h|6h|24h|7d` (default
-  `1h`). Data comes from a single-node VictoriaMetrics that scrapes kubelet and cAdvisor metrics;
-  `scripts/install.sh` installs it in the `victoria-metrics` namespace with
-  its TSDB on hostPath.
+  `1h`). Data comes from a single-node VictoriaMetrics; `scripts/install.sh` installs it in the
+  `victoria-metrics` namespace with its TSDB on hostPath, a memory limit
+  (`VICTORIAMETRICS_MEMORY_LIMIT`, 512Mi) and `GOMAXPROCS` (`VICTORIAMETRICS_CPUS`, 2: its
+  ingestion buffers grow with the CPUs it sees). Up to 16 queries run at once, whatever the CPU
+  count. Its scrape config keeps only the metrics `metrics-query.ts` queries (cAdvisor, kubelet
+  volume stats, Hubble, the CloudNativePG exporter) plus cAdvisor's CPU throttling and OOM counters,
+  so a future resource limit hint has history; a new query needs its metric added there, and
+  `metrics-query.spec.ts` fails until it is.
 - `vendor/victoriametrics/victoriametrics.client.ts` queries the Prometheus API through the API
   server's service proxy (`KubernetesService.proxyServiceRequest`, shared with the VictoriaLogs
   client), so it works with the API inside or outside the cluster. `VICTORIAMETRICS_ADDRESS`
@@ -680,6 +685,30 @@ SSH, with the scripts and requirement checks in `node-join-script.ts`. SSH goes 
   500 and `cursor` = the `next_cursor` of the previous page: `<time>~<skip>`, the last line's time
   and how many lines at exactly that time were already returned, so lines that share a timestamp
   are never lost between pages), `GET .../logs/histogram` (lines per level
+  in about 60 buckets), `GET .../logs/sources` (services and pods with line counts, plus live pods) and
+  `GET .../logs/stream` (server-sent events). Every endpoint takes `range=15m|1h|6h|24h|7d` or
+  `start` + `end` (RFC 3339, at most 31 days) and the filters `workload`, `pod`, `level`
+  (`error|warn|info|debug|unknown`, comma separated or repeated) and `q`.
+- Storage is a single-node VictoriaLogs; Vector runs as a DaemonSet from the same chart and reads
+  container logs only from namespaces labelled `app.kubernetes.io/managed-by=acceleratio` (plus a
+  `project-` guard in its VRL). It writes flat fields (`namespace`, `pod`, `container`,
+  `workload_id`, `level`, `stream`, `_msg`) and detects `level` once at ingestion: JSON
+  `level`/`severity`, logfmt `level=`, glog prefixes, upper-case keywords. Logs outlive pods, so
+  history spans restarts and deploys. `scripts/install.sh` (`victorialogs_values`) is the single source
+  of the chart values.
+- `vendor/victorialogs/victorialogs.client.ts` calls `/select/logsql/query`, `/hits` and `/tail`
+  through the API server's service proxy. `VICTORIALOGS_ADDRESS` (default
+  `victoria-logs.victoria-logs:9428`) names the Service.
+- `logs-query.ts` builds LogsQL only from validated, structured filters. Every query starts with the
+  `{namespace="project-<id>"}` stream filter, which is the project isolation; user text only appears
+  JSON-quoted (search is an escaped, case-insensitive substring regexp). Unknown service ids are
+  allowed so deleted services stay filterable.
+- The live stream reads `/select/logsql/tail` from the store, not from pods, so new pods after a
+  deploy appear without reconnecting. It batches lines into unnamed SSE frames
+  (`{ type: 'entries' | 'dropped' | 'error' }`), forwards at most 500 lines/s (the rest are counted
+  as `dropped`), allows 5 open streams per user (checked again at subscription, where concurrent opens cannot
+  race) and completes on shutdown. VictoriaLogs being unreachable is a 503 ("Log storage unavailable" in the console).
+
 ## Security scanning
 
 - `application/security/` scans the images services run with Trivy. `SecurityService` lists the pods of
@@ -737,30 +766,6 @@ SSH, with the scripts and requirement checks in `node-join-script.ts`. SSH goes 
   when it closes nothing, the findings wait instead.
 - The canvas card of a service whose status is `action` shows a shield badge
   (`SecurityAttentionProvider` in `ProjectCanvas` reads `GET …/security` once a minute).
-
-  in about 60 buckets), `GET .../logs/sources` (services and pods with line counts, plus live pods) and
-  `GET .../logs/stream` (server-sent events). Every endpoint takes `range=15m|1h|6h|24h|7d` or
-  `start` + `end` (RFC 3339, at most 31 days) and the filters `workload`, `pod`, `level`
-  (`error|warn|info|debug|unknown`, comma separated or repeated) and `q`.
-- Storage is a single-node VictoriaLogs; Vector runs as a DaemonSet from the same chart and reads
-  container logs only from namespaces labelled `app.kubernetes.io/managed-by=acceleratio` (plus a
-  `project-` guard in its VRL). It writes flat fields (`namespace`, `pod`, `container`,
-  `workload_id`, `level`, `stream`, `_msg`) and detects `level` once at ingestion: JSON
-  `level`/`severity`, logfmt `level=`, glog prefixes, upper-case keywords. Logs outlive pods, so
-  history spans restarts and deploys. `scripts/install.sh` (`victorialogs_values`) is the single source
-  of the chart values.
-- `vendor/victorialogs/victorialogs.client.ts` calls `/select/logsql/query`, `/hits` and `/tail`
-  through the API server's service proxy. `VICTORIALOGS_ADDRESS` (default
-  `victoria-logs.victoria-logs:9428`) names the Service.
-- `logs-query.ts` builds LogsQL only from validated, structured filters. Every query starts with the
-  `{namespace="project-<id>"}` stream filter, which is the project isolation; user text only appears
-  JSON-quoted (search is an escaped, case-insensitive substring regexp). Unknown service ids are
-  allowed so deleted services stay filterable.
-- The live stream reads `/select/logsql/tail` from the store, not from pods, so new pods after a
-  deploy appear without reconnecting. It batches lines into unnamed SSE frames
-  (`{ type: 'entries' | 'dropped' | 'error' }`), forwards at most 500 lines/s (the rest are counted
-  as `dropped`), allows 5 open streams per user (checked again at subscription, where concurrent opens cannot
-  race) and completes on shutdown. VictoriaLogs being unreachable is a 503 ("Log storage unavailable" in the console).
 
 ## Platform updates
 
