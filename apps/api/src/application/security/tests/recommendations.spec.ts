@@ -294,6 +294,40 @@ describe('assessService', () => {
         .service.status,
     ).toBe('ok');
   });
+
+  it('gives one recommendation per kind for a service running two digests', () => {
+    const shared = vuln('high', '2.0');
+    const { recommendations } = assessService(
+      facts({
+        images: [
+          {
+            image: 'nginx:latest',
+            managed: false,
+            vulnerabilities: [shared],
+          },
+          {
+            image: 'nginx:latest',
+            managed: false,
+            vulnerabilities: [shared, vuln('critical', '3.0')],
+          },
+        ],
+      }),
+    );
+    const updates = recommendations.filter(
+      (item) => item.kind === 'image_update',
+    );
+
+    expect(updates).toHaveLength(1);
+    expect(updates[0]).toMatchObject({
+      id: 'image_update:w1',
+      level: 'recommended',
+    });
+    expect(updates[0].fixes).toMatchObject({ critical: 1, high: 1 });
+    expect(updates[0].packages.map((item) => item.name)).toEqual([
+      'pkg-critical',
+      'pkg-high',
+    ]);
+  });
 });
 
 describe('isMovingTag', () => {

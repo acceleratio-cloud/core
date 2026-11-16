@@ -133,7 +133,17 @@ export const assessService = (
   /** Every image has a finished scan. */
   scanned: boolean;
 } => {
-  const recommendations: SecurityRecommendation[] = [];
+  // One recommendation per kind: a service running several digests (a
+  // rollout, `latest` pulled at different times) gets their findings merged.
+  const pending = new Map<
+    RecommendationKind,
+    {
+      level: RecommendationLevel;
+      image: string | null;
+      items: Vulnerability[] | null;
+      update: SecurityRecommendation['update'];
+    }
+  >();
   let platformFixable = 0;
   let waiting = 0;
 
@@ -143,19 +153,31 @@ export const assessService = (
     image: string | null,
     items: Vulnerability[] | null,
     update: SecurityRecommendation['update'] = null,
-  ) =>
-    recommendations.push({
-      id: `${kind}:${facts.workload_id}`,
-      workload_id: facts.workload_id,
-      kind,
-      level,
-      image,
-      fixes: items ? tally(items) : null,
-      packages: items ? packagesOf(items) : [],
-      exploited: items ? items.filter((item) => item.exploited).length : 0,
-      is_new: false,
-      update,
-    });
+  ) => {
+    const earlier = pending.get(kind);
+
+    if (!earlier) {
+      pending.set(kind, { level, image, items, update });
+      return;
+    }
+
+    if (earlier.items && items) {
+      const keys = new Set(earlier.items.map(findingKey));
+
+      // packagesOf expects the most severe first.
+      earlier.items = [
+        ...earlier.items,
+        ...items.filter((item) => !keys.has(findingKey(item))),
+      ].sort(
+        (a, b) =>
+          VULNERABILITY_SEVERITIES.indexOf(a.severity) -
+          VULNERABILITY_SEVERITIES.indexOf(b.severity),
+      );
+      earlier.level = levelOf(earlier.items, facts.public);
+    }
+
+    earlier.update ??= update;
+  };
 
   for (const { image, managed, vulnerabilities, release } of facts.images) {
     if (!vulnerabilities) {
@@ -255,6 +277,20 @@ export const assessService = (
   }
 
   const scanned = facts.images.every((item) => item.vulnerabilities);
+  const recommendations = [...pending].map(
+    ([kind, { level, image, items, update }]): SecurityRecommendation => ({
+      id: `${kind}:${facts.workload_id}`,
+      workload_id: facts.workload_id,
+      kind,
+      level,
+      image,
+      fixes: items ? tally(items) : null,
+      packages: items ? packagesOf(items) : [],
+      exploited: items ? items.filter((item) => item.exploited).length : 0,
+      is_new: false,
+      update,
+    }),
+  );
 
   return {
     service: {

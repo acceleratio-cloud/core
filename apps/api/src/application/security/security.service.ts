@@ -164,7 +164,13 @@ export class SecurityService
     });
 
     const all = assessed.flatMap((item) => item.recommendations);
-    const firstSeen = await this.recordSeen(projectId, all);
+    const firstSeen = await this.recordSeen(
+      projectId,
+      all,
+      assessed
+        .filter((item) => !item.scanned)
+        .map((item) => item.service.workload_id),
+    );
     const baseline = Math.min(...firstSeen.values());
     const now = Date.now();
 
@@ -422,11 +428,13 @@ export class SecurityService
 
   /**
    * When each current recommendation was first given. Ones that are gone are
-   * forgotten, so a recommendation that comes back is new again.
+   * forgotten, so a recommendation that comes back is new again; a service
+   * with an image not scanned yet (a fresh deploy) keeps its own.
    */
   private async recordSeen(
     projectId: string,
     items: SecurityRecommendation[],
+    unscanned: string[],
   ): Promise<Map<string, number>> {
     const ids = items.map((item) => item.id);
 
@@ -450,6 +458,9 @@ export class SecurityService
           eq(securityRecommendationSeen.project_id, projectId),
           ids.length > 0
             ? notInArray(securityRecommendationSeen.recommendation_id, ids)
+            : undefined,
+          unscanned.length > 0
+            ? notInArray(securityRecommendationSeen.workload_id, unscanned)
             : undefined,
         ),
       );

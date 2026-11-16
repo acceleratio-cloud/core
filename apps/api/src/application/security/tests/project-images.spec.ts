@@ -94,6 +94,21 @@ describe('projectImages', () => {
       ),
     ).toEqual([]);
   });
+
+  it('skips pods that ended or are leaving', () => {
+    const web = {
+      name: 'main',
+      image: 'nginx:1.27',
+      imageID: `docker.io/library/nginx@${DIGEST}`,
+    };
+    const evicted = pod('w-web', [web]);
+    const leaving = pod('w-web', [web]);
+
+    evicted.status!.phase = 'Failed';
+    leaving.metadata!.deletionTimestamp = new Date();
+
+    expect(projectImages([evicted, leaving], workloads)).toEqual([]);
+  });
 });
 
 describe('scanTarget', () => {

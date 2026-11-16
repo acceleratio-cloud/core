@@ -27,7 +27,7 @@ const MANAGED_TYPES = new Set<WorkloadType>(['postgres', 'static']);
 /**
  * The images the project's services run now: each running container of a pod
  * that belongs to a service, once per service, container and digest. Init
- * containers and pods of no service are left out.
+ * containers, pods of no service and pods that ended or are leaving are left out.
  */
 export const projectImages = (
   pods: V1Pod[],
@@ -39,7 +39,13 @@ export const projectImages = (
   for (const pod of pods) {
     const owner = byId.get(pod.metadata?.labels?.[WORKLOAD_ID_LABEL] ?? '');
 
-    if (!owner) {
+    // Evicted and finished pods linger with their old images; leaving ones are on their way out.
+    if (
+      !owner ||
+      pod.metadata?.deletionTimestamp ||
+      pod.status?.phase === 'Failed' ||
+      pod.status?.phase === 'Succeeded'
+    ) {
       continue;
     }
 
