@@ -1,5 +1,5 @@
 export type ProjectTabId =
-  'architecture' | 'observability' | 'logs' | 'audit' | 'settings';
+  'architecture' | 'observability' | 'logs' | 'security' | 'audit' | 'settings';
 
 export type ProjectTab = {
   id: ProjectTabId;
@@ -15,6 +15,7 @@ export const PROJECT_TABS: ProjectTab[] = [
   { id: 'architecture', label: 'Architecture' },
   { id: 'observability', label: 'Usage Metrics' },
   { id: 'logs', label: 'Logs' },
+  { id: 'security', label: 'Security' },
   { id: 'audit', label: 'Audit Trail' },
   { id: 'settings', label: 'Settings' },
 ];

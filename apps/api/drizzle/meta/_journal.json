@@ -232,6 +232,27 @@
       "when": 1794505543560,
       "tag": "0032_drop_workload_storage_class",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1794768080214,
+      "tag": "0033_image_scan",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1794775579445,
+      "tag": "0034_security_recommendations",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1794776502575,
+      "tag": "0035_image_version_check",
+      "breakpoints": true
     }
   ]
 }

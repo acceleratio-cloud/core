@@ -12,3 +12,4 @@ export * from './types/platform-update';
 export * from './types/github';
 export * from './types/marketplace';
 export * from './types/audit';
+export * from './types/security';

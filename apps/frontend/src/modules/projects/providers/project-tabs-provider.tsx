@@ -8,9 +8,15 @@ export type LogsTarget = {
   pod?: string;
 };
 
+/** A request to show a service on the canvas; `key` repeats the same one. */
+export type ServiceRequest = { id: string; key: number };
+
 type ProjectTabsContextValue = {
   /** Selects the Logs tab filtered to `target`, from any tab of the page. */
   openLogs: (target: LogsTarget) => void;
+  /** Selects the Architecture tab with the service's details open. */
+  openService: (workloadId: string) => void;
+  serviceRequest: ServiceRequest | null;
 };
 
 const ProjectTabsContext = createContext<ProjectTabsContextValue | null>(null);

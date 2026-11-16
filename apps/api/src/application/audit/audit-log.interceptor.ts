@@ -59,6 +59,9 @@ export const AUDIT_ACTIONS: Record<string, string | null> = {
   // One request per file; the release's create and publish cover the upload.
   'StaticReleasesController.upload': null,
   'StaticReleasesController.publish': 'site.release.publish',
+  'SecurityController.scan': 'security.scan',
+  'SecurityController.acceptRisk': 'security.risk.accept',
+  'SecurityController.restoreRisk': 'security.risk.restore',
 };
 
 const READ_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);

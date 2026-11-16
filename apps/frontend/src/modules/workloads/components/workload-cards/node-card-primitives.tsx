@@ -7,6 +7,7 @@ import {
   Clock,
   LoaderCircle,
   Rocket,
+  ShieldAlert,
   TriangleAlert,
   type LucideIcon,
 } from 'lucide-react';
@@ -20,6 +21,7 @@ import { getApiErrorMessage } from '@/api';
 import { workloadsApi } from '@/api/workloads';
 import { cn } from '@/lib/utils';
 import { useProject } from '@/modules/projects/providers/project-provider';
+import { useNeedsSecurityAction } from '@/modules/security/providers/security-attention-provider';
 import {
   formatAbsoluteTime,
   formatRelativeTime,
@@ -112,12 +114,15 @@ export const NodeHeader = ({
   title,
   subtitle,
   status,
+  workloadId,
 }: {
   icon: ReactNode;
   title: string;
   /** How other services of the project reach this one, such as `api.internal`. */
   subtitle?: string | null;
   status: WorkloadStatusValue;
+  /** Shows a badge while the service needs a security fix. */
+  workloadId?: string;
 }) => (
   <div className="flex items-center gap-2.5 border-b border-edge-subtle bg-surface-muted/40 px-3 py-2.5">
     <span className="flex size-7 shrink-0 items-center justify-center rounded-md border border-border bg-surface-sunken">
@@ -139,9 +144,21 @@ export const NodeHeader = ({
         </span>
       ) : null}
     </span>
+    <SecurityBadge workloadId={workloadId} />
     <StatusMeter status={status} />
   </div>
 );
+
+const SecurityBadge = ({ workloadId }: { workloadId?: string }) =>
+  useNeedsSecurityAction(workloadId) ? (
+    <span
+      title="Needs a security fix: see the Security tab"
+      className="flex shrink-0 items-center text-status-danger"
+    >
+      <ShieldAlert aria-hidden="true" strokeWidth={1.75} className="size-4" />
+      <span className="sr-only">Needs a security fix</span>
+    </span>
+  ) : null;
 
 export const NodeRows = ({ children }: { children: ReactNode }) => (
   <dl className="flex flex-col px-3 py-1.5">{children}</dl>

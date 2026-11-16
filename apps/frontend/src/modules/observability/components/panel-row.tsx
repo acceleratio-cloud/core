@@ -7,7 +7,9 @@ import { cn } from '@/lib/utils';
 
 type PanelRowProps = {
   title: string;
-  panelCount: number;
+  /** Shown as `(3 panels)`; `meta` replaces it with other wording. */
+  panelCount?: number;
+  meta?: string;
   className?: string;
   children: ReactNode;
 };
@@ -18,7 +20,8 @@ type PanelRowProps = {
  */
 export const PanelRow = ({
   title,
-  panelCount,
+  panelCount = 0,
+  meta,
   className,
   children,
 }: PanelRowProps) => {
@@ -47,7 +50,7 @@ export const PanelRow = ({
             {title}
           </span>
           <span className="font-mono text-[11px] text-fg-tertiary">
-            ({panelCount} {panelCount === 1 ? 'panel' : 'panels'})
+            ({meta ?? `${panelCount} ${panelCount === 1 ? 'panel' : 'panels'}`})
           </span>
         </button>
       </h2>

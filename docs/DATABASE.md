@@ -131,6 +131,21 @@ erDiagram
         timestamp updated_at
     }
     storage_class ||--o{ storage_benchmark : "measured by"
+    image_scan {
+        uuid id PK
+        varchar digest UK
+        text image
+        image_scan_status status
+        text status_message
+        jsonb counts
+        integer fixable
+        jsonb vulnerabilities
+        varchar external_name
+        timestamp requested_at
+        timestamp started_at
+        timestamp finished_at
+        timestamp last_seen_at
+    }
     storage_benchmark {
         uuid id PK
         uuid storage_class_id FK
@@ -312,6 +327,49 @@ finishing after a restart still credits them). `log` keeps the last 64 KiB of th
 the build ends, because the Job and its pod are deleted an hour later. A build cancelled from the
 console or superseded by a newer push ends as `cancelled` (migration `0025`) and is never deployed,
 even when its Job finished first. Rows go with their workload.
+
+### `image_scan`
+
+The latest vulnerability scan of one container image (migration `0033`), keyed by `digest`
+(`image_scan_digest_unique`), so services in any project that run the same image share it. It has no
+foreign key: the API adds a row when it sees a pod of a service run an image (on a read of the Security
+tab and in an hourly sweep of every project), and `last_seen_at` records the last such sighting; rows
+not seen for 7 days are deleted. `image` is the `<repository>@<digest>` a node pulled, which the
+scanner pulls again.
+
+`status` is `pending` → `scanning` → `succeeded` or `failed`; `requested_at` orders the queue. The
+partial unique index `image_scan_active_unique` allows one `scanning` row, so one Trivy Job runs at a
+time across the cluster. A finished scan of an image still in use returns to `pending` after a day,
+because the vulnerability database grows. `external_name` is the Job name in the scan namespace
+(`acceleratio-security`). A succeeded scan stores `counts` (per severity, `critical` to `unknown`),
+`fixable` (findings with a fixed version) and `vulnerabilities`, highest severity first and capped at
+2000 entries, each with its `kind` (`os` for a distribution package, `library` for an application
+dependency); `counts` covers every finding. `status_message` explains a failure.
+
+### `security_acceptance`
+
+A security recommendation a user chose to leave alone (migration `0034`), keyed by
+`recommendation_id` (`<kind>:<workload id>`). It keeps the `reason`, who accepted it (`accepted_by`,
+a name or email), `expires_at` (30, 90 or 180 days after acceptance) and a snapshot of what the
+recommendation closed then (`fixes` per severity, `exploited`). The API ignores it once it expires
+or once the recommendation has more critical, high or exploited findings than the snapshot, and
+deletes expired rows in its hourly sweep. Rows go with their project or workload.
+
+### `security_recommendation_seen`
+
+When the API first gave each current recommendation of a project (migration `0034`). Rows of
+recommendations that are no longer given are deleted, so one that returns counts as new again. A
+recommendation is new for a week after `first_seen_at`, unless it came within an hour of the
+project's earliest row. Rows go with their project or workload.
+
+### `image_version_check`
+
+The newest release of the same line as an image a Docker service names (migration `0035`), keyed by
+`image` (`<registry>/<repository>:<tag>`). `candidate_tag` and `candidate_digest` are null when the
+line has no newer release; `error` says why the registry could not be read. `checked_at` is the
+last lookup: one runs at most once a day per image, or after an hour when it failed, and rows not
+looked up for a week are deleted. The release is scanned like any image, through `image_scan` by
+`candidate_digest`.
 
 ### `workload_domain`
 

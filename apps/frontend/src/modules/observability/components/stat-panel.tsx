@@ -4,6 +4,7 @@ import { useId } from 'react';
 import { Area, AreaChart, ResponsiveContainer, YAxis } from 'recharts';
 
 import type { MetricsPoint } from '@acceleratio/shared';
+import { cn } from '@/lib/utils';
 import { splitValue } from '../utils/format';
 import { Panel } from './panel';
 
@@ -15,6 +16,8 @@ type StatPanelProps = {
   caption?: string;
   /** History behind the figure, drawn as a quiet sparkline. */
   points?: MetricsPoint[];
+  /** Text color of the figure, for a reading that is an alarm. */
+  tone?: string;
 };
 
 /** A single headline figure with its trend underneath. */
@@ -23,6 +26,7 @@ export const StatPanel = ({
   value,
   caption,
   points,
+  tone,
 }: StatPanelProps) => {
   const gradientId = useId().replace(/:/g, '');
   const { number, unit } = splitValue(value ?? '—');
@@ -31,7 +35,12 @@ export const StatPanel = ({
   return (
     <Panel title={title} wellClassName="h-32">
       <div className="relative z-10 flex flex-col gap-1.5 px-3.5 pt-3.5">
-        <p className="flex items-baseline gap-1.5 font-mono tracking-tight text-fg-primary tabular-nums">
+        <p
+          className={cn(
+            'flex items-baseline gap-1.5 font-mono tracking-tight text-fg-primary tabular-nums',
+            tone,
+          )}
+        >
           <span className="text-[28px] leading-none font-medium">{number}</span>
           {unit ? (
             <span className="text-sm leading-none text-fg-secondary">

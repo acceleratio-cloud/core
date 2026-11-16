@@ -1,0 +1,171 @@
+---
+title: Security
+description: Known vulnerabilities in the images your services run, and what to do about them.
+---
+
+A project's **Security** tab tells you what to fix in your services, and what
+you can leave alone. It is built on scans of every image your services run
+with [Trivy](https://trivy.dev): operating system packages and the
+application's own dependencies (npm, Python, Go, Java and others).
+
+A scan of a real image finds hundreds of known vulnerabilities, and most of
+them are not yours to fix: no fixed version exists yet, or the fix arrives
+with the image's next release or a platform update. The tab turns them into
+a short list of actions, each saying what it closes, and keeps the rest out
+of the way.
+
+## The dashboard
+
+![The Security tab of Supabase: 1 urgent action, 1 finding exploited in the wild, 8 of 8 images scanned, services by status and findings by severity](/screenshots/security.png)
+
+| Row | What it shows |
+| --- | --- |
+| Summary | Urgent actions, findings exploited in the wild, public services, images scanned, all findings and how many have a fixed version, accepted risks |
+| Overview | Services by status, findings by severity, and who fixes the findings: your actions, Acceleratio, nobody yet, or accepted |
+| Services | Every service, most pressing first: its status, whether it is public, its findings by severity and its number of actions. Click one to open it on the canvas |
+| Recommended actions | What to do, most urgent first. See [Recommended actions](#recommended-actions) |
+| Can wait | Fixes that arrive with a platform update, findings without a fix yet, and accepted risks |
+| All vulnerabilities | Every image with its findings by severity. Open one for each vulnerability, its package, installed and fixed version, and a link to [OSV](https://osv.dev) |
+
+Every row folds away. **Scan now** at the top right scans the project's
+images again, and shows when the last scan finished.
+
+## Service status
+
+Each service gets one status:
+
+| Status | Meaning |
+| --- | --- |
+| Need action | A fix you can apply closes something serious |
+| Update available | A fix you can apply, without rush |
+| Handled by Acceleratio | Fixes arrive with a [platform update](/settings/updates) |
+| Waiting for fixes | Known vulnerabilities you cannot fix yet: no fixed version exists, or no release of the image includes it |
+| Up to date | Nothing known |
+
+A service is **public** when it has a domain, or when it is a database with
+its port open to everyone.
+
+## Recommended actions
+
+Each action says which findings it closes, by severity, and lists the most
+severe packages with their installed and fixed versions.
+
+| Action | When |
+| --- | --- |
+| Update dependencies | Packages of a service built from GitHub have fixed versions. Raise them in the project's dependency file; the next deploy builds them in |
+| Update the base image | Packages of the image a `Dockerfile` starts `FROM` have fixes. Move `FROM` to a newer tag, or rebuild if it follows a moving one |
+| Update to a newer release | A Docker service runs an image that has a newer release with fixes. See below |
+| Restrict access | A database port is open to the whole internet. Allow only the networks that need it |
+| Pin a version | An image follows `latest` or no tag, so a redeploy can pull different code |
+
+An action is **urgent** when it closes a vulnerability that CISA lists as
+[exploited in the wild](https://www.cisa.gov/known-exploited-vulnerabilities-catalog),
+or a critical one on a public service. Others are recommended, or optional
+when they close only medium and low findings. An action that appeared in the
+last week says **New**, and the canvas marks services that need action with a
+shield.
+
+### Updating an image to a newer release
+
+For a Docker service that names its image by a version, such as
+`supabase/postgres:17.6.1.136`, Acceleratio looks up the newest release of
+the same line in the image's registry:
+
+- the same major version, prefix and variant: `v2.148.3` moves to `v2.161.0`,
+  `2.11.9-alpine` to a newer `-alpine`, never to `3.0.0`;
+- no pre-releases such as `-rc1` or `-beta`;
+- a build hash in the tag, such as `2026.11.02-sha-a05e7ec`, follows newer
+  builds.
+
+The release is scanned before it is recommended, so the action says what the
+update closes and what remains after it, for example: _Update db to
+17.12.0.000. Closes 1 critical, 54 high, 70 medium and 91 low; 7 medium and 1
+low remain._ While the release is being scanned, the action names it without
+the counts.
+
+When no newer release exists, or it fixes nothing (some releases update the
+application but not the packages under it), the findings wait under **Waiting
+for fixes** until a release does. Releases are looked up once a day per image.
+Docker Hub, GitHub Container Registry, Quay and other public registries are
+read without an account; listing tags does not count against Docker Hub's
+pull limit. A registry that asks for credentials gets no version: the action
+asks you to look for a newer release instead.
+
+Acceleratio never changes the image itself: **Edit image** opens the service,
+and the update is a new version you deploy.
+
+## Accepting a risk
+
+When an action does not apply, for example the service is not reachable the
+way the finding needs, choose **Accept risk**, say why and for how long (30,
+90 or 180 days). It moves to **Accepted risks** with your reason and name, and
+comes back when it expires, or sooner if it gets worse: more critical, high or
+exploited findings than when you accepted it. **Restore** brings it back at
+once. Accepting and restoring are recorded in the
+[Audit Trail](/workloads#project-tabs).
+
+## When images are scanned
+
+Each image is scanned when a service first runs it and again every day, since
+new vulnerabilities are published all the time. **Scan now** scans the
+project's images again at once. An image several services run is scanned once.
+
+One scan runs at a time across the cluster, as a short job in the
+`acceleratio-security` namespace; nothing runs between scans. The first scan
+of an image pulls it from its registry once and keeps a list of its packages
+(an SBOM); daily scans check that list against a fresh vulnerability database
+and never pull the image again. Images built from GitHub are read from the
+cluster's own registry. The database and the lists are kept on a 10 GiB
+volume; a list no image has used for 14 days is deleted.
+
+The scan job runs as an unprivileged user with a read-only file system, no
+Linux capabilities and the network rules of a build: it can reach the
+internet and the cluster's DNS and registry, nothing else in the cluster.
+
+### Internet access
+
+Scanning needs outbound HTTPS to:
+
+- Trivy's public vulnerability databases, refreshed on every scan;
+- the registries of the images, for the first pull and for release lookups
+  (Docker Hub's own API for images on Docker Hub);
+- `www.cisa.gov`, for the catalog of exploited vulnerabilities, once a day.
+
+Without it, scans fail and the tab keeps the last good results.
+
+### Settings
+
+| Installer setting | Default | Meaning |
+| --- | --- | --- |
+| `SCAN_MEMORY_LIMIT` | `1Gi` | Memory of one scan, at least `256Mi` |
+| `SCAN_TIMEOUT_MINUTES` | `20` | How long one scan may run, 1 to 180 |
+
+Set them in the installer settings and run the installer again; see the
+[installer README](https://github.com/acceleratio-cloud/core/blob/main/scripts/README.md).
+
+### When a scan fails
+
+The **Scan** column of **All vulnerabilities** says why:
+
+| Message | What to do |
+| --- | --- |
+| The scanner ran out of its 1Gi memory on this image | Raise `SCAN_MEMORY_LIMIT` |
+| The scan ran longer than 20 minutes | Raise `SCAN_TIMEOUT_MINUTES`, or check the connection to the image's registry |
+| This image reference cannot be scanned | The image name is not one a registry can serve |
+| The scan could not be started in the cluster | Check that the cluster can schedule a job in `acceleratio-security` |
+| An error from Trivy | Usually the registry or the vulnerability database could not be reached |
+
+A failed scan is tried again with the next daily scan, or at once with
+**Scan now**.
+
+## Limits
+
+- Each image keeps its 2,000 most severe findings. For larger images the
+  counts are complete, but what an update closes is counted from those 2,000.
+- Findings exploited in the wild that no release of the image fixes yet are
+  listed under **Waiting for fixes**, not as an action.
+- The tab shows the latest scan, not a history.
+- PostgreSQL and static sites run images that Acceleratio picks, and services
+  built from GitHub without a Dockerfile start from a base image Acceleratio
+  picks. Their fixes arrive with a platform update; there is nothing to change
+  in these services.
