@@ -26,12 +26,14 @@ import {
 import { fromNodeHeaders } from 'better-auth/node';
 import type { Request, Response } from 'express';
 import type {
+  AcceptInvitePayload,
   AuthSession,
   AuthStatusResponse,
   AuthSessionSummary,
   AuthUser,
   ChangePasswordPayload,
   ChangePasswordResponse,
+  InvitePreview,
   SessionListResponse,
   SessionResponse,
   SignInEmailPayload,
@@ -42,6 +44,16 @@ import { DATABASE } from '@/vendor/db/database.constants';
 import type { Database } from '@/vendor/db/database.constants';
 import { user } from '@/vendor/db/schema';
 import { normalizeName } from '@/common/validation';
+import {
+  CurrentAccess,
+  RequireAccess,
+  toMemberAccess,
+  type Access,
+} from '@/application/member/access';
+import {
+  INVALID_INVITE_MESSAGE,
+  MemberService,
+} from '@/application/member/member.service';
 import { AuthExceptionFilter } from './auth-exception.filter';
 import { PasswordAttemptLimiter } from './password-attempt-limiter';
 
@@ -72,12 +84,14 @@ interface AuthSessionLike {
 }
 
 @UseFilters(AuthExceptionFilter)
+@RequireAccess('member')
 @Controller('auth')
 export class AuthController {
   constructor(
     @Inject(DATABASE) private readonly db: Database,
     private readonly authService: AuthService,
     private readonly passwordLimiter: PasswordAttemptLimiter,
+    private readonly members: MemberService,
   ) {}
 
   @Get('status')
@@ -109,8 +123,70 @@ export class AuthController {
         returnHeaders: true,
       }),
     );
+    const userId = result.user.id;
+
+    try {
+      // A second, concurrent installation loses here: one owner only.
+      await this.members.addOwner(userId);
+    } catch (error) {
+      await this.members.deleteUser(userId);
+      throw error;
+    }
 
     return this.serializeAuthResult(result);
+  }
+
+  @Get('invites/:token')
+  @AllowAnonymous()
+  invite(@Param('token') token: string): Promise<InvitePreview> {
+    return this.members.previewInvite(token);
+  }
+
+  /** Creates the account an invite link grants and signs it in. */
+  @Post('invites/:token/accept')
+  @HttpCode(HttpStatus.OK)
+  @AllowAnonymous()
+  async acceptInvite(
+    @Param('token') token: string,
+    @Body() body: AcceptInvitePayload,
+    @Req() request: Request,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<Record<string, unknown>> {
+    const name = normalizeName(body?.name);
+    const { email, password } = body ?? {};
+
+    if (typeof email !== 'string' || typeof password !== 'string') {
+      throw new BadRequestException('Enter an email and a password');
+    }
+
+    const claimed = await this.members.claimInvite(token);
+
+    if (!claimed) {
+      throw new NotFoundException(INVALID_INVITE_MESSAGE);
+    }
+
+    let userId: string | undefined;
+
+    try {
+      const result = await this.forwardAuthResult(response, () =>
+        this.authService.api.signUpEmail({
+          body: { name, email, password },
+          headers: fromNodeHeaders(request.headers),
+          returnHeaders: true,
+        }),
+      );
+      userId = result.user.id;
+      await this.members.addFromInvite(userId, claimed);
+
+      return this.serializeAuthResult(result);
+    } catch (error) {
+      // The link stays usable and no account is left without access.
+      await this.members.releaseInvite(claimed.id);
+      if (userId) {
+        await this.members.deleteUser(userId);
+      }
+      throw error;
+    }
   }
 
   @Post('sign-in/email')
@@ -121,27 +197,37 @@ export class AuthController {
     @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
   ): Promise<Record<string, unknown>> {
-    const result = await this.forwardAuthResult(response, () =>
-      this.authService.api.signInEmail({
+    const result = await this.forwardAuthResult(response, async () => {
+      const signedIn = await this.authService.api.signInEmail({
         body,
         headers: fromNodeHeaders(request.headers),
         returnHeaders: true,
-      }),
-    );
+      });
+
+      // Before any cookie is set: a valid password is not access.
+      await this.members.assertMember(signedIn.response.user.id);
+
+      return signedIn;
+    });
 
     return this.serializeAuthResult(result);
   }
 
   @Get('session')
   @OptionalAuth()
-  session(@Session() session: UserSession | null): SessionResponse {
-    if (!session) {
-      return { session: null, user: null };
+  session(
+    @Session() session: UserSession | null,
+    @CurrentAccess() access: Access | undefined,
+  ): SessionResponse {
+    // AccessGuard clears the session of an account that has no access.
+    if (!session || !access) {
+      return { session: null, user: null, access: null };
     }
 
     return {
       session: this.toAuthSession(session.session),
       user: this.toAuthUser(session.user),
+      access: toMemberAccess(access),
     };
   }
 

@@ -1,11 +1,13 @@
 import { api } from "@/api";
 import type {
+  AcceptInvitePayload,
   ApiErrorResponse,
   AuthStatusResponse,
   AuthUser,
   AuthUserResponse,
   ChangePasswordPayload,
   ChangePasswordResponse,
+  InvitePreview,
   SessionListResponse,
   SessionResponse,
   SignInEmailPayload,
@@ -61,6 +63,19 @@ export const authApi = {
   revokeOtherSessions: async () => {
     const { data } = await api.delete<ChangePasswordResponse>(
       "/auth/sessions/others",
+    );
+    return data;
+  },
+  getInvite: async (token: string) => {
+    const { data } = await api.get<InvitePreview>(
+      `/auth/invites/${encodeURIComponent(token)}`,
+    );
+    return data;
+  },
+  acceptInvite: async (token: string, payload: AcceptInvitePayload) => {
+    const { data } = await api.post<AuthUserResponse>(
+      `/auth/invites/${encodeURIComponent(token)}/accept`,
+      payload,
     );
     return data;
   },

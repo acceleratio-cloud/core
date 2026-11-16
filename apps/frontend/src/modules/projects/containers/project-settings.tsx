@@ -7,6 +7,8 @@ import { sileo } from 'sileo';
 
 import { getApiErrorMessage } from '@/api';
 import { projectsApi } from '@/api/projects';
+import { useAuth } from '@/modules/auth/providers/auth-provider';
+import { canProject } from '@/modules/auth/utils/access';
 import { SettingsSection } from '@/modules/settings/components/settings-section';
 import { CopyButton } from '@/shared/components/copy-button';
 import { Button } from '@/shared/components/ui/button';
@@ -33,15 +35,18 @@ const NAME_MAX_LENGTH = 48;
 
 /** The Settings tab: project identity and the danger zone. */
 export const ProjectSettings = () => {
+  const { project } = useProject();
+  const { access } = useAuth();
+
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 pt-20 pb-10 sm:px-6">
-      <GeneralSection />
-      <DangerSection />
+      <GeneralSection editable={canProject(access, project.id, 'edit')} />
+      {canProject(access, project.id, 'delete') ? <DangerSection /> : null}
     </div>
   );
 };
 
-const GeneralSection = () => {
+const GeneralSection = ({ editable }: { editable: boolean }) => {
   const { project, replaceProject } = useProject();
   const {
     register,
@@ -78,6 +83,7 @@ const GeneralSection = () => {
               <FieldLabel htmlFor="project-settings-name">Name</FieldLabel>
               <Input
                 id="project-settings-name"
+                readOnly={!editable}
                 autoComplete="off"
                 maxLength={NAME_MAX_LENGTH}
                 aria-invalid={!!errors.name}
@@ -113,11 +119,13 @@ const GeneralSection = () => {
           <FieldError>{errors.root?.message}</FieldError>
         </FieldGroup>
 
-        <div className="mt-6 flex items-center gap-3 border-t border-border pt-5">
-          <Button type="submit" loading={isSubmitting} disabled={!isDirty}>
-            Save changes
-          </Button>
-        </div>
+        {editable ? (
+          <div className="mt-6 flex items-center gap-3 border-t border-border pt-5">
+            <Button type="submit" loading={isSubmitting} disabled={!isDirty}>
+              Save changes
+            </Button>
+          </div>
+        ) : null}
       </form>
     </SettingsSection>
   );

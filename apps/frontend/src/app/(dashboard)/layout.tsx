@@ -17,5 +17,7 @@ export default async function DefaultDashboardLayout({
     redirect("/auth");
   }
 
-  return <DashboardLayout>{children}</DashboardLayout>;
+  return (
+    <DashboardLayout access={session.access}>{children}</DashboardLayout>
+  );
 }

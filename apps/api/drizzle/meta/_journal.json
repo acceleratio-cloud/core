@@ -253,6 +253,13 @@
       "when": 1794776502575,
       "tag": "0035_image_version_check",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1794827769814,
+      "tag": "0036_members",
+      "breakpoints": true
     }
   ]
 }

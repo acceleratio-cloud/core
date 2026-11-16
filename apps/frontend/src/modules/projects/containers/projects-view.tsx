@@ -1,55 +1,62 @@
-"use client"
+'use client';
 
-import { useEffect, useState } from "react"
-import { Plus } from "lucide-react"
+import { useEffect, useState } from 'react';
+import { Plus } from 'lucide-react';
 
-import { getApiErrorMessage } from "@/api"
-import { projectsApi } from "@/api/projects"
-import type { Project } from "@acceleratio/shared"
-import { Button } from "@/shared/components/ui/button"
-import { ProjectCard, ProjectCardSkeleton } from "../components/project-card"
-import { ProjectsEmptyState } from "../components/projects-empty-state"
-import { CreateProjectDialog, type ProjectDraft } from "./create-project-dialog"
+import { getApiErrorMessage } from '@/api';
+import { projectsApi } from '@/api/projects';
+import type { Project } from '@acceleratio/shared';
+import { useAuth } from '@/modules/auth/providers/auth-provider';
+import { isManager } from '@/modules/auth/utils/access';
+import { Button } from '@/shared/components/ui/button';
+import { ProjectCard, ProjectCardSkeleton } from '../components/project-card';
+import { ProjectsEmptyState } from '../components/projects-empty-state';
+import {
+  CreateProjectDialog,
+  type ProjectDraft,
+} from './create-project-dialog';
 
-const SKELETON_COUNT = 6
+const SKELETON_COUNT = 6;
 
 export const ProjectsView = () => {
-  const [projects, setProjects] = useState<Project[]>([])
-  const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [isCreateOpen, setIsCreateOpen] = useState(false)
+  const { access } = useAuth();
+  const canCreate = isManager(access);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
 
   useEffect(() => {
-    let active = true
+    let active = true;
 
     projectsApi
       .list()
       .then((items) => {
         if (active) {
-          setProjects(items)
+          setProjects(items);
         }
       })
       .catch((requestError) => {
         if (active) {
-          setError(getApiErrorMessage(requestError))
+          setError(getApiErrorMessage(requestError));
         }
       })
       .finally(() => {
         if (active) {
-          setIsLoading(false)
+          setIsLoading(false);
         }
-      })
+      });
 
     return () => {
-      active = false
-    }
-  }, [])
+      active = false;
+    };
+  }, []);
 
   const handleCreate = async ({ name }: ProjectDraft) => {
-    const project = await projectsApi.create({ name })
+    const project = await projectsApi.create({ name });
 
-    setProjects((currentProjects) => [project, ...currentProjects])
-  }
+    setProjects((currentProjects) => [project, ...currentProjects]);
+  };
 
   return (
     <>
@@ -59,18 +66,17 @@ export const ProjectsView = () => {
             Projects
           </h1>
           <p className="mt-2.5 text-sm text-muted-foreground">
-            Isolated environments for the servers and infrastructure you operate.
+            Isolated environments for the servers and infrastructure you
+            operate.
           </p>
         </div>
 
-        <Button onClick={() => setIsCreateOpen(true)}>
-          <Plus
-            data-icon="inline-start"
-            aria-hidden="true"
-            strokeWidth={2}
-          />
-          New project
-        </Button>
+        {canCreate ? (
+          <Button onClick={() => setIsCreateOpen(true)}>
+            <Plus data-icon="inline-start" aria-hidden="true" strokeWidth={2} />
+            New project
+          </Button>
+        ) : null}
       </div>
 
       {isLoading ? (
@@ -93,7 +99,9 @@ export const ProjectsView = () => {
           ))}
         </div>
       ) : (
-        <ProjectsEmptyState onCreate={() => setIsCreateOpen(true)} />
+        <ProjectsEmptyState
+          onCreate={canCreate ? () => setIsCreateOpen(true) : undefined}
+        />
       )}
 
       <CreateProjectDialog
@@ -103,5 +111,5 @@ export const ProjectsView = () => {
         existingNames={projects.map((project) => project.name)}
       />
     </>
-  )
-}
+  );
+};

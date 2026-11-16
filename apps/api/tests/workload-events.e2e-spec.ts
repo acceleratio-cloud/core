@@ -17,6 +17,13 @@ import type {
 import { WorkloadEventsService } from '@/application/workload/observer/workload-events.service';
 import { WorkloadController } from '@/application/workload/workload.controller';
 import { WorkloadService } from '@/application/workload/workload.service';
+import { DockerWorkloadNetworkService } from '@/application/workload/docker/docker-workload-network.service';
+import { WorkloadInstancesService } from '@/application/workload/instances/workload-instances.service';
+import { APP_INTERCEPTOR } from '@nestjs/core';
+import { AccessRevocationInterceptor } from '@/application/member/access-revocation.interceptor';
+import { AccessService } from '@/application/member/access.service';
+import { DATABASE } from '@/vendor/db/database.constants';
+import { signedInOwner } from './signed-in-owner';
 
 const projectId = '2f1c9a3e-8b7d-4e6f-9a0b-1c2d3e4f5a6b';
 const otherProjectId = '9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d';
@@ -98,6 +105,7 @@ const readWorkloadEvent = (
 describe('Workload events (e2e)', () => {
   let app: INestApplication;
   let events: WorkloadEventsService;
+  let access: AccessService;
   let request: http.ClientRequest | undefined;
 
   beforeEach(async () => {
@@ -106,11 +114,18 @@ describe('Workload events (e2e)', () => {
       providers: [
         WorkloadEventsService,
         { provide: WorkloadService, useValue: { list: jest.fn() } },
+        { provide: WorkloadInstancesService, useValue: {} },
+        { provide: DockerWorkloadNetworkService, useValue: {} },
+        ...signedInOwner,
+        { provide: DATABASE, useValue: {} },
+        AccessService,
+        { provide: APP_INTERCEPTOR, useClass: AccessRevocationInterceptor },
       ],
     }).compile();
 
     app = moduleRef.createNestApplication();
     events = app.get(WorkloadEventsService);
+    access = app.get(AccessService);
     await app.listen(0);
   });
 
@@ -183,5 +198,35 @@ describe('Workload events (e2e)', () => {
     events.publish(positionEvent);
 
     await expect(received).resolves.toEqual(positionEvent);
+  }, 15_000);
+
+  it("ends the stream when the viewer's access changes", async () => {
+    const server = app.getHttpServer() as http.Server;
+    const address = server.address() as AddressInfo;
+    const host = address.family === 'IPv6' ? '::1' : '127.0.0.1';
+
+    const client = http.get({
+      host,
+      port: address.port,
+      path: `/projects/${projectId}/workloads/events`,
+      headers: { accept: 'text/event-stream' },
+    });
+
+    request = client;
+
+    const response = await new Promise<http.IncomingMessage>(
+      (resolve, reject) => {
+        client.once('response', resolve);
+        client.once('error', reject);
+      },
+    );
+    const ended = new Promise<void>((resolve) => {
+      response.on('end', resolve);
+      response.resume();
+    });
+
+    access.notify(['owner-1']);
+
+    await expect(ended).resolves.toBeUndefined();
   }, 15_000);
 });

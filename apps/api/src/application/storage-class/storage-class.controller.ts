@@ -17,12 +17,14 @@ import type {
   UpdateStorageClassPayload,
 } from '@acceleratio/shared';
 import { StorageClassService } from './storage-class.service';
+import { RequireAccess } from '@/application/member/access';
 
 @Controller('storage-classes')
 export class StorageClassController {
   constructor(private readonly storageClassService: StorageClassService) {}
 
   @Get()
+  @RequireAccess('member')
   list(): Promise<StorageClass[]> {
     return this.storageClassService.list();
   }

@@ -20,6 +20,12 @@ export const SETTINGS_SECTIONS: SettingsNavItem[] = [
   { id: 'profile', label: 'Profile', icon: UserRound },
 ];
 
+/** Custom roles have no installation settings, only their profile. */
+export const settingsSectionsFor = (custom: boolean): SettingsNavItem[] =>
+  custom
+    ? SETTINGS_SECTIONS.filter((section) => section.id === 'profile')
+    : SETTINGS_SECTIONS;
+
 export const isSettingsSectionId = (
   value: string,
 ): value is SettingsSectionId =>

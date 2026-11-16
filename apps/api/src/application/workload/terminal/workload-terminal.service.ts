@@ -16,12 +16,15 @@ import type {
   WorkloadTerminalClientMessage,
   WorkloadTerminalServerMessage,
 } from '@acceleratio/shared';
+import type { Subscription } from 'rxjs';
 import { WebSocket, WebSocketServer, type RawData } from 'ws';
 import { AuditLogService } from '@/application/audit/audit-log.service';
 import {
   clientAddress,
   userAgentOf,
 } from '@/application/audit/audit-log.request';
+import { allows } from '@/application/member/access';
+import { AccessService } from '@/application/member/access.service';
 import { projectNamespace } from '@/common/naming';
 import { getKubernetesStatusCode } from '@/vendor/kubernetes/kubernetes-error';
 import {
@@ -53,6 +56,7 @@ export const PING_INTERVAL_MS = 30_000;
 const MAX_PAYLOAD_BYTES = 1024 * 1024;
 const CLOSE_NORMAL = 1000;
 const CLOSE_GOING_AWAY = 1001;
+const CLOSE_POLICY_VIOLATION = 1008;
 const CLOSE_INTERNAL_ERROR = 1011;
 
 class UpgradeRejection extends Error {
@@ -183,6 +187,7 @@ export class WorkloadTerminalService
   /** Open sessions and their user, for the per-user cap and shutdown. */
   private readonly sessions = new Map<WebSocket, string>();
   private httpServer?: Server;
+  private accessChanges?: Subscription;
 
   private readonly onUpgrade = (
     request: IncomingMessage,
@@ -198,9 +203,19 @@ export class WorkloadTerminalService
     private readonly instances: WorkloadInstancesService,
     private readonly kubernetes: KubernetesService,
     private readonly audit: AuditLogService,
+    private readonly access: AccessService,
   ) {}
 
   onApplicationBootstrap(): void {
+    // A shell outlives the request that opened it: end it when access changes.
+    this.accessChanges = this.access.changes().subscribe((userId) => {
+      for (const [socket, owner] of this.sessions) {
+        if (owner === userId) {
+          socket.close(CLOSE_POLICY_VIOLATION, 'Your access has changed');
+        }
+      }
+    });
+
     const server = this.adapterHost.httpAdapter?.getHttpServer() as
       Server | undefined;
 
@@ -214,6 +229,7 @@ export class WorkloadTerminalService
 
   onModuleDestroy(): void {
     this.httpServer?.off('upgrade', this.onUpgrade);
+    this.accessChanges?.unsubscribe();
 
     for (const socket of this.sessions.keys()) {
       socket.close(CLOSE_GOING_AWAY, 'Server is shutting down');
@@ -317,6 +333,20 @@ export class WorkloadTerminalService
 
     const userId = session.user.id;
     remember(session);
+
+    // Nest guards do not run on upgrades; this is the same check AccessGuard makes.
+    const access = await this.access.resolve(userId);
+
+    if (!access) {
+      throw new UpgradeRejection(401, 'This account no longer has access');
+    }
+
+    if (!allows(access, target.projectId, 'edit')) {
+      throw new UpgradeRejection(
+        403,
+        "Your role can't open a terminal in this project",
+      );
+    }
 
     if (this.sessionCountOf(userId) >= MAX_SESSIONS_PER_USER) {
       throw new UpgradeRejection(429, 'Too many open terminals');
@@ -495,6 +525,18 @@ export class WorkloadTerminalService
         `Terminal socket error on ${label}: ${describeError(error)}`,
       );
     });
+
+    // A change during the upgrade missed this socket; later ones close it.
+    const access = await this.access.resolve(target.userId);
+
+    if (!access || !allows(access, target.projectId, 'edit')) {
+      finish(
+        { type: 'error', message: 'Your access has changed' },
+        CLOSE_POLICY_VIOLATION,
+      );
+      void this.recordTerminal(request, target, 403, 'Access changed');
+      return;
+    }
 
     try {
       connection = await this.kubernetes.execInPod({

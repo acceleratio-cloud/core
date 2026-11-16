@@ -130,7 +130,8 @@ const ProjectsEmptyIllustration = () => {
   );
 };
 
-export const ProjectsEmptyState = ({ onCreate }: { onCreate: () => void }) => {
+/** Without `onCreate` (a role that cannot create projects) there is no button. */
+export const ProjectsEmptyState = ({ onCreate }: { onCreate?: () => void }) => {
   return (
     <div className="mt-6 flex min-h-80 flex-col items-center justify-center panel-lit rounded-lg px-6 py-14 text-center">
       <ProjectsEmptyIllustration />
@@ -139,13 +140,17 @@ export const ProjectsEmptyState = ({ onCreate }: { onCreate: () => void }) => {
         No projects yet
       </h2>
       <p className="mt-2 max-w-[19rem] text-sm text-balance text-muted-foreground">
-        Create a project to group the servers and infrastructure you operate.
+        {onCreate
+          ? 'Create a project to group the servers and infrastructure you operate.'
+          : 'No project has been shared with you yet.'}
       </p>
 
-      <Button variant="outline" onClick={onCreate} className="mt-6">
-        <Plus data-icon="inline-start" aria-hidden="true" strokeWidth={2} />
-        New project
-      </Button>
+      {onCreate ? (
+        <Button variant="outline" onClick={onCreate} className="mt-6">
+          <Plus data-icon="inline-start" aria-hidden="true" strokeWidth={2} />
+          New project
+        </Button>
+      ) : null}
     </div>
   );
 };

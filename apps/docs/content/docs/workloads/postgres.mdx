@@ -19,12 +19,13 @@ Create a database with a **version** (16 or 17), a **disk size** and a
 ![The PostgreSQL overview: connections, database size, cache hits, transactions and the connection string](/screenshots/postgres-overview.png)
 
 The overview shows the in-project connection address and, on request, the
-password. Services of the same project connect over the
+password, which needs Edit on the project ([Users and roles](/settings/users)). Services of the same project connect over the
 [private network](/networking/private-network); a database needs no
 public domain.
 
 The overview also shows the server's state and load, and the tables of the
 `app` database with their indexes and a read-only, paged view of their rows.
+Viewing rows needs Edit on the project.
 
 ### Access from outside the cluster
 
@@ -89,7 +90,7 @@ base backup.
 
 - **Export** downloads the `app` database as it is now, as a `pg_dump`
   custom-format file. Restore it with `pg_restore` of the same PostgreSQL
-  version or newer.
+  version or newer. Exporting needs Edit on the project.
 - **Import** loads a dump as the `app` user, all or nothing in one transaction.
   A custom-format archive replaces the objects it contains. A SQL file runs as
   written, so make it with `pg_dump --no-owner --no-acl`.

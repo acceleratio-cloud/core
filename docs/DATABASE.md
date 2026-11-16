@@ -28,6 +28,11 @@ Table conventions (naming, timestamps, indexes, delete behavior) are in
 erDiagram
     user ||--o{ session : "has"
     user ||--o{ account : "has"
+    user ||--o| member : "has access as"
+    custom_role ||--o{ member : "is held by"
+    custom_role ||--o{ custom_role_project : "grants"
+    project ||--o{ custom_role_project : "is granted by"
+    custom_role ||--o{ invite : "is offered by"
     project ||--o{ workload : "contains"
     workload ||--o{ workload_version : "has history"
     workload |o--o| workload_version : "runs"
@@ -196,6 +201,35 @@ erDiagram
         varchar actor
         timestamp started_at
         timestamp finished_at
+    }
+    member {
+        text user_id PK, FK
+        member_role role
+        uuid role_id FK
+        timestamp created_at
+        timestamp updated_at
+    }
+    custom_role {
+        uuid id PK
+        varchar name UK
+        timestamp created_at
+        timestamp updated_at
+    }
+    custom_role_project {
+        uuid role_id PK, FK
+        uuid project_id PK, FK
+        project_access access
+    }
+    invite {
+        uuid id PK
+        text token_hash UK
+        member_role role
+        uuid role_id FK
+        integer max_uses
+        integer use_count
+        timestamp expires_at
+        text created_by FK
+        timestamp created_at
     }
 ```
 
@@ -539,6 +573,36 @@ once per 10 minutes. Rows older than `AUDIT_RETENTION_DAYS` (default 365, `0` ke
 deleted daily in batches of 5,000. `audit_log_project_created_idx` serves the newest-first project
 page, keyed by `(created_at, id)`; `audit_log_created_idx` serves retention.
 
+### `member`
+
+An account's access to the installation (migration `0036`), one row per `user_id`. An account without
+a row has no access. `role` is `owner`, `admin`, `viewer` (shown as "Read only") or `custom`;
+`role_id` names the custom role and is set exactly when `role` is `custom` (a check enforces it).
+`member_owner_unique`, a partial unique index on `role = 'owner'`, allows a single owner. Ownership
+moves in one transaction that demotes the owner before promoting the next one. Removing a member
+deletes the `user` row, which cascades here. A custom role still held by a member cannot be deleted
+(`ON DELETE RESTRICT`). The migration makes the earliest existing account the owner and any others
+admins.
+
+Columns: `user_id`, `role`, `role_id`, `created_at`, `updated_at`.
+
+### `custom_role` and `custom_role_project`
+
+A named set of per-project grants (migration `0036`). `custom_role.name` is unique.
+`custom_role_project` has one row per granted project, keyed by `(role_id, project_id)`, with
+`access` one of `read`, `edit` or `delete`. The levels are ordered: each includes the ones before it.
+Rows go with their role or project.
+
+### `invite`
+
+An invite link (migration `0036`). Only `token_hash`, the SHA-256 of the token, is stored; the token
+itself is returned once, when the link is created. `role` is never `owner`. `max_uses` is 1 for a
+personal link and null for one anyone may use until it expires. Accepting an invite increments
+`use_count` atomically under the expiry and use limit, and gives the use back if the account cannot
+be created. `expires_at` is 7 days after creation. Expired and used-up rows are deleted whenever
+invites are listed or created. Rows go with their custom role, or with the account that created
+them (`created_by`).
+
 ### better-auth tables
 
 `user`, `session`, `account`, and `verification` are written by better-auth, not by application code.
@@ -564,6 +628,8 @@ library; do not repurpose them.
 | `workload_domain_kind` | `generated`, `custom` | `workload_domain.kind` |
 | `workload_domain_status` | `generated`, `verification`, `success`, `failed` | `workload_domain.status` |
 | `workload_domain_certificate_status` | `pending`, `issued`, `failed` | `workload_domain.certificate_status` |
+| `member_role` | `owner`, `admin`, `viewer`, `custom` | `member.role`, `invite.role` |
+| `project_access` | `read`, `edit`, `delete` | `custom_role_project.access` |
 
 Enum values are part of the database contract. Add a value with a migration; never reorder or remove
 one that has shipped.

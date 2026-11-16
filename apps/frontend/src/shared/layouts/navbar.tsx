@@ -2,9 +2,12 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { House, Server, Settings, Store } from 'lucide-react';
+import { House, Server, Settings, Store, Users } from 'lucide-react';
+import type { MemberAccess } from '@acceleratio/shared';
 
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/modules/auth/providers/auth-provider';
+import { isCustom } from '@/modules/auth/utils/access';
 import { Separator } from '@/shared/components/ui/separator';
 import { LogoIcon } from '../icons/logo-icon';
 import { SystemStatusButton } from '@/modules/system/containers/system-status';
@@ -15,16 +18,31 @@ const links: CommandPage[] = [
   { label: 'Overview', href: '/', icon: House },
   { label: 'Marketplace', href: '/marketplace', icon: Store },
   { label: 'Cluster', href: '/cluster', icon: Server },
+  { label: 'Users', href: '/users', icon: Users },
   { label: 'Settings', href: '/settings', icon: Settings },
 ];
+
+/** Custom roles work inside their projects only. */
+const INSTALLATION_PAGES = new Set(['/cluster', '/users']);
 
 const isActivePath = (pathname: string, href: string) =>
   href === '/'
     ? pathname === '/'
     : pathname === href || pathname.startsWith(`${href}/`);
 
-export const Navbar = () => {
+/** `initialAccess` comes from the server, so the links don't pop in. */
+export const Navbar = ({
+  initialAccess,
+}: {
+  initialAccess: MemberAccess | null;
+}) => {
   const pathname = usePathname();
+  const access = useAuth().access ?? initialAccess;
+  // Hidden until the role is known, so a custom role never requests them.
+  const installation = access !== null && !isCustom(access);
+  const pages = installation
+    ? links
+    : links.filter((link) => !INSTALLATION_PAGES.has(link.href));
 
   return (
     <div className="flex h-full items-center gap-3 px-4 sm:px-5">
@@ -46,7 +64,7 @@ export const Navbar = () => {
         aria-label="Primary"
         className="flex min-w-0 items-center gap-0.5 rounded-full border border-border bg-surface-panel/70 p-0.5"
       >
-        {links.map((link) => (
+        {pages.map((link) => (
           <NavItem
             key={link.href}
             link={link}
@@ -56,8 +74,8 @@ export const Navbar = () => {
       </nav>
 
       <div className="ml-auto flex items-center gap-3">
-        <SystemStatusButton />
-        <CommandSearch pages={links} />
+        {installation ? <SystemStatusButton /> : null}
+        <CommandSearch pages={pages} />
 
         <UserMenu />
       </div>

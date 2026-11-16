@@ -802,8 +802,8 @@ SSH, with the scripts and requirement checks in `node-join-script.ts`. SSH goes 
   when nothing else happens.
 - `DELETE` returns `Promise<void>` with `@HttpCode(HttpStatus.NO_CONTENT)`.
 - Request bodies use the shared payload interfaces (`CreateProjectPayload`); there are no DTO classes.
-- The auth controller is the one exception: it holds logic because it forwards to better-auth and
-  enforces the single-account bootstrap rule.
+- The auth controller is the one exception: it holds logic because it forwards to better-auth, makes
+  the first account the owner and creates accounts from invite links.
 
 ## Services
 
@@ -908,6 +908,26 @@ SSH, with the scripts and requirement checks in `node-join-script.ts`. SSH goes 
   so this app's controllers own the routes.
 - Decorators from `@thallesp/nestjs-better-auth`: `@AllowAnonymous()` for public routes, `@OptionalAuth()`
   for routes that work signed in or out, `@Session()` to read the session.
+- Two global guards run in this order, both registered in `application.module.ts`: better-auth's
+  `AuthGuard` (the session), then `AccessGuard` in `application/member/` (the role). The auth module
+  sets `disableGlobalAuthGuard: true` so the order stays explicit.
+- `AccessGuard` reads the role from the `member` table on every request, never from the session,
+  which better-auth caches in a cookie. Its default rule:
+  - A route with a `:projectId` param needs `read` on that project for GET and `edit` otherwise.
+    Name the param `projectId` on every project route.
+  - Any other route needs a built-in role (owner, admin or read only) for GET, and owner or admin
+    otherwise. Custom roles are denied.
+- `@RequireAccess(rule)` overrides the default:
+  - `{ project: 'edit' }` on reads that reveal secrets or export data.
+  - `{ project: 'delete' }` on deleting a project or a service.
+  - `'member'` on the few installation routes custom roles need inside their projects.
+  `member/tests/routes.spec.ts` lists every `'member'` route and fails when one is added.
+- `@CurrentAccess()` gives a handler the caller's access. A handler checks it itself when the project
+  is not in the path (marketplace deploy) or the list must be filtered (`GET /projects`).
+- The terminal WebSocket bypasses Nest guards: `WorkloadTerminalService` checks access itself, at
+  the upgrade and again once the socket is registered.
+- When `AccessService` reports a change to a user's access, their terminals close and the global
+  `AccessRevocationInterceptor` ends their `@Sse` streams; a new `@Sse` route needs nothing extra.
 - `AuthExceptionFilter` is controller-scoped and converts a better-auth `APIError` into
   `{ status_code, message, code? }`, which matches `ApiErrorResponse` in the shared package.
 - `HttpExceptionFilter` in `common/http-exception.filter.ts` is registered globally in `main.ts` and

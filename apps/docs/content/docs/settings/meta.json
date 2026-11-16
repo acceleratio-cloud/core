@@ -1,4 +1,4 @@
 {
   "title": "Platform settings",
-  "pages": [ "control-plane-url", "updates", "github", "profile"]
+  "pages": [ "control-plane-url", "updates", "github", "profile", "users"]
 }

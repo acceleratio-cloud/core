@@ -1,3 +1,5 @@
+import type { MemberAccess } from './member';
+
 export interface AuthUser {
   id: string;
   name: string;
@@ -22,6 +24,7 @@ export interface AuthSession {
 export interface SessionResponse {
   session: AuthSession | null;
   user: AuthUser | null;
+  access: MemberAccess | null;
 }
 
 export interface AuthStatusResponse {

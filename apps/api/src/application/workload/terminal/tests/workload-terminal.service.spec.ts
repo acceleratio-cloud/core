@@ -25,7 +25,10 @@ import { BadRequestException } from '@nestjs/common';
 import type { HttpAdapterHost } from '@nestjs/core';
 import type { AuthService } from '@thallesp/nestjs-better-auth';
 import type { V1Pod } from '@kubernetes/client-node';
+import { Subject } from 'rxjs';
 import { WebSocket } from 'ws';
+import type { Access } from '@/application/member/access';
+import type { AccessService } from '@/application/member/access.service';
 import type {
   KubernetesService,
   PodExecRequest,
@@ -115,8 +118,17 @@ describe('WorkloadTerminalService', () => {
   let connection: FakeConnection;
   let execRequest: PodExecRequest | undefined;
   let record: jest.Mock;
+  let resolveAccess: jest.Mock;
+  let accessChanges: Subject<string>;
 
   beforeEach(async () => {
+    resolveAccess = jest.fn().mockResolvedValue({
+      userId: 'user-1',
+      role: 'owner',
+      roleId: null,
+      projects: null,
+    } satisfies Access);
+    accessChanges = new Subject<string>();
     record = jest.fn().mockResolvedValue(undefined);
     server = http.createServer();
     getSession = jest.fn().mockResolvedValue({
@@ -146,6 +158,10 @@ describe('WorkloadTerminalService', () => {
         record,
         workloadName: jest.fn().mockResolvedValue('web'),
       } as unknown as AuditLogService,
+      {
+        resolve: resolveAccess,
+        changes: () => accessChanges.asObservable(),
+      } as unknown as AccessService,
     );
     service.onApplicationBootstrap();
 
@@ -211,6 +227,57 @@ describe('WorkloadTerminalService', () => {
 
     await expect(rejectionStatus(PATH)).resolves.toBe(401);
     expect(record).not.toHaveBeenCalled();
+  });
+
+  it('refuses an account that no longer has access', async () => {
+    resolveAccess.mockResolvedValue(null);
+
+    await expect(rejectionStatus(PATH)).resolves.toBe(401);
+    expect(execInPod).not.toHaveBeenCalled();
+  });
+
+  it('refuses read-only access to the project', async () => {
+    resolveAccess.mockResolvedValue({
+      userId: 'user-1',
+      role: 'viewer',
+      roleId: null,
+      projects: null,
+    } satisfies Access);
+
+    await expect(rejectionStatus(PATH)).resolves.toBe(403);
+    expect(execInPod).not.toHaveBeenCalled();
+  });
+
+  it('closes an open shell when the account loses access', async () => {
+    const client = await connect();
+    const closed = new Promise<number>((resolve) =>
+      client.on('close', (code) => resolve(code)),
+    );
+
+    await waitFor(() => execRequest !== undefined);
+    accessChanges.next('someone-else');
+    accessChanges.next('user-1');
+
+    await expect(closed).resolves.toBe(1008);
+  });
+
+  it('closes a shell whose access changed while it opened', async () => {
+    resolveAccess
+      .mockResolvedValueOnce({
+        userId: 'user-1',
+        role: 'owner',
+        roleId: null,
+        projects: null,
+      } satisfies Access)
+      .mockResolvedValueOnce(null);
+
+    const client = await connect();
+    const closed = new Promise<number>((resolve) =>
+      client.on('close', (code) => resolve(code)),
+    );
+
+    await expect(closed).resolves.toBe(1008);
+    expect(execInPod).not.toHaveBeenCalled();
   });
 
   it('audits an opened shell and a refused one', async () => {

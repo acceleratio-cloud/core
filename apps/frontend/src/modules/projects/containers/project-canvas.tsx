@@ -21,6 +21,8 @@ import {
 import { sileo } from 'sileo';
 
 import { getApiErrorMessage } from '@/api';
+import { useAuth } from '@/modules/auth/providers/auth-provider';
+import { canProject } from '@/modules/auth/utils/access';
 import { CreateWorkloadDialog } from '@/modules/workloads/containers/create-workload-dialog';
 import { WorkloadDetails } from '@/modules/workloads/containers/workload-details';
 import { workloadNodeTypes } from '@/modules/workloads/components/workload-nodes';
@@ -72,6 +74,7 @@ const usePrefersReducedMotion = () =>
 
 export const ProjectCanvas = () => {
   const { project, workloads, workloadsError } = useProject();
+  const { access } = useAuth();
   const [selectedWorkloadId, setSelectedWorkloadId] = useState<string | null>(
     null,
   );
@@ -100,11 +103,13 @@ export const ProjectCanvas = () => {
         <div className="relative h-full min-h-0 flex-1 bg-surface-board">
           {/* The project header floats over the left of this row (see
             ProjectView); the create action stays with the canvas. */}
-          <div className="pointer-events-none absolute top-3 right-3 z-10 flex h-10 items-center">
-            <div className="pointer-events-auto shrink-0">
-              <CreateWorkloadDialog />
+          {canProject(access, project.id, 'edit') ? (
+            <div className="pointer-events-none absolute top-3 right-3 z-10 flex h-10 items-center">
+              <div className="pointer-events-auto shrink-0">
+                <CreateWorkloadDialog />
+              </div>
             </div>
-          </div>
+          ) : null}
           {workloadsError ? (
             <p
               role="alert"
@@ -135,6 +140,7 @@ const WorkloadFlow = ({
   onClearSelection: () => void;
 }) => {
   const { project, workloads, isLoadingWorkloads, moveWorkload } = useProject();
+  const { access } = useAuth();
   const traffic = useProjectTraffic(project.id);
   const reducedMotion = usePrefersReducedMotion();
   const { setCenter, getZoom } = useReactFlow();
@@ -275,6 +281,8 @@ const WorkloadFlow = ({
         minZoom={0.3}
         maxZoom={1.5}
         nodesConnectable={false}
+        // Positions are saved: a read-only role gets a fixed layout.
+        nodesDraggable={canProject(access, project.id, 'edit')}
         nodesFocusable={false}
         edgesFocusable={false}
         selectNodesOnDrag={false}

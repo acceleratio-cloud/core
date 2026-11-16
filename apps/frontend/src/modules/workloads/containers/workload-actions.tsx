@@ -22,6 +22,8 @@ import type { Workload, WorkloadConfig } from '@acceleratio/shared';
 import { getApiErrorMessage } from '@/api';
 import { cn } from '@/lib/utils';
 import { workloadsApi } from '@/api/workloads';
+import { useAuth } from '@/modules/auth/providers/auth-provider';
+import { canProject } from '@/modules/auth/utils/access';
 import { useProject } from '@/modules/projects/providers/project-provider';
 import { DetailSection } from '@/modules/workloads/components/workload-details/detail-primitives';
 import { deployAction } from '@/modules/workloads/utils/workload-capabilities';
@@ -282,6 +284,9 @@ export const WorkloadLifecycleActions = ({
 }: { leading?: ReactNode } = {}) => {
   const { workload, pendingAction, lifecycleError, runLifecycle } =
     useWorkloadActions();
+  const { project } = useProject();
+  const { access } = useAuth();
+  const canEdit = canProject(access, project.id, 'edit');
   const deploy = deployAction(workload);
   const [reviewOpen, setReviewOpen] = useState(false);
   const reviewsChanges = hasPendingChanges(workload);
@@ -347,7 +352,7 @@ export const WorkloadLifecycleActions = ({
     },
   ];
 
-  const visible = actions.filter((action) => action.visible);
+  const visible = canEdit ? actions.filter((action) => action.visible) : [];
   const controls = visible.filter((action) => !action.primary);
   const primary = visible.find((action) => action.primary);
 
@@ -465,6 +470,8 @@ export const WorkloadDeleteSection = ({
     clearDeleteError,
     deleteWorkload,
   } = useWorkloadActions();
+  const { project } = useProject();
+  const { access } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
   // The panel's portal ignores pointer events, and a dialog mounted inside it
   // inherits that, so the confirmation mounts on the body to be clickable.
@@ -488,6 +495,10 @@ export const WorkloadDeleteSection = ({
     await deleteWorkload();
     setIsOpen(false);
   };
+
+  if (!canProject(access, project.id, 'delete')) {
+    return null;
+  }
 
   return (
     <>
