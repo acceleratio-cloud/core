@@ -38,6 +38,7 @@ import {
   GithubWorkloadService,
 } from '@/application/workload/github/github-workload.service';
 import { verifyWebhookSignature } from './github-webhook';
+import { RequireAccess } from '@/application/member/access';
 
 const INVALID_SIGNATURE_MESSAGE = 'Invalid webhook signature';
 
@@ -54,6 +55,7 @@ export class GithubController {
   ) {}
 
   @Get()
+  @RequireAccess('member')
   list(): Promise<GithubIntegration> {
     return this.github.list();
   }
@@ -102,6 +104,7 @@ export class GithubController {
   }
 
   @Get('apps/:id/repositories')
+  @RequireAccess('member')
   repositories(
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<GithubRepository[]> {
@@ -109,6 +112,7 @@ export class GithubController {
   }
 
   @Get('apps/:id/branches')
+  @RequireAccess('member')
   branches(
     @Param('id', ParseUUIDPipe) id: string,
     @Query('repository') repository: string | undefined,
@@ -117,6 +121,7 @@ export class GithubController {
   }
 
   @Get('public/repository')
+  @RequireAccess('member')
   publicRepository(
     @Query('repository') repository: string | undefined,
   ): Promise<Omit<GithubRepository, 'installation_id'>> {
@@ -124,6 +129,7 @@ export class GithubController {
   }
 
   @Get('public/branches')
+  @RequireAccess('member')
   publicBranches(
     @Query('repository') repository: string | undefined,
   ): Promise<string[]> {

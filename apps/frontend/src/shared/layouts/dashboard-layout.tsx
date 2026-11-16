@@ -1,7 +1,14 @@
 import type { ReactNode } from "react"
+import type { MemberAccess } from "@acceleratio/shared"
 import { Navbar } from "./navbar"
 
-export const DashboardLayout = ({ children }: { children: ReactNode }) => {
+export const DashboardLayout = ({
+  access,
+  children,
+}: {
+  access: MemberAccess | null
+  children: ReactNode
+}) => {
   return (
     <div className="flex h-screen flex-col bg-surface-canvas">
       <a
@@ -11,7 +18,7 @@ export const DashboardLayout = ({ children }: { children: ReactNode }) => {
         Skip to content
       </a>
       <header className="h-12 shrink-0">
-        <Navbar />
+        <Navbar initialAccess={access} />
       </header>
       <div className="flex min-h-0 flex-1 flex-col px-2 pb-2 sm:px-3 sm:pb-3">
         <main

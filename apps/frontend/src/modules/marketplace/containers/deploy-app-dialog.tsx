@@ -12,6 +12,8 @@ import { getApiErrorMessage } from '@/api';
 import { marketplaceApi } from '@/api/marketplace';
 import { projectsApi } from '@/api/projects';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/modules/auth/providers/auth-provider';
+import { canProject, isManager } from '@/modules/auth/utils/access';
 import { Button } from '@/shared/components/ui/button';
 import {
   Dialog,
@@ -110,10 +112,13 @@ const DeployAppForm = ({
   onDeployed: () => void;
 }) => {
   const router = useRouter();
+  const { access } = useAuth();
+  // Only the owner and admins create projects; others deploy where they edit.
+  const canCreate = isManager(access);
   const [projects, setProjects] = useState<Project[] | null>(null);
   const [projectsError, setProjectsError] = useState<string | null>(null);
-  const [target, setTarget] = useState<Target>('new');
-  const [projectId, setProjectId] = useState<string | null>(null);
+  const [target, setTarget] = useState<Target>(canCreate ? 'new' : 'existing');
+  const [chosenId, setProjectId] = useState<string | null>(null);
   const [projectName, setProjectName] = useState(app.name);
   const [prefix, setPrefix] = useState('');
   const [inputs, setInputs] = useState<Record<string, string>>(() =>
@@ -128,7 +133,6 @@ const DeployAppForm = ({
       .list()
       .then((list) => {
         setProjects(list);
-        setProjectId((current) => current ?? list[0]?.id ?? null);
       })
       .catch((caught) => {
         setProjects([]);
@@ -138,7 +142,14 @@ const DeployAppForm = ({
       });
   }, []);
 
-  const items = (projects ?? []).map((p) => ({ value: p.id, label: p.name }));
+  const usable = (projects ?? []).filter((p) =>
+    canProject(access, p.id, 'edit'),
+  );
+  const items = usable.map((p) => ({ value: p.id, label: p.name }));
+  const projectId =
+    chosenId && usable.some((p) => p.id === chosenId)
+      ? chosenId
+      : (usable[0]?.id ?? null);
   const missing = app.inputs.some(
     (input) => input.required && !inputs[input.name]?.trim(),
   );
@@ -211,11 +222,15 @@ const DeployAppForm = ({
                 disabled={pending}
                 className="grid grid-cols-2 gap-1 rounded-lg bg-surface-muted p-1"
               >
-                <TargetOption value="new" label="New project" />
+                <TargetOption
+                  value="new"
+                  label="New project"
+                  disabled={!canCreate}
+                />
                 <TargetOption
                   value="existing"
                   label="Existing project"
-                  disabled={!projects || projects.length === 0}
+                  disabled={usable.length === 0}
                 />
               </RadioGroup>
               {projectsError ? (

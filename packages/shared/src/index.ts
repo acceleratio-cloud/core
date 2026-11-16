@@ -13,3 +13,4 @@ export * from './types/github';
 export * from './types/marketplace';
 export * from './types/audit';
 export * from './types/security';
+export * from './types/member';

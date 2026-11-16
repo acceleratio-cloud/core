@@ -1,10 +1,13 @@
 import { Suspense } from 'react';
+import { connection } from 'next/server';
 
+import { getServerSession } from '@/api/auth/server';
 import { SettingsSkeleton } from '@/modules/settings/components/settings-skeleton';
 import { SettingsView } from '@/modules/settings/containers/settings-view';
 import {
   isSettingsSectionId,
   SETTINGS_TAB_PARAM,
+  settingsSectionsFor,
 } from '@/modules/settings/sections';
 
 /**
@@ -33,11 +36,20 @@ const SettingsSection = async ({
   searchParams,
 }: Pick<PageProps<'/settings'>, 'searchParams'>) => {
   const tab = (await searchParams)[SETTINGS_TAB_PARAM];
+  // The session is request data: render this part at request time.
+  await connection();
+  const session = await getServerSession();
+  const sections = settingsSectionsFor(session?.access?.role === 'custom');
+  const requested =
+    typeof tab === 'string' && isSettingsSectionId(tab) ? tab : undefined;
 
   return (
     <SettingsView
+      sections={sections}
       activeId={
-        typeof tab === 'string' && isSettingsSectionId(tab) ? tab : undefined
+        sections.length === 1
+          ? sections[0].id
+          : requested
       }
     />
   );

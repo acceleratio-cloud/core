@@ -23,6 +23,7 @@ import {
   contentDisposition,
   S3BucketObjectsService,
 } from './s3-bucket-objects.service';
+import { RequireAccess } from '@/application/member/access';
 
 /**
  * The contents of an S3 bucket workload, for the console's explorer. Files
@@ -71,6 +72,7 @@ export class S3BucketObjectsController {
   }
 
   @Get('content')
+  @RequireAccess({ project: 'edit' })
   async download(
     @Param('projectId', ParseUUIDPipe) projectId: string,
     @Param('id', ParseUUIDPipe) id: string,

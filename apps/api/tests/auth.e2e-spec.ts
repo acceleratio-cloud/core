@@ -21,6 +21,8 @@ import { AuthService } from '@thallesp/nestjs-better-auth';
 import request from 'supertest';
 import type { App } from 'supertest/types';
 import { AuthController } from '@/application/auth/auth.controller';
+import { PasswordAttemptLimiter } from '@/application/auth/password-attempt-limiter';
+import { MemberService } from '@/application/member/member.service';
 import { DATABASE } from '@/vendor/db/database.constants';
 
 const signInPayload = {
@@ -51,6 +53,11 @@ describe('Auth (e2e)', () => {
           useValue: {
             api: { signUpEmail: jest.fn(), signInEmail, signOut: jest.fn() },
           },
+        },
+        PasswordAttemptLimiter,
+        {
+          provide: MemberService,
+          useValue: { assertMember: () => Promise.resolve() },
         },
       ],
     }).compile();

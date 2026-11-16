@@ -12,6 +12,9 @@ import type { App } from 'supertest/types';
 import { WorkloadEventsService } from '@/application/workload/observer/workload-events.service';
 import { WorkloadController } from '@/application/workload/workload.controller';
 import { WorkloadService } from '@/application/workload/workload.service';
+import { DockerWorkloadNetworkService } from '@/application/workload/docker/docker-workload-network.service';
+import { WorkloadInstancesService } from '@/application/workload/instances/workload-instances.service';
+import { signedInOwner } from './signed-in-owner';
 
 const projectId = '2f1c9a3e-8b7d-4e6f-9a0b-1c2d3e4f5a6b';
 const workloadId = '3f9a1b2c-4d5e-6f70-8192-a3b4c5d6e7f8';
@@ -35,6 +38,9 @@ describe('Workload versions (e2e)', () => {
       providers: [
         WorkloadEventsService,
         { provide: WorkloadService, useValue: facade },
+        { provide: WorkloadInstancesService, useValue: {} },
+        { provide: DockerWorkloadNetworkService, useValue: {} },
+        ...signedInOwner,
       ],
     }).compile();
 
@@ -78,10 +84,12 @@ describe('Workload versions (e2e)', () => {
       .post(`${base}/versions/${versionId}/rollback`)
       .expect(200);
 
+    // The session is stubbed, so no author is recorded.
     expect(facade.rollback).toHaveBeenCalledWith(
       projectId,
       workloadId,
       versionId,
+      null,
     );
     expect(response.body).toEqual({ id: workloadId, status: 'deploying' });
   });

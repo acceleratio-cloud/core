@@ -162,10 +162,7 @@ export class AuditLogInterceptor implements NestInterceptor {
     const route = String(Reflect.getMetadata(PATH_METADATA, controller) ?? '');
     const params = asRecord(request.params);
     const body = asRecord(request.body);
-    const projectParam =
-      params.projectId ??
-      (route === 'projects' ? params.id : undefined) ??
-      body.project_id;
+    const projectParam = params.projectId ?? body.project_id;
     const projectId = isUuid(projectParam) ? projectParam : null;
     const workloadId =
       route.startsWith(WORKLOAD_ROUTE) && isUuid(params.id) ? params.id : null;

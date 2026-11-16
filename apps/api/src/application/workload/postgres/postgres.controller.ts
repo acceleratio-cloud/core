@@ -28,6 +28,7 @@ import { PostgresBackupService } from './postgres-backup.service';
 import { PostgresAccessService } from './postgres-access.service';
 import { PostgresOverviewService } from './postgres-overview.service';
 import { PostgresWorkloadService } from './postgres.service';
+import { RequireAccess } from '@/application/member/access';
 
 /**
  * A PostgreSQL workload's Overview tab (state, structure, rows), its external
@@ -44,6 +45,7 @@ export class PostgresController {
 
   /** The `app` database as a pg_dump custom-format file, current state. */
   @Get('dump')
+  @RequireAccess({ project: 'edit' })
   async dump(
     @Param('projectId', ParseUUIDPipe) projectId: string,
     @Param('id', ParseUUIDPipe) id: string,
@@ -112,6 +114,7 @@ export class PostgresController {
   }
 
   @Get('tables/:schema/:table/rows')
+  @RequireAccess({ project: 'edit' })
   rows(
     @Param('projectId', ParseUUIDPipe) projectId: string,
     @Param('id', ParseUUIDPipe) id: string,
@@ -141,6 +144,7 @@ export class PostgresController {
 
   /** The current password; the console asks for it only on a click. */
   @Get('credentials')
+  @RequireAccess({ project: 'edit' })
   credentials(
     @Param('projectId', ParseUUIDPipe) projectId: string,
     @Param('id', ParseUUIDPipe) id: string,

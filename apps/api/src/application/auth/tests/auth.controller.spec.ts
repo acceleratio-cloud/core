@@ -26,6 +26,8 @@ import {
 import { Test } from '@nestjs/testing';
 import { AuthService, type UserSession } from '@thallesp/nestjs-better-auth';
 import { DATABASE } from '@/vendor/db/database.constants';
+import type { Access } from '@/application/member/access';
+import { MemberService } from '@/application/member/member.service';
 import { AuthController } from '../auth.controller';
 import { PasswordAttemptLimiter } from '../password-attempt-limiter';
 
@@ -103,6 +105,15 @@ const createFixture = async (usersCount: number) => {
       revokeOtherSessions: jest.fn(),
     },
   };
+  const members = {
+    addOwner: jest.fn().mockResolvedValue(undefined),
+    addFromInvite: jest.fn().mockResolvedValue(undefined),
+    deleteUser: jest.fn().mockResolvedValue(undefined),
+    claimInvite: jest.fn(),
+    releaseInvite: jest.fn().mockResolvedValue(undefined),
+    previewInvite: jest.fn(),
+    assertMember: jest.fn().mockResolvedValue(undefined),
+  };
 
   const moduleRef = await Test.createTestingModule({
     controllers: [AuthController],
@@ -110,10 +121,11 @@ const createFixture = async (usersCount: number) => {
       { provide: DATABASE, useValue: db },
       { provide: AuthService, useValue: auth },
       PasswordAttemptLimiter,
+      { provide: MemberService, useValue: members },
     ],
   }).compile();
 
-  return { controller: moduleRef.get(AuthController), auth };
+  return { controller: moduleRef.get(AuthController), auth, members };
 };
 
 const signUpPayload = {
@@ -175,6 +187,32 @@ describe('AuthController', () => {
       ]);
     });
 
+    it('makes the first account the owner', async () => {
+      const { controller, auth, members } = await createFixture(0);
+      const { response } = createResponse();
+
+      auth.api.signUpEmail.mockResolvedValue(authResult({ token: 't', user }));
+
+      await controller.signUpEmail(signUpPayload, createRequest(), response);
+
+      expect(members.addOwner).toHaveBeenCalledWith('user-1');
+      expect(members.deleteUser).not.toHaveBeenCalled();
+    });
+
+    it('deletes the account that lost a concurrent installation', async () => {
+      const { controller, auth, members } = await createFixture(0);
+      const { response } = createResponse();
+
+      auth.api.signUpEmail.mockResolvedValue(authResult({ token: 't', user }));
+      members.addOwner.mockRejectedValue(new ForbiddenException('taken'));
+
+      await expect(
+        controller.signUpEmail(signUpPayload, createRequest(), response),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+
+      expect(members.deleteUser).toHaveBeenCalledWith('user-1');
+    });
+
     it('leaves the response alone when no cookie is set', async () => {
       const { controller, auth } = await createFixture(0);
       const { response, setHeader } = createResponse();
@@ -186,6 +224,90 @@ describe('AuthController', () => {
       await controller.signUpEmail(signUpPayload, createRequest(), response);
 
       expect(setHeader).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('acceptInvite', () => {
+    const claimed = { id: 'invite-1', role: 'viewer', role_id: null };
+
+    it('rejects a spent or unknown link without creating an account', async () => {
+      const { controller, auth, members } = await createFixture(1);
+      const { response } = createResponse();
+
+      members.claimInvite.mockResolvedValue(null);
+
+      await expect(
+        controller.acceptInvite(
+          'tok',
+          signUpPayload,
+          createRequest(),
+          response,
+        ),
+      ).rejects.toBeInstanceOf(NotFoundException);
+
+      expect(auth.api.signUpEmail).not.toHaveBeenCalled();
+    });
+
+    it('creates the account with only the picked fields and grants the role', async () => {
+      const { controller, auth, members } = await createFixture(1);
+      const { response } = createResponse();
+
+      members.claimInvite.mockResolvedValue(claimed);
+      auth.api.signUpEmail.mockResolvedValue(authResult({ token: 't', user }));
+
+      await controller.acceptInvite(
+        'tok',
+        { ...signUpPayload, image: 'x', role: 'owner' } as typeof signUpPayload,
+        createRequest(),
+        response,
+      );
+
+      expect(auth.api.signUpEmail).toHaveBeenCalledWith(
+        expect.objectContaining({ body: signUpPayload }),
+      );
+      expect(members.addFromInvite).toHaveBeenCalledWith('user-1', claimed);
+      expect(members.releaseInvite).not.toHaveBeenCalled();
+    });
+
+    it('gives the use back when the account cannot be created', async () => {
+      const { controller, auth, members } = await createFixture(1);
+      const { response } = createResponse();
+
+      members.claimInvite.mockResolvedValue(claimed);
+      auth.api.signUpEmail.mockRejectedValue(new Error('User already exists'));
+
+      await expect(
+        controller.acceptInvite(
+          'tok',
+          signUpPayload,
+          createRequest(),
+          response,
+        ),
+      ).rejects.toThrow('User already exists');
+
+      expect(members.releaseInvite).toHaveBeenCalledWith('invite-1');
+      expect(members.deleteUser).not.toHaveBeenCalled();
+    });
+
+    it('removes the account when its access cannot be saved', async () => {
+      const { controller, auth, members } = await createFixture(1);
+      const { response } = createResponse();
+
+      members.claimInvite.mockResolvedValue(claimed);
+      auth.api.signUpEmail.mockResolvedValue(authResult({ token: 't', user }));
+      members.addFromInvite.mockRejectedValue(new Error('role deleted'));
+
+      await expect(
+        controller.acceptInvite(
+          'tok',
+          signUpPayload,
+          createRequest(),
+          response,
+        ),
+      ).rejects.toThrow('role deleted');
+
+      expect(members.releaseInvite).toHaveBeenCalledWith('invite-1');
+      expect(members.deleteUser).toHaveBeenCalledWith('user-1');
     });
   });
 
@@ -218,13 +340,49 @@ describe('AuthController', () => {
         'better-auth.session=def; Path=/',
       ]);
     });
+
+    it('sets no cookie for an account without access', async () => {
+      const { controller, auth, members } = await createFixture(1);
+      const { response, setHeader } = createResponse();
+
+      auth.api.signInEmail.mockResolvedValue(
+        authResult({ token: 'token-def', user }, [
+          'better-auth.session=def; Path=/',
+        ]),
+      );
+      members.assertMember.mockRejectedValue(new ForbiddenException());
+
+      await expect(
+        controller.signInEmail(
+          { email: 'ada@example.com', password: 'secret-password' },
+          createRequest(),
+          response,
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(members.assertMember).toHaveBeenCalledWith('user-1');
+      expect(setHeader).not.toHaveBeenCalled();
+    });
   });
 
   describe('session', () => {
     it('returns empty fields for an anonymous request', async () => {
       const { controller } = await createFixture(1);
 
-      expect(controller.session(null)).toEqual({ session: null, user: null });
+      expect(controller.session(null, undefined)).toEqual({
+        session: null,
+        user: null,
+        access: null,
+      });
+    });
+
+    it('reads as signed out for an account without access', async () => {
+      const { controller } = await createFixture(1);
+
+      expect(controller.session({ session, user }, undefined)).toEqual({
+        session: null,
+        user: null,
+        access: null,
+      });
     });
 
     it('serializes the resolved session and user to snake_case', async () => {
@@ -234,11 +392,25 @@ describe('AuthController', () => {
         user: { ...user, role: 'admin' },
       } as unknown as UserSession;
 
-      expect(controller.session(current)).toEqual({
+      const access: Access = {
+        userId: 'user-1',
+        role: 'custom',
+        roleId: 'role-1',
+        projects: new Map([['project-1', 'edit']]),
+      };
+
+      expect(controller.session(current, access)).toEqual({
         session: serializedSession,
         user: serializedUser,
+        access: {
+          role: 'custom',
+          role_id: 'role-1',
+          projects: { 'project-1': 'edit' },
+        },
       });
-      expect(controller.session(current).user).not.toHaveProperty('role');
+      expect(controller.session(current, access).user).not.toHaveProperty(
+        'role',
+      );
     });
   });
 

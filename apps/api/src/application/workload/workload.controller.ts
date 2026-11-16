@@ -37,6 +37,7 @@ import type {
   WorkloadVersionDiffQuery,
 } from '@acceleratio/shared';
 import type { Observable } from 'rxjs';
+import { RequireAccess } from '@/application/member/access';
 import { DockerWorkloadNetworkService } from './docker/docker-workload-network.service';
 import { WorkloadInstancesService } from './instances/workload-instances.service';
 import { WorkloadEventsService } from './observer/workload-events.service';
@@ -208,6 +209,7 @@ export class WorkloadController {
 
   /** The only route that returns environment variable values. */
   @Get(':id/env')
+  @RequireAccess({ project: 'edit' })
   @Header('Cache-Control', 'no-store')
   env(
     @Param('projectId', ParseUUIDPipe) projectId: string,
@@ -217,6 +219,7 @@ export class WorkloadController {
   }
 
   @Get(':id/credentials')
+  @RequireAccess({ project: 'edit' })
   @Header('Cache-Control', 'no-store')
   credentials(
     @Param('projectId', ParseUUIDPipe) projectId: string,
@@ -379,6 +382,7 @@ export class WorkloadController {
   }
 
   @Delete(':id')
+  @RequireAccess({ project: 'delete' })
   @HttpCode(HttpStatus.NO_CONTENT)
   remove(
     @Param('projectId', ParseUUIDPipe) projectId: string,

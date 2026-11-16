@@ -1,0 +1,79 @@
+---
+title: Users and roles
+description: Invite people and choose what each of them can do.
+---
+
+**Users** in the top navigation has three tabs: **Members**, **Invite links**
+and **Roles**. The owner and admins manage them; read-only users can view the
+page; custom roles don't see it.
+
+## Roles
+
+| Role | Can do |
+| --- | --- |
+| Owner | Everything, including managing admins and transferring ownership. There is exactly one owner. |
+| Admin | Everything except managing the owner and admins. |
+| Read only | Sees every project and the cluster, without secrets. Changes nothing. |
+| Custom | Only the projects its custom role grants. |
+
+The first account, created at `/auth/installation`, is the owner. The
+**Roles** tab shows the built-in roles with how many members hold each, and
+the custom roles with their projects.
+
+## Custom roles
+
+A custom role grants each project one level:
+
+- **Read**: status, logs, metrics and settings, without secrets.
+- **Edit**: Read, plus changing and deploying services, revealing env
+  variables and credentials, database exports and table rows, bucket
+  downloads and the terminal.
+- **Full**: Edit, plus deleting services and the project.
+
+Create one with **Create role** on the **Roles** tab: a name, then a level or
+**No access** for each project. Edit or delete it from the menu on its card. A
+role assigned to members can't be deleted; give them another role first.
+Deleting a role also deletes its open invite links.
+
+Members with a custom role see only their projects. Cluster, Users and the
+System and Integrations settings are hidden from them. They can deploy
+marketplace apps into projects where they have Edit.
+
+## Invite links
+
+Choose **Invite people**, a role, and who can use the link:
+
+- **One person**: the link creates one account.
+- **Anyone with the link**: it creates accounts until it expires or is revoked.
+
+A link is shown once, when it is created, and expires after 7 days. The
+person opening it chooses their name, email and password. The owner invites
+admins, read-only users and custom roles; admins invite read-only users and
+custom roles.
+
+The **Invite links** tab lists the links that still work: their role, who can
+use them and how often they were used, when they expire and who created them.
+**Revoke** stops a link at once; accounts it already created stay.
+
+A link works only while its creator may still grant its role. Removing a
+member, or giving them a role that can't grant it, ends their links.
+
+## Members
+
+The **Members** tab lists every account with its role and when it joined. The
+menu on a row changes the role, removes the member or, for the owner,
+transfers ownership:
+
+- The owner manages admins, read-only users and custom roles.
+- Admins manage read-only users and custom roles.
+- Nobody changes or removes the owner; ownership moves only by transfer.
+
+A new role, a removed member or an edited custom role applies on the next
+request. Open terminals and live updates of that account close. Removing a
+member deletes their account and ends every session.
+
+**Transfer ownership** makes another member the owner. The former owner
+becomes an admin, and the admin invite links they created stop working.
+
+An account without a role (shown as **No access**) can't sign in. Give it a
+role or remove it.

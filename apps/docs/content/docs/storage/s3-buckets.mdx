@@ -12,7 +12,8 @@ across the whole platform and cannot change later.
 ![The overview of the storefront-media bucket: endpoint, bucket, region, access key ID and the Secret it is stored in](/screenshots/s3-bucket.png)
 
 The bucket's **Overview** shows its endpoint, bucket name, region, access key
-ID and, on request, the secret access key. The keys reach only this bucket.
+ID and, on request, the secret access key, which needs Edit on the project
+([Users and roles](/settings/users)). The keys reach only this bucket.
 
 A Kubernetes Secret in the project holds the keys under the names AWS SDKs
 read: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_ENDPOINT_URL` and
@@ -28,7 +29,7 @@ keys too.
 ## Files
 
 The **Explore** tab browses the bucket's files, creates folders and uploads
-files.
+files. Downloading a file needs Edit on the project.
 
 Deleting a bucket deletes every object in it and its access keys.
 

@@ -9,6 +9,8 @@ import type { Project } from '@acceleratio/shared';
 import { getApiErrorMessage } from '@/api';
 import { projectsApi } from '@/api/projects';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/modules/auth/providers/auth-provider';
+import { isManager } from '@/modules/auth/utils/access';
 import { buttonVariants } from '@/shared/components/ui/button';
 import {
   DropdownMenu,
@@ -51,6 +53,7 @@ export const ProjectSwitcher = ({
       ? `/project/${id}`
       : `/project/${id}?${PROJECT_TAB_PARAM}=${activeTab}`;
   const { project } = useProject();
+  const { access } = useAuth();
   const [projects, setProjects] = useState<Project[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -107,7 +110,10 @@ export const ProjectSwitcher = ({
           <DropdownMenuGroup>
             <DropdownMenuLabel>Projects</DropdownMenuLabel>
 
-            <div className="max-h-64 overflow-y-auto [scrollbar-gutter:auto]" aria-busy={isLoading}>
+            <div
+              className="max-h-64 overflow-y-auto [scrollbar-gutter:auto]"
+              aria-busy={isLoading}
+            >
               {items.map((item) => {
                 const isCurrent = item.id === project.id;
 
@@ -160,16 +166,20 @@ export const ProjectSwitcher = ({
             ) : null}
           </DropdownMenuGroup>
 
-          <DropdownMenuSeparator />
+          {isManager(access) ? (
+            <>
+              <DropdownMenuSeparator />
 
-          <DropdownMenuItem onClick={() => setIsCreateOpen(true)}>
-            <Plus
-              aria-hidden="true"
-              strokeWidth={1.75}
-              className="size-3.5 shrink-0 text-muted-foreground"
-            />
-            Create project
-          </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setIsCreateOpen(true)}>
+                <Plus
+                  aria-hidden="true"
+                  strokeWidth={1.75}
+                  className="size-3.5 shrink-0 text-muted-foreground"
+                />
+                Create project
+              </DropdownMenuItem>
+            </>
+          ) : null}
         </DropdownMenuContent>
       </DropdownMenu>
 

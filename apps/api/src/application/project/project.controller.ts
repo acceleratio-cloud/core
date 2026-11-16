@@ -15,6 +15,11 @@ import type {
   Project,
   UpdateProjectPayload,
 } from '@acceleratio/shared';
+import {
+  CurrentAccess,
+  RequireAccess,
+  type Access,
+} from '@/application/member/access';
 import { WorkloadService } from '@/application/workload/workload.service';
 import { ProjectService } from './project.service';
 
@@ -26,12 +31,18 @@ export class ProjectController {
   ) {}
 
   @Get()
-  list(): Promise<Project[]> {
-    return this.projectService.list();
+  @RequireAccess('member')
+  async list(@CurrentAccess() access: Access): Promise<Project[]> {
+    const projects = await this.projectService.list();
+
+    // A custom role sees only the projects it is granted.
+    return access.projects
+      ? projects.filter((item) => access.projects!.has(item.id))
+      : projects;
   }
 
-  @Get(':id')
-  get(@Param('id', ParseUUIDPipe) id: string): Promise<Project> {
+  @Get(':projectId')
+  get(@Param('projectId', ParseUUIDPipe) id: string): Promise<Project> {
     return this.projectService.get(id);
   }
 
@@ -40,17 +51,18 @@ export class ProjectController {
     return this.projectService.create(body);
   }
 
-  @Patch(':id')
+  @Patch(':projectId')
   update(
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('projectId', ParseUUIDPipe) id: string,
     @Body() body: UpdateProjectPayload,
   ): Promise<Project> {
     return this.projectService.update(id, body);
   }
 
-  @Delete(':id')
+  @Delete(':projectId')
+  @RequireAccess({ project: 'delete' })
   @HttpCode(HttpStatus.NO_CONTENT)
-  remove(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
+  remove(@Param('projectId', ParseUUIDPipe) id: string): Promise<void> {
     return this.workloadService.removeProject(id);
   }
 }

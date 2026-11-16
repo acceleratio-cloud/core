@@ -4,20 +4,25 @@ import { cn } from '@/lib/utils';
 import {
   SETTINGS_SECTIONS,
   settingsSectionHref,
+  type SettingsNavItem,
   type SettingsSectionId,
 } from '../sections';
 
 type SettingsNavProps = {
   activeId: SettingsSectionId;
+  sections?: SettingsNavItem[];
 };
 
-export const SettingsNav = ({ activeId }: SettingsNavProps) => {
+export const SettingsNav = ({
+  activeId,
+  sections = SETTINGS_SECTIONS,
+}: SettingsNavProps) => {
   return (
     <nav
       aria-label="Settings"
       className="flex gap-1 overflow-x-auto panel-lit rounded-xl p-1.5 lg:sticky lg:top-6 lg:flex-col lg:overflow-visible"
     >
-      {SETTINGS_SECTIONS.map((section) => {
+      {sections.map((section) => {
         const Icon = section.icon;
         const active = section.id === activeId;
 

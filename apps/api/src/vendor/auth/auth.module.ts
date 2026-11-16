@@ -7,6 +7,8 @@ import { auth } from './auth';
     BetterAuthModule.forRoot({
       auth,
       disableControllers: true,
+      // ApplicationModule registers AuthGuard itself, right before AccessGuard.
+      disableGlobalAuthGuard: true,
     }),
   ],
 })

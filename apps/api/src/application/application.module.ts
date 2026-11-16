@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
-import { APP_INTERCEPTOR } from '@nestjs/core';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
+import { AuthGuard } from '@thallesp/nestjs-better-auth';
 import { AuditLogController } from '@/application/audit/audit-log.controller';
 import { AuditLogInterceptor } from '@/application/audit/audit-log.interceptor';
 import { AuditLogService } from '@/application/audit/audit-log.service';
@@ -8,6 +9,11 @@ import { PasswordAttemptLimiter } from '@/application/auth/password-attempt-limi
 import { HealthController } from '@/application/health/health.controller';
 import { GithubController } from '@/application/integration/github/github.controller';
 import { GithubService } from '@/application/integration/github/github.service';
+import { AccessGuard } from '@/application/member/access.guard';
+import { AccessRevocationInterceptor } from '@/application/member/access-revocation.interceptor';
+import { AccessService } from '@/application/member/access.service';
+import { MemberController } from '@/application/member/member.controller';
+import { MemberService } from '@/application/member/member.service';
 import { MarketplaceController } from '@/application/marketplace/marketplace.controller';
 import { MarketplaceDeployService } from '@/application/marketplace/marketplace-deploy.service';
 import { MarketplaceService } from '@/application/marketplace/marketplace.service';
@@ -94,6 +100,7 @@ import { VictoriaMetricsClient } from '@/vendor/victoriametrics/victoriametrics.
     GithubController,
     HealthController,
     MarketplaceController,
+    MemberController,
     LogsController,
     MetricsController,
     NodeController,
@@ -109,8 +116,14 @@ import { VictoriaMetricsClient } from '@/vendor/victoriametrics/victoriametrics.
     PostgresController,
   ],
   providers: [
+    // Global guards run in this order: the session first, then access.
+    { provide: APP_GUARD, useClass: AuthGuard },
+    { provide: APP_GUARD, useClass: AccessGuard },
+    AccessService,
+    MemberService,
     AuditLogService,
     { provide: APP_INTERCEPTOR, useClass: AuditLogInterceptor },
+    { provide: APP_INTERCEPTOR, useClass: AccessRevocationInterceptor },
     PasswordAttemptLimiter,
     MarketplaceService,
     MarketplaceDeployService,
