@@ -7,6 +7,7 @@
     "postgres",
     "static-sites",
     "marketplace",
-    "logs-and-metrics"
+    "logs-and-metrics",
+    "security"
   ]
 }

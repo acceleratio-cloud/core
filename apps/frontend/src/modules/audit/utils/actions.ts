@@ -37,6 +37,9 @@ const ACTION_LABELS: Record<string, string> = {
   'bucket.object.delete': 'Deleted files',
   'site.release.create': 'Started site upload',
   'site.release.publish': 'Published site',
+  'security.scan': 'Started security scan',
+  'security.risk.accept': 'Accepted security risk',
+  'security.risk.restore': 'Restored security recommendation',
 };
 
 export const actionLabel = (action: string) => ACTION_LABELS[action] ?? action;

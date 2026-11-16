@@ -29,7 +29,12 @@ import { toWorkloadNodes } from '@/modules/workloads/utils/workload-nodes';
 import { CanvasLoader } from '@/shared/components/canvas-loader';
 import { TrafficEdge } from '../components/traffic-edge';
 import { useProjectTraffic } from '../hooks/use-project-traffic';
+import { SecurityAttentionProvider } from '@/modules/security/providers/security-attention-provider';
 import { useProject } from '../providers/project-provider';
+import {
+  useProjectTabs,
+  type ServiceRequest,
+} from '../providers/project-tabs-provider';
 
 const edgeTypes = { traffic: TrafficEdge } satisfies EdgeTypes;
 
@@ -66,10 +71,23 @@ const usePrefersReducedMotion = () =>
   );
 
 export const ProjectCanvas = () => {
-  const { workloads, workloadsError } = useProject();
+  const { project, workloads, workloadsError } = useProject();
   const [selectedWorkloadId, setSelectedWorkloadId] = useState<string | null>(
     null,
   );
+  const { serviceRequest } = useProjectTabs();
+  // Starts empty: a canvas first shown by the request must still apply it.
+  const [handledRequest, setHandledRequest] = useState<ServiceRequest | null>(
+    null,
+  );
+
+  // Another tab asked to show a service: select it once per request.
+  if (serviceRequest !== handledRequest) {
+    setHandledRequest(serviceRequest);
+    if (serviceRequest) {
+      setSelectedWorkloadId(serviceRequest.id);
+    }
+  }
 
   const selectedWorkload =
     workloads.find((workload) => workload.id === selectedWorkloadId) ?? null;
@@ -77,31 +95,33 @@ export const ProjectCanvas = () => {
   const closeDetails = useCallback(() => setSelectedWorkloadId(null), []);
 
   return (
-    <ReactFlowProvider>
-      <div className="relative h-full min-h-0 flex-1 bg-surface-board">
-        {/* The project header floats over the left of this row (see
+    <SecurityAttentionProvider projectId={project.id}>
+      <ReactFlowProvider>
+        <div className="relative h-full min-h-0 flex-1 bg-surface-board">
+          {/* The project header floats over the left of this row (see
             ProjectView); the create action stays with the canvas. */}
-        <div className="pointer-events-none absolute top-3 right-3 z-10 flex h-10 items-center">
-          <div className="pointer-events-auto shrink-0">
-            <CreateWorkloadDialog />
+          <div className="pointer-events-none absolute top-3 right-3 z-10 flex h-10 items-center">
+            <div className="pointer-events-auto shrink-0">
+              <CreateWorkloadDialog />
+            </div>
           </div>
+          {workloadsError ? (
+            <p
+              role="alert"
+              className="absolute top-16 left-3 z-10 max-w-sm rounded-md border border-destructive/30 bg-background px-3 py-2 text-xs leading-relaxed text-destructive"
+            >
+              {workloadsError}
+            </p>
+          ) : null}
+          <WorkloadDetails workload={selectedWorkload} onClose={closeDetails} />
+          <WorkloadFlow
+            selectedWorkloadId={selectedWorkloadId}
+            onSelectWorkload={setSelectedWorkloadId}
+            onClearSelection={closeDetails}
+          />
         </div>
-        {workloadsError ? (
-          <p
-            role="alert"
-            className="absolute top-16 left-3 z-10 max-w-sm rounded-md border border-destructive/30 bg-background px-3 py-2 text-xs leading-relaxed text-destructive"
-          >
-            {workloadsError}
-          </p>
-        ) : null}
-        <WorkloadDetails workload={selectedWorkload} onClose={closeDetails} />
-        <WorkloadFlow
-          selectedWorkloadId={selectedWorkloadId}
-          onSelectWorkload={setSelectedWorkloadId}
-          onClearSelection={closeDetails}
-        />
-      </div>
-    </ReactFlowProvider>
+      </ReactFlowProvider>
+    </SecurityAttentionProvider>
   );
 };
 

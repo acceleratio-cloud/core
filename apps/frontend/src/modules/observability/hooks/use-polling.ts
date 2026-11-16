@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef } from 'react';
 export const METRICS_REFRESH_MS = 15_000;
 
 /**
- * Runs `load` now, then every 15 s while `enabled` and the page is visible,
+ * Runs `load` now, then every `intervalMs` (15 s) while `enabled` and the page is visible,
  * and again when the page becomes visible. Each run aborts the previous one,
  * so an older response never lands after a newer one; unmounting aborts too.
  * Returns a function that refreshes on demand.
@@ -14,6 +14,7 @@ export const METRICS_REFRESH_MS = 15_000;
 export const usePolling = (
   load: (signal: AbortSignal) => Promise<void>,
   enabled = true,
+  intervalMs = METRICS_REFRESH_MS,
 ) => {
   const controller = useRef<AbortController | null>(null);
 
@@ -36,7 +37,7 @@ export const usePolling = (
     };
 
     refresh();
-    const timer = window.setInterval(refreshVisible, METRICS_REFRESH_MS);
+    const timer = window.setInterval(refreshVisible, intervalMs);
     document.addEventListener('visibilitychange', refreshVisible);
 
     return () => {
@@ -44,7 +45,7 @@ export const usePolling = (
       document.removeEventListener('visibilitychange', refreshVisible);
       controller.current?.abort();
     };
-  }, [enabled, refresh]);
+  }, [enabled, intervalMs, refresh]);
 
   return refresh;
 };

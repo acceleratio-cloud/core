@@ -100,6 +100,9 @@ REGISTRY_SIZE="${REGISTRY_SIZE:-50Gi}"
 REGISTRY_CLUSTER_IP="${REGISTRY_CLUSTER_IP:-}"
 # Image references in workloads use this name; only the mirror resolves it.
 # Keep in step with REGISTRY_PULL_HOST in the API.
+# Image scans of the Security tab: one Job at a time, nothing between scans.
+SCAN_MEMORY_LIMIT="${SCAN_MEMORY_LIMIT:-1Gi}"
+SCAN_TIMEOUT_MINUTES="${SCAN_TIMEOUT_MINUTES:-20}"
 readonly REGISTRY_HOST="registry.acceleratio.internal"
 ACCELERATIO_DATA_DIR="${ACCELERATIO_DATA_DIR:-/var/lib/acceleratio}"
 POSTGRES_DATA_DIR="${POSTGRES_DATA_DIR:-${ACCELERATIO_DATA_DIR}/postgres}"
@@ -429,6 +432,8 @@ Common variables (environment or --config):
   ACCELERATIO_CONSOLE_NODE_PORT default 30300
   ACCELERATIO_API_NODE_PORT   default 30080
   ACCELERATIO_DEV             default 0 (1 is the same as --dev)
+  SCAN_MEMORY_LIMIT           default 1Gi (memory of one image scan)
+  SCAN_TIMEOUT_MINUTES        default 20 (one image scan, 1 to 180)
   ACCELERATIO_POSTGRES_NODE_PORT default 30432 (PostgreSQL, --dev only)
   RUSTFS_NODE_PORT            default 30900 (RustFS S3, --dev only)
   ACCELERATIO_PUBLIC_HOST     default public IPv4; host used in the URLs
@@ -2661,6 +2666,10 @@ metadata:
   name: registry
   namespace: ${ns}
 data:
+            - name: SCAN_MEMORY_LIMIT
+              value: "${SCAN_MEMORY_LIMIT}"
+            - name: SCAN_TIMEOUT_MINUTES
+              value: "${SCAN_TIMEOUT_MINUTES}"
   # Retention keeps the build cache and the 20 newest images per service.
   config.json: |
     {

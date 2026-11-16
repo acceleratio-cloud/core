@@ -240,6 +240,8 @@ Every variable can be set in the environment or in a file passed to
 | `ACCELERATIO_API_IMAGE` | `ghcr.io/acceleratio-cloud/api:<version>` | API image |
 | `ACCELERATIO_CONSOLE_IMAGE` | `ghcr.io/acceleratio-cloud/console:<version>` | console image |
 | `POSTGRES_IMAGE` | `postgres:17-alpine` | PostgreSQL image |
+| `SCAN_MEMORY_LIMIT` | `1Gi` | memory of one image scan of the Security tab; raise it when large images fail with "ran out of memory" |
+| `SCAN_TIMEOUT_MINUTES` | `20` | how long one image scan may run (1 to 180) |
 | `POSTGRES_DATA_DIR` | `/var/lib/acceleratio/postgres` | hostPath for the database files |
 | `ACCELERATIO_CONSOLE_NODE_PORT` | `30300` | node port of the console |
 | `ACCELERATIO_API_NODE_PORT` | `30080` | node port of the API |

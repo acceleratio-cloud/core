@@ -32,6 +32,11 @@ import { ProjectController } from '@/application/project/project.controller';
 import { ProjectDnsService } from '@/application/project/project-dns.service';
 import { ProjectIsolationService } from '@/application/project/project-isolation.service';
 import { ProjectService } from '@/application/project/project.service';
+import { ImageScanService } from '@/application/security/image-scan.service';
+import { ImageVersionService } from '@/application/security/image-version.service';
+import { KevService } from '@/application/security/kev.service';
+import { SecurityController } from '@/application/security/security.controller';
+import { SecurityService } from '@/application/security/security.service';
 import { StorageBenchmarkController } from '@/application/storage-class/benchmark/storage-benchmark.controller';
 import { StorageBenchmarkService } from '@/application/storage-class/benchmark/storage-benchmark.service';
 import { StorageClassController } from '@/application/storage-class/storage-class.controller';
@@ -70,6 +75,7 @@ import { WorkloadVersionService } from '@/application/workload/workload-version.
 import { S3StorageClient } from '@/vendor/s3/s3.client';
 import { TraefikClient } from '@/vendor/traefik/traefik.client';
 import { GithubClient } from '@/vendor/github/github.client';
+import { OciRegistryClient } from '@/vendor/registry/oci-registry.client';
 import { VictoriaLogsClient } from '@/vendor/victorialogs/victorialogs.client';
 import { VictoriaMetricsClient } from '@/vendor/victoriametrics/victoriametrics.client';
 
@@ -93,6 +99,7 @@ import { VictoriaMetricsClient } from '@/vendor/victoriametrics/victoriametrics.
     NodeController,
     PlatformUpdateController,
     ProjectController,
+    SecurityController,
     StorageClassController,
     StorageBenchmarkController,
     SystemController,
@@ -108,6 +115,7 @@ import { VictoriaMetricsClient } from '@/vendor/victoriametrics/victoriametrics.
     MarketplaceService,
     MarketplaceDeployService,
     GithubClient,
+    OciRegistryClient,
     GithubService,
     NodeService,
     NodeDrainService,
@@ -120,6 +128,10 @@ import { VictoriaMetricsClient } from '@/vendor/victoriametrics/victoriametrics.
     ProjectService,
     ProjectDnsService,
     ProjectIsolationService,
+    ImageScanService,
+    ImageVersionService,
+    KevService,
+    SecurityService,
     StorageClassService,
     StorageBenchmarkService,
     ControlPlaneDnsService,

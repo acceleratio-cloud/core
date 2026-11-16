@@ -8,10 +8,12 @@ import { AuditLogView } from '@/modules/audit/containers/audit-log-view';
 import { LogsView } from '@/modules/logs/containers/logs-view';
 import { setLogsTargetParams } from '@/modules/logs/utils/links';
 import { ObservabilityView } from '@/modules/observability/containers/observability-view';
+import { SecurityView } from '@/modules/security/containers/security-view';
 import { ProjectHeader } from '../components/project-header';
 import {
   ProjectTabsProvider,
   type LogsTarget,
+  type ServiceRequest,
 } from '../providers/project-tabs-provider';
 import {
   DEFAULT_PROJECT_TAB,
@@ -28,7 +30,7 @@ import { ProjectSettings } from './project-settings';
 type Direction = 'forward' | 'backward' | null;
 
 /**
- * The project page: one route, four tabs. `?tab=` (Architecture omits it) is
+ * The project page: one route, several tabs. `?tab=` (Architecture omits it) is
  * the source of truth, so a reload or a shared link opens the same tab. The tab
  * bar writes it with `history.replaceState(null, …)`: Next syncs that into
  * `useSearchParams` without a server round trip. Passing the current history
@@ -86,7 +88,21 @@ export const ProjectView = () => {
     setLogsTargetParams(url.searchParams, target);
     window.history.replaceState(null, '', url);
   }, []);
-  const tabsContext = useMemo(() => ({ openLogs }), [openLogs]);
+  const [serviceRequest, setServiceRequest] = useState<ServiceRequest | null>(
+    null,
+  );
+  const openService = useCallback((workloadId: string) => {
+    const url = new URL(window.location.href);
+
+    url.searchParams.delete(PROJECT_TAB_PARAM);
+    setLogsTargetParams(url.searchParams, {});
+    window.history.replaceState(null, '', url);
+    setServiceRequest({ id: workloadId, key: Date.now() });
+  }, []);
+  const tabsContext = useMemo(
+    () => ({ openLogs, openService, serviceRequest }),
+    [openLogs, openService, serviceRequest],
+  );
 
   return (
     <ProjectTabsProvider value={tabsContext}>
@@ -124,6 +140,16 @@ export const ProjectView = () => {
           direction={direction}
         >
           <LogsView active={activeTab === 'logs'} />
+        </TabPanel>
+
+        <TabPanel
+          tab="security"
+          activeTab={activeTab}
+          visited={visited}
+          direction={direction}
+          scrollable
+        >
+          <SecurityView active={activeTab === 'security'} />
         </TabPanel>
 
         <TabPanel

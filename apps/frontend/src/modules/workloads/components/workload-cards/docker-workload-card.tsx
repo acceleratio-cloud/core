@@ -47,6 +47,7 @@ export const DockerWorkloadCard = ({
         title={data.name}
         subtitle={internalAddress(data)}
         status={data.status}
+        workloadId={data.id}
       />
 
       <NodeRows>

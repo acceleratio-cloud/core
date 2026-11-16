@@ -40,8 +40,8 @@ src/
 
 ## Project page
 
-- `/project/[id]` is one route with four tabs (`modules/projects/tabs.ts`): Architecture (the workload
-  canvas), Usage Metrics, Logs and Settings. They are not routes: `ProjectView` reads `?tab=` through
+- `/project/[id]` is one route with tabs (`modules/projects/tabs.ts`): Architecture (the workload
+  canvas), Usage Metrics, Logs, Security, Audit Trail and Settings. They are not routes: `ProjectView` reads `?tab=` through
   `useSearchParams` and writes it with `history.replaceState` (Architecture omits it), so a reload or a
   shared link opens the same tab without a server round trip. The project switcher keeps the tab.
 - Panels mount on first visit and then stay mounted while hidden (`hidden` + `inert`), so the canvas
@@ -53,6 +53,14 @@ src/
   in workload order (never cycled; a seventh service folds into a neutral Other) so a service keeps
   its color in every panel. Saturation gauges use the `status-*` colors and always repeat the level
   as a word and an icon.
+- `modules/security/` is the Security tab, a dashboard built from the Usage Metrics panels
+  (`Panel`, `PanelRow`, `StatPanel`, `DonutPanel`): a summary row, services by status (`action`,
+  `update`, `platform`, `waiting`, `pending`, `ok`), findings by severity and who fixes them, a table
+  of services, the recommendations most urgent first, then what can wait (fixed by the platform, no
+  fix yet, accepted risks) and every finding of every image under All vulnerabilities. A service row
+  or a recommendation opens the service on the canvas (`useProjectTabs().openService`). It polls `GET /projects/:projectId/security` every 15 s while
+  shown; a row there opens the image's vulnerabilities (`GET …/security/images/:digest`), and Scan
+  now queues the project's images again (`POST …/security/scan`).
 - `modules/logs/` is the Logs tab: every service of the project in one newest-first list. The
   container (`containers/logs-view.tsx`) owns the filters (service, pod, level, search, window);
   `hooks/use-log-history.ts` loads pages and older pages by cursor, `hooks/use-log-stream.ts` follows
@@ -672,6 +680,64 @@ SSH, with the scripts and requirement checks in `node-join-script.ts`. SSH goes 
   500 and `cursor` = the `next_cursor` of the previous page: `<time>~<skip>`, the last line's time
   and how many lines at exactly that time were already returned, so lines that share a timestamp
   are never lost between pages), `GET .../logs/histogram` (lines per level
+## Security scanning
+
+- `application/security/` scans the images services run with Trivy. `SecurityService` lists the pods of
+  the project namespace and maps them to services by `acceleratio.io/workload-id`
+  (`project-images.ts`; PostgreSQL pods inherit the label from their Cluster); each running container
+  is one image, by the digest in its `imageID`. Reading the tab and an hourly sweep of every project
+  hand the images to `ImageScanService`, the queue in `image_scan` (see
+  [DATABASE.md](./DATABASE.md#image_scan)).
+- `ImageScanService` runs one Trivy Job at a time across the cluster, polled every 5 s from the
+  database, so a restart or a second API process picks up where it stopped. The namespace
+  (`SCAN_NAMESPACE`, default `acceleratio-security`), its CiliumNetworkPolicy (the builds' rules: DNS,
+  the registry, the internet) and a 10 GiB `trivy-cache` claim on the default StorageClass are
+  created on first use. The cache keeps the vulnerability database between scans; the volume is
+  attached only while a scan runs, and nothing runs between scans.
+- The Job (`image-scan.manifests.ts`) runs `SCANNER_IMAGE` (default Trivy pinned by digest) as
+  nobody with a read-only root, no capabilities and RuntimeDefault seccomp. `SCAN_MEMORY_LIMIT`
+  (default 1Gi) is its memory limit, with `GOMEMLIMIT` at 85% of it, and `SCAN_TIMEOUT_MINUTES`
+  (default 20) its deadline; both come from `install.sh`. The first scan of a digest pulls the image
+  once and writes a CycloneDX SBOM to `/cache/sbom/<scanner version>/` (`--parallel=1` keeps large
+  images in memory); every scan then runs `trivy sbom` on it, so daily rescans never reach the
+  image's registry, only the database mirror. SBOMs unused for 14 days are deleted. The scan prints
+  one JSON object per vulnerability through a Go template, which `scan-output.ts` reads from the pod
+  log. Images built from GitHub are pulled through the registry's cluster DNS name
+  (`buildRegistry()`) over HTTP, since pods cannot resolve `registry.acceleratio.internal`.
+- PostgreSQL and static site images are `managed`: the platform picks them, so the console says a
+  platform update brings their fixes.
+- `recommendations.ts` decides who can fix each finding, from facts the API has: findings with a fixed
+  version in a GitHub service's dependencies (`dependencies`) or, for a Dockerfile build, in its base
+  image (`base_image`) are the user's; so are those of an image a Docker service names
+  (`image_update`). Managed images and the Railpack base image count as `platform`, findings without
+  a fixed version as `waiting`. A PostgreSQL port open to `0.0.0.0/0` (`database_exposed`) and a
+  Docker image without a version tag or on `latest` (`moving_tag`) are checks of their own. A
+  fix for a finding CISA lists as exploited in the wild (KEV), or for a critical finding on a service
+  with a routed domain or an open database port, is urgent; critical or high otherwise is
+  recommended; the rest is optional. Exploited packages lead the listed packages. A service with an urgent
+  recommendation needs action. The console words each kind; the API sends only kinds and numbers.
+- `kev.service.ts` loads CISA's KEV catalogue (`KEV_URL`, default the CISA feed) at start and once a
+  day into memory, retrying hourly after a failure; without it nothing is marked exploited. Findings
+  are marked on read (`exploited`), never stored.
+- A user can accept a recommendation (`POST …/security/acceptances` with a reason and 30, 90 or 180
+  days; `DELETE …/acceptances/:id` restores it). It moves to Accepted risks and stops counting toward
+  the service's status, until it expires or grows: more critical, high or exploited findings than its
+  snapshot in `security_acceptance`. `security_recommendation_seen` keeps when each recommendation was
+  first given, so one that appears a while after the project's first ones says New for a week.
+- `image-version.service.ts` finds, for an image a Docker service names by a version tag, the
+  newest release of the same line (`image-versions.ts`: same `v` prefix, number count, major and
+  suffix, no pre-release after a release; a build hash such as `-sha-a05e7ec` is part of the
+  version). `vendor/registry/oci-registry.client.ts` reads tags anonymously: Docker Hub through its
+  API, newest first and filtered to the major (`2.`), since its registry lists tags alphabetically;
+  other registries through the registry API with the Bearer token flow. A HEAD of the manifest
+  gives the release's digest, which joins the scan queue. Lookups run in the background, one at a
+  time, at most once a day per image (hourly after a failure) and are kept in
+  `image_version_check`. The `image_update` recommendation then names the release and what it
+  closes (findings of the current image the release no longer has); without a newer release, or
+  when it closes nothing, the findings wait instead.
+- The canvas card of a service whose status is `action` shows a shield badge
+  (`SecurityAttentionProvider` in `ProjectCanvas` reads `GET …/security` once a minute).
+
   in about 60 buckets), `GET .../logs/sources` (services and pods with line counts, plus live pods) and
   `GET .../logs/stream` (server-sent events). Every endpoint takes `range=15m|1h|6h|24h|7d` or
   `start` + `end` (RFC 3339, at most 31 days) and the filters `workload`, `pod`, `level`
