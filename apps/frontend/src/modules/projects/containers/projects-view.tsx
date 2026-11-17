@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Plus } from 'lucide-react';
 
 import { getApiErrorMessage } from '@/api';
@@ -19,6 +20,7 @@ import {
 const SKELETON_COUNT = 6;
 
 export const ProjectsView = () => {
+  const router = useRouter();
   const { access } = useAuth();
   const canCreate = isManager(access);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -56,6 +58,8 @@ export const ProjectsView = () => {
     const project = await projectsApi.create({ name });
 
     setProjects((currentProjects) => [project, ...currentProjects]);
+    // The new project is where the user goes next, as from the switcher.
+    router.push(`/project/${project.id}`);
   };
 
   return (
