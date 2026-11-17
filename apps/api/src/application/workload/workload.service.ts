@@ -6,6 +6,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type {
+  ComposeImportPayload,
+  ComposeImportPlan,
   CreateWorkloadPayload,
   S3BucketCredentials,
   UpdateInternalHostnamePayload,
@@ -22,6 +24,7 @@ import { and, eq } from 'drizzle-orm';
 import { ProjectService } from '@/application/project/project.service';
 import { DATABASE } from '@/vendor/db/database.constants';
 import type { Database } from '@/vendor/db/database.constants';
+import { planComposeImport } from './docker/docker-compose.import';
 import { DockerWorkloadService } from './docker/docker-workload.service';
 import { GithubWorkloadService } from './github/github-workload.service';
 import { WorkloadEventsService } from './observer/workload-events.service';
@@ -216,6 +219,17 @@ export class WorkloadService {
     }
 
     return this.registry.get(payload?.type).create(projectId, payload);
+  }
+
+  async planComposeImport(
+    projectId: string,
+    payload: ComposeImportPayload,
+  ): Promise<ComposeImportPlan> {
+    if (!(await this.projectService.exists(projectId))) {
+      throw new NotFoundException('Project not found');
+    }
+
+    return planComposeImport(payload);
   }
 
   async get(projectId: string, id: string): Promise<Workload> {

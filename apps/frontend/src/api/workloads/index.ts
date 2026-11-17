@@ -1,4 +1,5 @@
 import type {
+  ComposeImportPlan,
   CreateWorkloadPayload,
   S3BucketCredentials,
   UpdateInternalHostnamePayload,
@@ -78,6 +79,14 @@ export const workloadsApi = {
     const { data } = await api.post<Workload>(
       `/projects/${projectId}/workloads`,
       payload,
+    );
+    return data;
+  },
+  /** Reads a compose file into services to create; creates nothing. */
+  importCompose: async (projectId: string, content: string) => {
+    const { data } = await api.post<ComposeImportPlan>(
+      `/projects/${projectId}/workloads/import/compose`,
+      { content },
     );
     return data;
   },

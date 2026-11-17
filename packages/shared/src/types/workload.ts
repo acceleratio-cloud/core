@@ -652,6 +652,32 @@ export interface CreateWorkloadPayload {
   config?: WorkloadConfig;
 }
 
+/** A Docker Compose file, as pasted or dropped in the console. */
+export interface ComposeImportPayload {
+  content: string;
+}
+
+/** A compose service the console can create as a Docker service. */
+export interface ImportedService {
+  name: string;
+  /** Already validated, with env values: it never leaves the importing user. */
+  config: DockerWorkloadConfig;
+  /** Container port to publish on a generated domain; null keeps it private. */
+  public_port: number | null;
+  /** Compose keys that were not carried over, such as `depends_on`. */
+  ignored: string[];
+}
+
+export interface SkippedImportService {
+  name: string;
+  reason: string;
+}
+
+export interface ComposeImportPlan {
+  services: ImportedService[];
+  skipped: SkippedImportService[];
+}
+
 export interface UpdateInternalHostnamePayload {
   /** A DNS label (`postgres`); a trailing `.internal` is accepted. */
   internal_hostname: string;

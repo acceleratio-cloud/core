@@ -13,6 +13,7 @@ class WorkloadController {
   update() {}
   list() {}
   env() {}
+  importCompose() {}
 }
 Reflect.defineMetadata(
   PATH_METADATA,
@@ -188,7 +189,7 @@ describe('AuditLogInterceptor', () => {
     ).toEqual(['failure', 'success']);
   });
 
-  it('records listed reads and skips other reads and per-file uploads', async () => {
+  it('records listed reads and skips other reads, per-file uploads and compose reads', async () => {
     const run = (
       controller: typeof WorkloadController | typeof StaticReleasesController,
       handler: string,
@@ -205,6 +206,7 @@ describe('AuditLogInterceptor', () => {
 
     await run(WorkloadController, 'list', 'GET');
     await run(StaticReleasesController, 'upload', 'PUT');
+    await run(WorkloadController, 'importCompose', 'POST');
     expect(record).not.toHaveBeenCalled();
 
     await run(WorkloadController, 'env', 'GET');

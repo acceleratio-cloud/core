@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import {
   BadRequestException,
   ConflictException,
@@ -457,7 +458,19 @@ export class DockerWorkloadNetworkService
       throw new ConflictException(PUBLIC_IP_UNKNOWN_MESSAGE);
     }
 
-    const hostname = generatedHostname(payload?.label, expectedIp);
+    const label = payload?.label ?? suggestedLabel(row.name, expectedIp);
+    const values = (hostname: string) => ({
+      workload_id: row.id,
+      hostname,
+      kind: 'generated' as const,
+      port,
+      status: 'generated' as const,
+      status_message: GENERATED_ISSUING_MESSAGE,
+      routed: true,
+      verified_at: new Date(),
+      certificate_status: 'pending' as const,
+    });
+    const hostname = generatedHostname(label, expectedIp);
     const existing = await this.findDomains(row.id);
 
     if (existing.some(({ kind }) => kind === 'generated')) {
@@ -466,17 +479,24 @@ export class DockerWorkloadNetworkService
 
     await this.traefik.assertAvailable();
 
-    const domain = await this.insert({
-      workload_id: row.id,
-      hostname,
-      kind: 'generated',
-      port,
-      status: 'generated',
-      status_message: GENERATED_ISSUING_MESSAGE,
-      routed: true,
-      verified_at: new Date(),
-      certificate_status: 'pending',
-    });
+    let domain: WorkloadDomainRow;
+    try {
+      domain = await this.insert(values(hostname));
+    } catch (error) {
+      // A label the caller chose is theirs to change; a suggested one held by
+      // another app gets a random suffix instead.
+      if (
+        payload?.label !== undefined ||
+        !(error instanceof ConflictException) ||
+        error.message !== HOSTNAME_TAKEN_MESSAGE
+      ) {
+        throw error;
+      }
+      const suffixed = `${label.slice(0, 20).replace(/-+$/, '')}-${randomBytes(3).toString('hex')}`;
+      domain = await this.insert(
+        values(generatedHostname(suffixed, expectedIp)),
+      );
+    }
 
     try {
       await this.publish(row, domain);

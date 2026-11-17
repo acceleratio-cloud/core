@@ -18,6 +18,8 @@ import { Session } from '@thallesp/nestjs-better-auth';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
 import type {
   AddWorkloadDomainPayload,
+  ComposeImportPayload,
+  ComposeImportPlan,
   CreateWorkloadPayload,
   GenerateWorkloadDomainPayload,
   UpdateWorkloadDomainPayload,
@@ -205,6 +207,16 @@ export class WorkloadController {
     @Body() body: CreateWorkloadPayload,
   ): Promise<Workload> {
     return this.workloadService.create(projectId, body);
+  }
+
+  /** Reads a compose file into services; the console then creates each one. */
+  @Post('import/compose')
+  @HttpCode(HttpStatus.OK)
+  importCompose(
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Body() body: ComposeImportPayload,
+  ): Promise<ComposeImportPlan> {
+    return this.workloadService.planComposeImport(projectId, body);
   }
 
   /** The only route that returns environment variable values. */

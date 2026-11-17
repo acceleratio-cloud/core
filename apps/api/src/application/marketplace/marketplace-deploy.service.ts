@@ -221,10 +221,11 @@ export class MarketplaceDeployService {
         }
         services[service.name] = { host: made.internal_domain! };
         if (!service.public) continue;
-        const host = await this.generateDomain(
+        // No label: the API picks the service's own, suffixed when taken.
+        const { hostname: host } = await this.network.generate(
           projectId,
           made.id,
-          service.port!,
+          { port: service.port! },
         );
         services[service.name].url = `https://${host}`;
         appHost ??= host;
@@ -308,32 +309,6 @@ export class MarketplaceDeployService {
     )
       throw new NotFoundException('Project not found');
     return id;
-  }
-
-  /** The suggested sslip.io label, or a suffixed one when another app holds it. */
-  private async generateDomain(
-    projectId: string,
-    workloadId: string,
-    port: number,
-  ): Promise<string> {
-    const { suggested_label: label } = await this.network.list(
-      projectId,
-      workloadId,
-    );
-    try {
-      return (
-        await this.network.generate(projectId, workloadId, { label, port })
-      ).hostname;
-    } catch (error) {
-      if (!(error instanceof ConflictException)) throw error;
-      const suffixed = `${label.slice(0, 20)}-${randomBytes(3).toString('hex')}`;
-      return (
-        await this.network.generate(projectId, workloadId, {
-          label: suffixed,
-          port,
-        })
-      ).hostname;
-    }
   }
 
   /**

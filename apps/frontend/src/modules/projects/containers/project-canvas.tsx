@@ -8,7 +8,12 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react';
-import type { EdgeTypes, NodeMouseHandler, OnNodeDrag } from '@xyflow/react';
+import type {
+  EdgeTypes,
+  NodeMouseHandler,
+  NodeTypes,
+  OnNodeDrag,
+} from '@xyflow/react';
 import {
   Background,
   BackgroundVariant,
@@ -23,22 +28,39 @@ import { sileo } from 'sileo';
 import { getApiErrorMessage } from '@/api';
 import { useAuth } from '@/modules/auth/providers/auth-provider';
 import { canProject } from '@/modules/auth/utils/access';
-import { CreateWorkloadDialog } from '@/modules/workloads/containers/create-workload-dialog';
+import {
+  CreateWorkloadDialog,
+  type CreateStart,
+} from '@/modules/workloads/containers/create-workload-dialog';
 import { WorkloadDetails } from '@/modules/workloads/containers/workload-details';
 import { workloadNodeTypes } from '@/modules/workloads/components/workload-nodes';
 import type { WorkloadNode } from '@/modules/workloads/utils/workload-nodes';
 import { toWorkloadNodes } from '@/modules/workloads/utils/workload-nodes';
 import { CanvasLoader } from '@/shared/components/canvas-loader';
+import {
+  EmptyCanvasNodeCard,
+  type EmptyCanvasNode,
+} from '../components/empty-canvas-node';
 import { TrafficEdge } from '../components/traffic-edge';
 import { useProjectTraffic } from '../hooks/use-project-traffic';
 import { SecurityAttentionProvider } from '@/modules/security/providers/security-attention-provider';
-import { useProject } from '../providers/project-provider';
+import { useProject, type FocusRequest } from '../providers/project-provider';
 import {
   useProjectTabs,
   type ServiceRequest,
 } from '../providers/project-tabs-provider';
 
 const edgeTypes = { traffic: TrafficEdge } satisfies EdgeTypes;
+
+const canvasNodeTypes = {
+  ...workloadNodeTypes,
+  empty: EmptyCanvasNodeCard,
+} satisfies NodeTypes;
+
+type CanvasNode = WorkloadNode | EmptyCanvasNode;
+
+/** Where the API puts a project's first service: it appears where the empty state was. */
+const FIRST_SERVICE_POSITION = { x: 0, y: 0 };
 
 const formatRate = new Intl.NumberFormat('en', { maximumFractionDigits: 1 });
 
@@ -96,6 +118,9 @@ export const ProjectCanvas = () => {
     workloads.find((workload) => workload.id === selectedWorkloadId) ?? null;
 
   const closeDetails = useCallback(() => setSelectedWorkloadId(null), []);
+  // Where the create dialog opened, or null while it is closed.
+  const [createStart, setCreateStart] = useState<CreateStart | null>(null);
+  const canEdit = canProject(access, project.id, 'edit');
 
   return (
     <SecurityAttentionProvider projectId={project.id}>
@@ -103,10 +128,14 @@ export const ProjectCanvas = () => {
         <div className="relative h-full min-h-0 flex-1 bg-surface-board">
           {/* The project header floats over the left of this row (see
             ProjectView); the create action stays with the canvas. */}
-          {canProject(access, project.id, 'edit') ? (
+          {canEdit ? (
             <div className="pointer-events-none absolute top-3 right-3 z-10 flex h-10 items-center">
               <div className="pointer-events-auto shrink-0">
-                <CreateWorkloadDialog />
+                <CreateWorkloadDialog
+                  open={createStart !== null}
+                  start={createStart ?? 'type'}
+                  onOpenChange={(open) => setCreateStart(open ? 'type' : null)}
+                />
               </div>
             </div>
           ) : null}
@@ -123,6 +152,7 @@ export const ProjectCanvas = () => {
             selectedWorkloadId={selectedWorkloadId}
             onSelectWorkload={setSelectedWorkloadId}
             onClearSelection={closeDetails}
+            onCreate={canEdit ? setCreateStart : undefined}
           />
         </div>
       </ReactFlowProvider>
@@ -134,30 +164,41 @@ const WorkloadFlow = ({
   selectedWorkloadId,
   onSelectWorkload,
   onClearSelection,
+  onCreate,
 }: {
   selectedWorkloadId: string | null;
   onSelectWorkload: (workloadId: string) => void;
   onClearSelection: () => void;
+  /** Opens the create dialog; absent for a role that cannot add services. */
+  onCreate?: (start: CreateStart) => void;
 }) => {
-  const { project, workloads, isLoadingWorkloads, moveWorkload } = useProject();
+  const {
+    project,
+    workloads,
+    isLoadingWorkloads,
+    workloadsError,
+    moveWorkload,
+    focusRequest,
+  } = useProject();
   const { access } = useAuth();
   const traffic = useProjectTraffic(project.id);
   const reducedMotion = usePrefersReducedMotion();
-  const { setCenter, getZoom } = useReactFlow();
+  const { setCenter, getZoom, fitView } = useReactFlow();
   const canvasWidth = useStore((state) => state.width);
   const canvasHeight = useStore((state) => state.height);
   // React Flow owns drag positions and node measurements. The effect keeps
   // the local list in sync with workloads (data, remote positions, creates and
   // deletes) without replacing a node that is currently under the pointer.
-  const [nodes, setNodes, onNodesChange] = useNodesState<WorkloadNode>([]);
+  const [nodes, setNodes, onNodesChange] = useNodesState<CanvasNode>([]);
   const draggingIds = useRef(new Set<string>());
 
   useEffect(() => {
     setNodes((currentNodes) => {
       const currentById = new Map(currentNodes.map((node) => [node.id, node]));
 
-      return toWorkloadNodes(workloads).map((node) => {
-        const current = currentById.get(node.id);
+      const next: CanvasNode[] = toWorkloadNodes(workloads).map((node) => {
+        // A service id never names the empty slot, so this is a service node.
+        const current = currentById.get(node.id) as WorkloadNode | undefined;
         const isDragging = draggingIds.current.has(node.id);
 
         return {
@@ -170,8 +211,30 @@ const WorkloadFlow = ({
           selected: node.id === selectedWorkloadId,
         };
       });
+
+      // A loaded project without services shows where the first one goes.
+      if (next.length === 0 && !isLoadingWorkloads && !workloadsError) {
+        next.push({
+          id: 'empty',
+          type: 'empty',
+          position: FIRST_SERVICE_POSITION,
+          data: { onCreate },
+          draggable: false,
+          selectable: false,
+          measured: currentById.get('empty')?.measured,
+        });
+      }
+
+      return next;
     });
-  }, [workloads, selectedWorkloadId, setNodes]);
+  }, [
+    workloads,
+    selectedWorkloadId,
+    isLoadingWorkloads,
+    workloadsError,
+    onCreate,
+    setNodes,
+  ]);
 
   const edges = useMemo<TrafficEdge[]>(() => {
     const names = new Map(workloads.map((w) => [w.id, w.name]));
@@ -200,14 +263,11 @@ const WorkloadFlow = ({
     });
   }, [traffic, workloads, reducedMotion]);
 
-  const handleNodeDragStart = useCallback<OnNodeDrag<WorkloadNode>>(
-    (_, node) => {
-      draggingIds.current.add(node.id);
-    },
-    [],
-  );
+  const handleNodeDragStart = useCallback<OnNodeDrag<CanvasNode>>((_, node) => {
+    draggingIds.current.add(node.id);
+  }, []);
 
-  const handleNodeDragStop = useCallback<OnNodeDrag<WorkloadNode>>(
+  const handleNodeDragStop = useCallback<OnNodeDrag<CanvasNode>>(
     (_, node) => {
       draggingIds.current.delete(node.id);
 
@@ -221,12 +281,12 @@ const WorkloadFlow = ({
     [moveWorkload],
   );
 
-  // Selecting a node opens the details panel, so glide the camera to put the
-  // node in the middle of the canvas the panel leaves uncovered.
-  const handleNodeClick = useCallback<NodeMouseHandler<WorkloadNode>>(
-    (_, node) => {
-      onSelectWorkload(node.id);
-
+  /**
+   * Glides the camera to put the node in the middle of the canvas or, with
+   * the details panel open, of the part the panel leaves uncovered.
+   */
+  const centerNode = useCallback(
+    (node: CanvasNode, besidePanel: boolean) => {
       const zoom = getZoom();
       const nodeWidth = node.measured?.width ?? 0;
       const nodeHeight = node.measured?.height ?? 0;
@@ -237,8 +297,12 @@ const WorkloadFlow = ({
       const visibleWidth = canvasWidth - panelWidth - PANEL_INSET;
       // Screen point the node should land on, in canvas pixels.
       const targetX =
-        visibleWidth >= MIN_VISIBLE_WIDTH ? visibleWidth / 2 : canvasWidth / 2;
-      const targetY = (PANEL_TOP + canvasHeight) / 2;
+        besidePanel && visibleWidth >= MIN_VISIBLE_WIDTH
+          ? visibleWidth / 2
+          : canvasWidth / 2;
+      const targetY = besidePanel
+        ? (PANEL_TOP + canvasHeight) / 2
+        : canvasHeight / 2;
 
       // `setCenter` puts a flow point at the middle of the canvas, so shift
       // that point by the screen offset of the target, in flow units.
@@ -252,15 +316,62 @@ const WorkloadFlow = ({
         },
       );
     },
-    [
-      onSelectWorkload,
-      getZoom,
-      setCenter,
-      canvasWidth,
-      canvasHeight,
-      reducedMotion,
-    ],
+    [getZoom, setCenter, canvasWidth, canvasHeight, reducedMotion],
   );
+
+  // Selecting a node opens the details panel beside it.
+  const handleNodeClick = useCallback<NodeMouseHandler<CanvasNode>>(
+    (_, node) => {
+      if (node.type === 'empty') {
+        return;
+      }
+      onSelectWorkload(node.id);
+      centerNode(node, true);
+    },
+    [onSelectWorkload, centerNode],
+  );
+
+  // A request made before this canvas opened is not replayed on it.
+  const handledFocus = useRef<FocusRequest | null>(focusRequest);
+
+  // A create asked to show its services: move once their cards are on the
+  // canvas and measured, so the camera knows where their middle is.
+  useEffect(() => {
+    if (!focusRequest || focusRequest === handledFocus.current) {
+      return;
+    }
+
+    const targets = nodes.filter(({ id }) => focusRequest.ids.includes(id));
+
+    if (
+      targets.length < focusRequest.ids.length ||
+      targets.some(({ measured }) => !measured?.width)
+    ) {
+      return;
+    }
+
+    handledFocus.current = focusRequest;
+
+    if (targets.length === 1) {
+      centerNode(targets[0], selectedWorkloadId !== null);
+      return;
+    }
+
+    void fitView({
+      nodes: targets,
+      padding: 0.2,
+      maxZoom: 1.15,
+      duration: reducedMotion ? 0 : CAMERA_DURATION_MS,
+      ease: easeOutCubic,
+    });
+  }, [
+    focusRequest,
+    nodes,
+    centerNode,
+    fitView,
+    selectedWorkloadId,
+    reducedMotion,
+  ]);
 
   return (
     <>
@@ -269,7 +380,7 @@ const WorkloadFlow = ({
       <ReactFlow
         nodes={nodes}
         edges={edges}
-        nodeTypes={workloadNodeTypes}
+        nodeTypes={canvasNodeTypes}
         edgeTypes={edgeTypes}
         onNodesChange={onNodesChange}
         onNodeClick={handleNodeClick}

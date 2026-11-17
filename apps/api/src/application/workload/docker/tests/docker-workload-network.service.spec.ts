@@ -357,6 +357,46 @@ describe('DockerWorkloadNetworkService', () => {
       expect(appsV1.patchNamespacedDeployment).not.toHaveBeenCalled();
     });
 
+    it('names the domain after the service when no label is given', async () => {
+      const { service } = createService();
+
+      const domain = await service.generate(projectId, workloadId, {
+        port: 80,
+      });
+
+      expect(domain.hostname).toBe('my-api-203-0-113-10.sslip.io');
+    });
+
+    it('suffixes the suggested label when another app holds it', async () => {
+      const other = '4a0b2c3d-5e6f-7081-92a3-b4c5d6e7f809';
+      const { service } = createService([
+        workloadRow(),
+        workloadRow({ id: other, external_name: 'my-api-4a0b2c3d' }),
+      ]);
+      await service.generate(projectId, other, { label: 'my-api', port: 80 });
+
+      const domain = await service.generate(projectId, workloadId, {
+        port: 80,
+      });
+
+      expect(domain.hostname).toMatch(
+        /^my-api-[0-9a-f]{6}-203-0-113-10\.sslip\.io$/,
+      );
+    });
+
+    it('keeps a chosen label and reports it taken', async () => {
+      const other = '4a0b2c3d-5e6f-7081-92a3-b4c5d6e7f809';
+      const { service } = createService([
+        workloadRow(),
+        workloadRow({ id: other, external_name: 'my-api-4a0b2c3d' }),
+      ]);
+      await service.generate(projectId, other, { label: 'api', port: 80 });
+
+      await expect(
+        service.generate(projectId, workloadId, { label: 'api', port: 80 }),
+      ).rejects.toThrow(HOSTNAME_TAKEN_MESSAGE);
+    });
+
     it('allows one generated domain per service', async () => {
       const { service } = createService();
       await service.generate(projectId, workloadId, { label: 'api', port: 80 });

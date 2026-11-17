@@ -1,0 +1,39 @@
+---
+title: Import from Docker Compose
+description: Bring the services of a compose file into a project.
+---
+
+**Create service → Import from… → Docker Compose** turns a `compose.yaml`
+into [Docker services](/workloads/docker). Paste the file or drop it on the
+text box, then **Apply**. The file is checked first; each service then shows
+its own progress, and a failed one has **Retry**, which continues from the
+step that failed. Closing the dialog early lets the rest finish; a service that
+fails after that shows as a notification.
+
+| Compose | Becomes |
+| --- | --- |
+| `image` | The service's image |
+| `command`, `entrypoint` | Command and entrypoint; a string is split like a shell line |
+| `environment` | Environment variables, with values exactly as written (`1.10` stays `1.10`) |
+| Named and anonymous `volumes` | [Volumes](/storage/volumes) of 10 GiB |
+| First TCP `ports` entry that can serve HTTP | A generated HTTPS domain on its container port |
+| `deploy.replicas` | Replicas |
+
+Services reach each other by their compose names, such as `db`. When the
+project already has a service with that name, the new one gets a `-2` suffix;
+the import shows each service's private address.
+
+UDP ports and the usual database and broker ports (such as 5432, 3306, 6379
+and 27017) get no domain; other services still reach them privately.
+
+A service needs an `image`: one with only `build` is skipped, and so is one
+turned off with `deploy.replicas: 0`. Bind mounts,
+`env_file`, variables without a value, `depends_on`, `healthcheck`,
+`networks`, `restart`, `deploy.resources` and other keys are not imported;
+the import lists them under each service. `${VAR}` substitution is not
+applied. Each service gets its own volumes, even when the file shares one
+named volume between services.
+
+A file holds at most 50 services and 512 KiB.
+
+**Railway** is listed as coming soon.

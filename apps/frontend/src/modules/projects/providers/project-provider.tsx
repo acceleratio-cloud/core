@@ -26,6 +26,9 @@ import {
   projectHasDisks,
 } from '@/modules/workloads/utils/volume-usage';
 
+/** Services the canvas should bring into view; a new object per request. */
+export type FocusRequest = { ids: string[] };
+
 type ProjectContextValue = {
   project: Project;
   /** Applies a project the API returned, such as after a rename. */
@@ -33,7 +36,15 @@ type ProjectContextValue = {
   workloads: Workload[];
   isLoadingWorkloads: boolean;
   workloadsError: string | null;
-  addWorkload: (workload: Workload) => void;
+  /**
+   * Shows a created service and brings it into view. `batch` skips the list
+   * reload and the camera move, for a caller adding many that calls
+   * `refreshWorkloads` and `focusWorkloads` once at the end.
+   */
+  addWorkload: (workload: Workload, options?: { batch?: boolean }) => void;
+  /** The latest request to bring services into view, for the canvas. */
+  focusRequest: FocusRequest | null;
+  focusWorkloads: (ids: string[]) => void;
   replaceWorkload: (workload: Workload) => void;
   moveWorkload: (
     workloadId: string,
@@ -193,6 +204,7 @@ export const ProjectProvider = ({
 }) => {
   const [project, setProject] = useState(initialProject);
   const [workloads, setWorkloads] = useState<Workload[]>([]);
+  const [focusRequest, setFocusRequest] = useState<FocusRequest | null>(null);
   const [isLoadingWorkloads, setIsLoadingWorkloads] = useState(true);
   const [workloadsError, setWorkloadsError] = useState<string | null>(null);
   const [volumeUsage, setVolumeUsage] = useState<
@@ -272,14 +284,28 @@ export const ProjectProvider = ({
 
   const refreshWorkloads = useCallback(() => loadWorkloads(), [loadWorkloads]);
 
+  const focusWorkloads = useCallback((ids: string[]) => {
+    if (ids.length > 0) {
+      setFocusRequest({ ids });
+    }
+  }, []);
+
   const addWorkload = useCallback(
-    (workload: Workload) => {
-      setWorkloads((currentWorkloads) => [...currentWorkloads, workload]);
+    (workload: Workload, options?: { batch?: boolean }) => {
+      setWorkloads((currentWorkloads) =>
+        currentWorkloads.some(({ id }) => id === workload.id)
+          ? currentWorkloads
+          : [...currentWorkloads, workload],
+      );
+      if (options?.batch) {
+        return;
+      }
       // A list that started before the create would drop the new row, so
       // start a fresh request that is guaranteed to be the latest one.
       void refreshWorkloads();
+      focusWorkloads([workload.id]);
     },
-    [refreshWorkloads],
+    [refreshWorkloads, focusWorkloads],
   );
 
   const replaceWorkload = useCallback((workload: Workload) => {
@@ -523,6 +549,8 @@ export const ProjectProvider = ({
       isLoadingWorkloads,
       workloadsError,
       addWorkload,
+      focusRequest,
+      focusWorkloads,
       replaceWorkload,
       moveWorkload,
       refreshWorkloads,
@@ -535,6 +563,8 @@ export const ProjectProvider = ({
       isLoadingWorkloads,
       workloadsError,
       addWorkload,
+      focusRequest,
+      focusWorkloads,
       replaceWorkload,
       moveWorkload,
       refreshWorkloads,

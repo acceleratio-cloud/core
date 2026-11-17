@@ -105,11 +105,12 @@ const setup = () => {
     deploy: jest.fn((project: string, id: string) => Promise.resolve({ id })),
     remove: jest.fn((project: string, id: string) => Promise.resolve(void id)),
   };
+  // The API names a generated domain after the service: w1 is demo, w3 redis.
   const network = {
-    list: jest.fn(() => Promise.resolve({ suggested_label: 'demo' })),
-    generate: jest.fn(
-      (project: string, workload: string, body: { label: string }) =>
-        Promise.resolve({ hostname: `${body.label}-1-2-3-4.sslip.io` }),
+    generate: jest.fn((project: string, workload: string) =>
+      Promise.resolve({
+        hostname: `${workload === 'w3' ? 'redis' : 'demo'}-1-2-3-4.sslip.io`,
+      }),
     ),
   };
   const dns = {
@@ -186,7 +187,6 @@ describe('MarketplaceDeployService', () => {
     ]);
     expect(postgres.credentials).toHaveBeenCalledWith(PROJECT, 'w2');
     expect(network.generate).toHaveBeenCalledWith(PROJECT, 'w1', {
-      label: 'demo',
       port: 3000,
     });
 
@@ -233,10 +233,6 @@ describe('MarketplaceDeployService', () => {
           : s,
       ),
     });
-    network.list
-      .mockResolvedValueOnce({ suggested_label: 'demo' })
-      .mockResolvedValueOnce({ suggested_label: 'redis' });
-
     const result = await service.deploy(
       'demo',
       payload({ project_name: 'Demo' }),
@@ -258,22 +254,6 @@ describe('MarketplaceDeployService', () => {
         }),
       }),
     ]);
-  });
-
-  it('retries the domain with a suffix when the label is taken', async () => {
-    const { service, network } = setup();
-    network.generate.mockRejectedValueOnce(new ConflictException('taken'));
-
-    const result = await service.deploy(
-      'demo',
-      payload({ project_id: EXISTING }),
-      null,
-    );
-
-    expect(network.generate).toHaveBeenCalledTimes(2);
-    expect(result.url).toMatch(
-      /^https:\/\/demo-[0-9a-f]{6}-1-2-3-4\.sslip\.io$/,
-    );
   });
 
   it('creates nothing when the public IP is unknown', async () => {

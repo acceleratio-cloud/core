@@ -2,7 +2,9 @@
  * Splits a shell-style line into arguments, the way `docker run` reads
  * them: whitespace separates arguments, single quotes keep text literally,
  * double quotes keep spaces and allow `\"` and `\\`, and a backslash outside
- * quotes escapes the next character. Nothing is expanded.
+ * quotes escapes the next character. Nothing is expanded. The API splits a
+ * compose `command` with its own copy (`apps/api/src/common/shell-args.ts`):
+ * change both together.
  */
 export const parseShellArgs = (line: string): string[] => {
   const args: string[] = [];

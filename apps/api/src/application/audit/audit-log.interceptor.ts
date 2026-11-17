@@ -58,6 +58,8 @@ export const AUDIT_ACTIONS: Record<string, string | null> = {
   'StaticReleasesController.create': 'site.release.create',
   // One request per file; the release's create and publish cover the upload.
   'StaticReleasesController.upload': null,
+  // Reads a pasted compose file, secrets included, and creates nothing.
+  'WorkloadController.importCompose': null,
   'StaticReleasesController.publish': 'site.release.publish',
   'SecurityController.scan': 'security.scan',
   'SecurityController.acceptRisk': 'security.risk.accept',

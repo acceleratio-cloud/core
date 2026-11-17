@@ -80,8 +80,11 @@ export interface WorkloadDomains {
 }
 
 export interface GenerateWorkloadDomainPayload {
-  /** First part of the sslip.io hostname; letters, digits and hyphens. */
-  label: string;
+  /**
+   * First part of the sslip.io hostname; letters, digits and hyphens. Absent
+   * uses the suggested label, with a random suffix when another app has it.
+   */
+  label?: string;
   port: number;
 }
 
