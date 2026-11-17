@@ -52,7 +52,7 @@ import { WorkloadEventsService } from '../observer/workload-events.service';
 import { workload, type WorkloadRow } from '../schemas/workload.schema';
 import type { WorkloadVersionRow } from '../schemas/workload-version.schema';
 import {
-  nextWorkloadPosition,
+  insertAtNextPosition,
   normalizeWorkloadPosition,
 } from '../workload-position';
 import type { WorkloadTypeService } from '../workload-type-service';
@@ -320,16 +320,18 @@ export class PostgresWorkloadService
     }
 
     const id = randomUUID();
-    const row = await this.insertRow({
-      id,
-      project_id: projectId,
-      name,
-      type: this.type,
-      draft_config: null,
-      position: await nextWorkloadPosition(this.db, projectId),
-      external_name: workloadExternalName(name, id),
-      last_deployed_at: new Date(),
-    });
+    const row = await insertAtNextPosition(this.db, projectId, (position) =>
+      this.insertRow({
+        id,
+        project_id: projectId,
+        name,
+        type: this.type,
+        draft_config: null,
+        position,
+        external_name: workloadExternalName(name, id),
+        last_deployed_at: new Date(),
+      }),
+    );
 
     try {
       await this.isolation.ensure(projectId);

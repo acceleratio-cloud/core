@@ -58,7 +58,7 @@ import {
 import type { WorkloadVersionRow } from '@/application/workload/schemas/workload-version.schema';
 import type { WorkloadTypeService } from '@/application/workload/workload-type-service';
 import {
-  nextWorkloadPosition,
+  insertAtNextPosition,
   normalizeWorkloadPosition,
 } from '@/application/workload/workload-position';
 import {
@@ -434,38 +434,41 @@ export class DockerWorkloadService
 
     // A new service has no volumes yet, so every one it brings is new.
     await this.reconcileVolumes(config, []);
-    const position = await nextWorkloadPosition(this.db, projectId);
     // The id is generated here rather than by the database so external_name can
     // be computed before the single insert statement.
     const id = randomUUID();
-    const values = {
-      id,
-      project_id: projectId,
-      name,
-      type: this.type,
-      // Nothing is applied yet, so the whole config is pending.
-      draft_config: config,
-      position,
-      external_name: workloadExternalName(name, id),
-    };
 
-    // Two services created at once can pick the same private hostname; the
-    // unique constraint catches it and the loser picks again.
-    for (let attempt = 1; ; attempt += 1) {
-      const taken = await this.network.takenServiceNames(projectId);
-      const internal = {
-        ...values,
-        internal_hostname: pickInternalHostname(name, taken),
+    return insertAtNextPosition(this.db, projectId, async (position) => {
+      const values = {
+        id,
+        project_id: projectId,
+        name,
+        type: this.type,
+        // Nothing is applied yet, so the whole config is pending.
+        draft_config: config,
+        position,
+        external_name: workloadExternalName(name, id),
       };
 
-      try {
-        return await this.insertNew(internal, name, id);
-      } catch (error) {
-        if (attempt >= 3 || !isInternalHostnameConflict(error)) {
-          throw error;
+      // Creates in a project take turns, but a rename of another service can
+      // still take the hostname picked here; the unique constraint catches it
+      // and this create picks again.
+      for (let attempt = 1; ; attempt += 1) {
+        const taken = await this.network.takenServiceNames(projectId);
+        const internal = {
+          ...values,
+          internal_hostname: pickInternalHostname(name, taken),
+        };
+
+        try {
+          return await this.insertNew(internal, name, id);
+        } catch (error) {
+          if (attempt >= 3 || !isInternalHostnameConflict(error)) {
+            throw error;
+          }
         }
       }
-    }
+    });
   }
 
   /** Inserts a new row, retrying once with a longer external name suffix. */

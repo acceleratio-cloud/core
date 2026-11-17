@@ -40,6 +40,35 @@ export const nextWorkloadPosition = async (
   return gridPosition(index);
 };
 
+/** The create placing a card in each project; the next one waits for it. */
+const placing = new Map<string, Promise<unknown>>();
+
+/**
+ * Inserts a new workload at the first free slot, one create per project at a
+ * time, so two creates at once cannot both take the same slot.
+ * shortcut: an in-process queue, enough for the single API replica the
+ * installer runs; a second replica would need a database lock.
+ */
+export const insertAtNextPosition = async <T>(
+  db: Database,
+  projectId: string,
+  insert: (position: WorkloadPosition) => Promise<T>,
+): Promise<T> => {
+  const previous = placing.get(projectId) ?? Promise.resolve();
+  const current = previous
+    .catch(() => undefined)
+    .then(async () => insert(await nextWorkloadPosition(db, projectId)));
+  placing.set(projectId, current);
+
+  try {
+    return await current;
+  } finally {
+    if (placing.get(projectId) === current) {
+      placing.delete(projectId);
+    }
+  }
+};
+
 export const normalizeWorkloadPosition = (
   position: unknown,
 ): WorkloadPosition => {

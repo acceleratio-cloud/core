@@ -32,7 +32,7 @@ import {
 } from '@/application/workload/schemas/workload.schema';
 import type { WorkloadVersionRow } from '@/application/workload/schemas/workload-version.schema';
 import {
-  nextWorkloadPosition,
+  insertAtNextPosition,
   normalizeWorkloadPosition,
 } from '@/application/workload/workload-position';
 import type { WorkloadTypeService } from '@/application/workload/workload-type-service';
@@ -297,20 +297,22 @@ export class S3BucketWorkloadService
     let row: WorkloadRow;
 
     try {
-      [row] = await this.db
-        .insert(workload)
-        .values({
-          id,
-          project_id: projectId,
-          name: bucket,
-          type: this.type,
-          draft_config: null,
-          position: await nextWorkloadPosition(this.db, projectId),
-          external_name: bucket,
-          bucket_name: bucket,
-          last_deployed_at: new Date(),
-        })
-        .returning();
+      [row] = await insertAtNextPosition(this.db, projectId, (position) =>
+        this.db
+          .insert(workload)
+          .values({
+            id,
+            project_id: projectId,
+            name: bucket,
+            type: this.type,
+            draft_config: null,
+            position,
+            external_name: bucket,
+            bucket_name: bucket,
+            last_deployed_at: new Date(),
+          })
+          .returning(),
+      );
     } catch (error) {
       if (isUniqueViolation(error)) {
         throw new ConflictException(BUCKET_TAKEN_MESSAGE);
