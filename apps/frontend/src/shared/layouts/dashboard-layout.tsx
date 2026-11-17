@@ -23,7 +23,7 @@ export const DashboardLayout = ({
       <div className="flex min-h-0 flex-1 flex-col px-2 pb-2 sm:px-3 sm:pb-3">
         <main
           id="main-content"
-          className="relative flex min-h-0 flex-1 flex-col overflow-y-auto rounded-xl border border-border bg-surface-panel"
+          className="relative flex min-h-0 flex-1 flex-col overflow-y-auto rounded-xl border border-border bg-surface-panel has-[[data-fills-panel]]:[scrollbar-gutter:auto]"
         >
           {children}
         </main>

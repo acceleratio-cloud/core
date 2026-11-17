@@ -95,11 +95,22 @@
   h2 {
     @apply font-heading;
   }
+  /* Scrollbars are a thin thumb on a clear track (the colour inherits), so a
+     gutter reserved before anything scrolls is plain background, never a
+     grey stripe beside the content. */
+  :root {
+    scrollbar-color: var(--edge-control) transparent;
+  }
+  * {
+    scrollbar-width: thin;
+  }
   /* A scrollbar that appears never narrows the content: every scroll
      container reserves its gutter up front, so layouts hold their width as
-     lists grow, tabs switch and panels load. Popups opt out with
-     [scrollbar-gutter:auto] where an empty gutter would look lopsided. */
-  html,
+     lists grow, tabs switch and panels load. The page itself never scrolls
+     (the shell is one viewport tall), so it reserves none. A view that fills
+     its container edge to edge sets data-fills-panel to drop the gutter;
+     popups opt out with [scrollbar-gutter:auto] where an empty gutter would
+     look lopsided. */
   .overflow-auto,
   .overflow-y-auto,
   .overflow-scroll,

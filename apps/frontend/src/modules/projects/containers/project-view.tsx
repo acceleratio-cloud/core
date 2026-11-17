@@ -106,7 +106,11 @@ export const ProjectView = () => {
 
   return (
     <ProjectTabsProvider value={tabsContext}>
-      <div className="relative min-h-0 flex-1 overflow-hidden bg-surface-board">
+      {/* The board meets the panel's border: no scrollbar gutter beside it. */}
+      <div
+        data-fills-panel
+        className="relative min-h-0 flex-1 overflow-hidden bg-surface-board"
+      >
         <div className="pointer-events-none absolute top-3 left-3 z-30 max-w-[calc(100%-1.5rem)]">
           <div className="pointer-events-auto min-w-0">
             <ProjectHeader activeTab={activeTab} onTabChange={selectTab} />
